@@ -500,6 +500,11 @@ class BotConfigurationService:
             "format": "Целое число.",
             "example": "100",
         },
+        "CRYPTOBOT_MIN_AMOUNT_USD": {
+            "description": "Минимальная сумма пополнения через CryptoBot в USD.",
+            "format": "Дробное число (через точку).",
+            "example": "1.0",
+        },
         "PAYMENT_VERIFICATION_AUTO_CHECK_ENABLED": {
             "description": (
                 "Запускает фоновую проверку ожидающих пополнений и повторно обращается "

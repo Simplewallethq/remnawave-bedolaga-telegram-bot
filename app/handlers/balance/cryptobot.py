@@ -143,8 +143,8 @@ async def process_cryptobot_payment_amount(
         
         amount_usd = round(amount_usd, 2)
         
-        if amount_usd < 1:
-            await message.answer("❌ Минимальная сумма для оплаты в USD: 1.00 USD")
+        if amount_usd < settings.CRYPTOBOT_MIN_AMOUNT_USD:
+            await message.answer(f"❌ Минимальная сумма для оплаты в USD: {settings.CRYPTOBOT_MIN_AMOUNT_USD:.2f} USD")
             return
         
         if amount_usd > 1000:
