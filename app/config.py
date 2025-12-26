@@ -1793,6 +1793,7 @@ settings = Settings()
 ENV_OVERRIDE_KEYS = set(settings.model_fields_set)
 
 _PERIOD_PRICE_FIELDS: Dict[int, str] = {
+    1: "PRICE_1_DAYS",
     14: "PRICE_14_DAYS",
     30: "PRICE_30_DAYS",
     60: "PRICE_60_DAYS",

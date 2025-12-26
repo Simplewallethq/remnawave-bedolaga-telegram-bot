@@ -291,6 +291,8 @@ def format_period_description(days: int, language: str = "ru") -> str:
     months = calculate_months_from_days(days)
     
     if language == "ru":
+        if days == 1:
+            return "1 день"
         if days == 14:
             return "14 дней"
         if days == 30:
@@ -307,6 +309,8 @@ def format_period_description(days: int, language: str = "ru") -> str:
             month_word = "месяц" if months == 1 else ("месяца" if 2 <= months <= 4 else "месяцев")
             return f"{days} дней ({months} {month_word})"
     else:
+        if days == 1:
+            return "1 day"
         if days == 14:
             return "14 days"
         month_word = "month" if months == 1 else "months"
@@ -330,6 +334,7 @@ def validate_pricing_calculation(
 
 
 STANDARD_PERIODS = {
+    1: {"months": 0.033, "display_ru": "1 день", "display_en": "1 day"},
     14: {"months": 0.5, "display_ru": "2 недели", "display_en": "2 weeks"},
     30: {"months": 1, "display_ru": "1 месяц", "display_en": "1 month"},
     60: {"months": 2, "display_ru": "2 месяца", "display_en": "2 months"},
