@@ -1332,11 +1332,11 @@ async def toggle_period_option(
 
     if target == "subscription":
         current = set(settings.get_available_subscription_periods())
-        options = {14, 30, 60, 90, 180, 360}
+        options = {1,14, 30, 60, 90, 180, 360}
         setting_key = "AVAILABLE_SUBSCRIPTION_PERIODS"
     elif target == "renewal":
         current = set(settings.get_available_renewal_periods())
-        options = {30, 60, 90, 180, 360}
+        options = {1,30, 60, 90, 180, 360}
         setting_key = "AVAILABLE_RENEWAL_PERIODS"
     else:
         await callback.answer()

@@ -1218,6 +1218,7 @@
   "PAY_NOW_BUTTON": "💳 Оплатить",
   "PAY_WITH_COINS_BUTTON": "🪙 Оплатить",
   "PENDING_CANCEL_BUTTON": "⌛ Отмена",
+  "PERIOD_1_DAYS": "📅 1 день - {settings.format_price(settings.PRICE_1_DAYS)}",
   "PERIOD_14_DAYS": "📅 14 дней - {settings.format_price(settings.PRICE_14_DAYS)}",
   "PERIOD_180_DAYS": "📅 180 дней - {settings.format_price(settings.PRICE_180_DAYS)}",
   "PERIOD_30_DAYS": "📅 30 дней - {settings.format_price(settings.PRICE_30_DAYS)}",

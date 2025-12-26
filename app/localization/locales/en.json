@@ -1203,6 +1203,7 @@
   "PAY_NOW_BUTTON": "💳 Pay",
   "PAY_WITH_COINS_BUTTON": "🪙 Pay",
   "PENDING_CANCEL_BUTTON": "⌛ Cancel",
+  "PERIOD_1_DAYS": "📅 1 day - {settings.format_price(settings.PRICE_1_DAYS)}",
   "PERIOD_14_DAYS": "📅 14 days - {settings.format_price(settings.PRICE_14_DAYS)}",
   "PERIOD_180_DAYS": "📅 180 days - {settings.format_price(settings.PRICE_180_DAYS)}",
   "PERIOD_30_DAYS": "📅 30 days - {settings.format_price(settings.PRICE_30_DAYS)}",
