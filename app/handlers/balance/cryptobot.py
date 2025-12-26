@@ -1,4 +1,5 @@
 import logging
+import math
 from aiogram import types
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -141,7 +142,7 @@ async def process_cryptobot_payment_amount(
         
         amount_usd = amount_rubles / current_rate
         
-        amount_usd = round(amount_usd, 2)
+        amount_usd = math.ceil(amount_usd * 100) / 100
         
         if amount_usd < settings.CRYPTOBOT_MIN_AMOUNT_USD:
             await message.answer(f"❌ Минимальная сумма для оплаты в USD: {settings.CRYPTOBOT_MIN_AMOUNT_USD:.2f} USD")
