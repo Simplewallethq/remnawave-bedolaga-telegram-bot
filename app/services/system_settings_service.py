@@ -495,6 +495,11 @@ class BotConfigurationService:
             "warning": "Пустой токен или неверный вебхук приведут к отказам платежей.",
             "dependencies": "CRYPTOBOT_API_TOKEN, CRYPTOBOT_WEBHOOK_SECRET",
         },
+        "CRYPTOBOT_MIN_AMOUNT": {
+            "description": "Минимальная сумма пополнения через CryptoBot в рублях.",
+            "format": "Целое число.",
+            "example": "100",
+        },
         "PAYMENT_VERIFICATION_AUTO_CHECK_ENABLED": {
             "description": (
                 "Запускает фоновую проверку ожидающих пополнений и повторно обращается "

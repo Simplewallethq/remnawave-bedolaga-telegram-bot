@@ -266,6 +266,7 @@ class Settings(BaseSettings):
     CRYPTOBOT_DEFAULT_ASSET: str = "USDT"
     CRYPTOBOT_ASSETS: str = "USDT,TON,BTC,ETH"
     CRYPTOBOT_INVOICE_EXPIRES_HOURS: int = 24
+    CRYPTOBOT_MIN_AMOUNT: int = 100
 
     HELEKET_ENABLED: bool = False
     HELEKET_MERCHANT_ID: Optional[str] = None

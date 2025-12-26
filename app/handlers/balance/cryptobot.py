@@ -44,7 +44,7 @@ async def start_cryptobot_payment(
         message_text = (
             f"🪙 <b>Пополнение криптовалютой</b>\n\n"
             f"Выберите сумму пополнения или введите вручную сумму "
-            f"от 100 до 100,000 ₽:\n\n"
+            f"от {settings.CRYPTOBOT_MIN_AMOUNT} до 100,000 ₽:\n\n"
             f"💰 Доступные активы: {assets_text}\n"
             f"⚡ Мгновенное зачисление на баланс\n"
             f"🔒 Безопасная оплата через CryptoBot\n\n"
@@ -54,7 +54,7 @@ async def start_cryptobot_payment(
     else:
         message_text = (
             f"🪙 <b>Пополнение криптовалютой</b>\n\n"
-            f"Введите сумму для пополнения от 100 до 100,000 ₽:\n\n"
+            f"Введите сумму для пополнения от {settings.CRYPTOBOT_MIN_AMOUNT} до 100,000 ₽:\n\n"
             f"💰 Доступные активы: {assets_text}\n"
             f"⚡ Мгновенное зачисление на баланс\n"
             f"🔒 Безопасная оплата через CryptoBot\n\n"
@@ -123,8 +123,8 @@ async def process_cryptobot_payment_amount(
     
     amount_rubles = amount_kopeks / 100
     
-    if amount_rubles < 100:
-        await message.answer("Минимальная сумма пополнения: 100 ₽")
+    if amount_rubles < settings.CRYPTOBOT_MIN_AMOUNT:
+        await message.answer(f"Минимальная сумма пополнения: {settings.CRYPTOBOT_MIN_AMOUNT} ₽")
         return
     
     if amount_rubles > 100000:
