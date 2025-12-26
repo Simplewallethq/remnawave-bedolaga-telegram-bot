@@ -609,8 +609,8 @@ def _build_period_options_section(language: str) -> Tuple[str, types.InlineKeybo
     available_subscription = set(settings.get_available_subscription_periods())
     available_renewal = set(settings.get_available_renewal_periods())
 
-    subscription_options = (14, 30, 60, 90, 180, 360)
-    renewal_options = (30, 60, 90, 180, 360)
+    subscription_options = (1,14, 30, 60, 90, 180, 360)
+    renewal_options = (1,30, 60, 90, 180, 360)
 
     title = texts.t("ADMIN_PRICING_SECTION_PERIOD_OPTIONS_TITLE", "🗓 Доступные периоды")
     lines: List[str] = [title, ""]

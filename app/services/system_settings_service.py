@@ -1397,6 +1397,7 @@ class BotConfigurationService:
         try:
             setattr(settings, key, value)
             if key in {
+                "PRICE_1_DAYS",
                 "PRICE_14_DAYS",
                 "PRICE_30_DAYS",
                 "PRICE_60_DAYS",
