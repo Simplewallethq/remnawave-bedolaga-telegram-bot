@@ -127,7 +127,9 @@ async def compute_simple_subscription_price(
     except (TypeError, ValueError):  # pragma: no cover - defensive conversion
         device_limit = settings.DEFAULT_DEVICE_LIMIT
     additional_devices = max(0, device_limit - settings.DEFAULT_DEVICE_LIMIT)
-    devices_price_original = additional_devices * settings.PRICE_PER_DEVICE
+    
+    # Calculate proportional price: (price_per_month * period_days) / 30
+    devices_price_original = int((additional_devices * settings.PRICE_PER_DEVICE * period_days) / 30)
 
     promo_group: Optional["PromoGroup"] = params.get("promo_group")
 

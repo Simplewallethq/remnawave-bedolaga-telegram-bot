@@ -966,17 +966,32 @@ async def calculate_subscription_total_cost(
     total_servers_discount = servers_discount_per_month * months_in_period
 
     additional_devices = max(0, devices - settings.DEFAULT_DEVICE_LIMIT)
+    # Calculate proportional price based on days: (price_per_month * period_days) / 30
+    devices_price_total_original = int((additional_devices * settings.PRICE_PER_DEVICE * period_days) / 30)
+    
+    # We use this as "per month" base for discount calculation logic consistency, 
+    # but effectively we want to apply discount to the total proportional amount.
+    # To fit into existing structure where we sum up *_price_per_month * months_in_period:
+    # We can set devices_price_per_month such that multiplied by months_in_period it equals our proportional total.
+    # However, existing logic does: total = per_month * months.
+    # So let's override the total calculation for devices to be precise.
+    
     devices_price_per_month = additional_devices * settings.PRICE_PER_DEVICE
+    
     devices_discount_percent = _get_discount_percent(
         user,
         promo_group,
         "devices",
         period_days=period_days,
     )
+    
+    # Calculate total discount based on the proportional total price
+    total_devices_discount = devices_price_total_original * devices_discount_percent // 100
+    total_devices_price = devices_price_total_original - total_devices_discount
+    
+    # For compatibility with details structure, we keep per_month values as theoretical monthly values
     devices_discount_per_month = devices_price_per_month * devices_discount_percent // 100
     discounted_devices_per_month = devices_price_per_month - devices_discount_per_month
-    total_devices_price = discounted_devices_per_month * months_in_period
-    total_devices_discount = devices_discount_per_month * months_in_period
 
     total_cost = base_price + total_traffic_price + total_servers_price + total_devices_price
 
@@ -1264,23 +1279,36 @@ async def calculate_addon_cost_for_remaining_period(
         logger.info(message)
 
     if additional_devices > 0:
+        # Calculate remaining days for proportional pricing
+        current_time = datetime.utcnow()
+        remaining_days = max(1, (subscription.end_date - current_time).days)
+        
         devices_price_per_month = additional_devices * settings.PRICE_PER_DEVICE
+        
+        # Proportional total price: (monthly_price * remaining_days) / 30
+        devices_total_price_original = int((devices_price_per_month * remaining_days) / 30)
+        
         devices_discount_percent = _get_discount_percent(
             user,
             promo_group,
             "devices",
             period_days=period_hint_days,
         )
-        devices_discount_per_month = devices_price_per_month * devices_discount_percent // 100
-        discounted_devices_per_month = devices_price_per_month - devices_discount_per_month
-        devices_total_cost = discounted_devices_per_month * months_to_pay
+        
+        devices_discount_total = devices_total_price_original * devices_discount_percent // 100
+        devices_total_cost = devices_total_price_original - devices_discount_total
+        
         total_cost += devices_total_cost
+        
+        # For logging/display purposes we still show monthly rate
+        devices_discount_per_month = devices_price_per_month * devices_discount_percent // 100
+        
         message = (
-            f"Устройства +{additional_devices}: {devices_price_per_month/100}₽/мес × {months_to_pay} = {devices_total_cost/100}₽"
+            f"Устройства +{additional_devices}: {devices_price_per_month/100}₽/мес × {remaining_days} дн. = {devices_total_cost/100}₽"
         )
-        if devices_discount_per_month > 0:
+        if devices_discount_total > 0:
             message += (
-                f" (скидка {devices_discount_percent}%: -{devices_discount_per_month * months_to_pay/100}₽)"
+                f" (скидка {devices_discount_percent}%: -{devices_discount_total/100}₽)"
             )
         logger.info(message)
 
