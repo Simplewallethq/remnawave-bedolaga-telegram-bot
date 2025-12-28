@@ -1231,8 +1231,8 @@ async def handle_extend_subscription(
                         device_limit = forced_limit
 
             additional_devices = max(0, (device_limit or 0) - settings.DEFAULT_DEVICE_LIMIT)
-            devices_price_per_month = additional_devices * settings.PRICE_PER_DEVICE
-            devices_total_base = devices_price_per_month * months_in_period
+            # Calculate proportional price: (additional * price * days) / 30
+            devices_total_base = int((additional_devices * settings.PRICE_PER_DEVICE * days) / 30)
             devices_price_info = calculate_user_price(db_user, devices_total_base, days, "devices")
 
             # 4. Calculate traffic price with promo group discount
