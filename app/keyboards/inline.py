@@ -1227,7 +1227,11 @@ def get_countries_keyboard(countries: List[dict], selected: List[str], language:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_devices_keyboard(current: int, language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
+def get_devices_keyboard(
+    current: int,
+    language: str = DEFAULT_LANGUAGE,
+    period_days: int = 30,
+) -> InlineKeyboardMarkup:
     texts = get_texts(language)
     keyboard = []
     
@@ -1238,7 +1242,10 @@ def get_devices_keyboard(current: int, language: str = DEFAULT_LANGUAGE) -> Inli
     buttons = []
     
     for devices in range(start_devices, end_devices): 
-        price = max(0, devices - settings.DEFAULT_DEVICE_LIMIT) * settings.PRICE_PER_DEVICE
+        additional_devices = max(0, devices - settings.DEFAULT_DEVICE_LIMIT)
+        # Calculate proportional price: (additional * price * days) / 30
+        price = int((additional_devices * settings.PRICE_PER_DEVICE * period_days) / 30)
+        
         price_text = f" (+{texts.format_price(price)})" if price > 0 else " (вкл.)"
         emoji = "✅" if devices == current else "⚪"
         
@@ -1794,17 +1801,29 @@ def get_change_devices_keyboard(
             chargeable_devices = new_chargeable - current_chargeable
             
             if chargeable_devices > 0:
-                price_per_month = chargeable_devices * device_price_per_month
-                discounted_per_month, discount_per_month = apply_percentage_discount(
-                    price_per_month,
+                # Calculate proportional price based on remaining days
+                remaining_days = 0
+                if subscription_end_date:
+                    now = datetime.utcnow()
+                    if subscription_end_date > now:
+                        remaining_days = (subscription_end_date - now).days
+                
+                # Use at least 1 day if there is any time remaining but less than 24h, or 0 if expired
+                if subscription_end_date and subscription_end_date > datetime.utcnow() and remaining_days == 0:
+                    remaining_days = 1
+
+                price_original = int((chargeable_devices * settings.PRICE_PER_DEVICE * remaining_days) / 30)
+                
+                discounted_total, discount_total = apply_percentage_discount(
+                    price_original,
                     discount_percent,
                 )
-                total_price = discounted_per_month * months_multiplier
-                price_text = f" (+{total_price//100}₽{period_text})"
-                if discount_percent > 0 and discount_per_month * months_multiplier > 0:
+                
+                price_text = f" (+{texts.format_price(discounted_total)}{period_text})"
+                if discount_total > 0:
                     price_text += (
                         f" (скидка {discount_percent}%:"
-                        f" -{(discount_per_month * months_multiplier)//100}₽)"
+                        f" -{texts.format_price(discount_total)})"
                     )
                 action_text = ""
             else:

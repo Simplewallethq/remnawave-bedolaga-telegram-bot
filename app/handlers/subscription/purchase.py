@@ -1756,7 +1756,11 @@ async def select_period(
 
         await callback.message.edit_text(
             texts.SELECT_DEVICES,
-            reply_markup=get_devices_keyboard(selected_devices, db_user.language)
+            reply_markup=get_devices_keyboard(
+                selected_devices,
+                db_user.language,
+                period_days=data.get('period_days', 30)
+            )
         )
         await state.set_state(SubscriptionStates.selecting_devices)
         await callback.answer()
@@ -1815,7 +1819,11 @@ async def select_devices(
     if devices != previous_devices:
         try:
             await callback.message.edit_reply_markup(
-                reply_markup=get_devices_keyboard(devices, db_user.language)
+                reply_markup=get_devices_keyboard(
+                    devices,
+                    db_user.language,
+                    period_days=data.get('period_days', 30)
+                )
             )
         except TelegramBadRequest as error:
             if "message is not modified" in str(error).lower():
