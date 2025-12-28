@@ -600,7 +600,8 @@ class MiniAppSubscriptionPurchaseService:
         default_devices: int,
     ) -> PurchaseDevicesConfig:
         discount_percent = user.get_promo_discount("devices", period_days)
-        unit_price = settings.PRICE_PER_DEVICE
+        # Calculate proportional unit price based on days: (price_per_device * period_days) / 30
+        unit_price = int((settings.PRICE_PER_DEVICE * period_days) / 30)
         discounted_unit_price, unit_discount_value = _apply_percentage_discount(unit_price, discount_percent)
         price_label = texts.format_price(discounted_unit_price)
         original_label = (

@@ -973,10 +973,11 @@ async def calculate_subscription_total_cost(
     # but effectively we want to apply discount to the total proportional amount.
     # To fit into existing structure where we sum up *_price_per_month * months_in_period:
     # We can set devices_price_per_month such that multiplied by months_in_period it equals our proportional total.
-    # However, existing logic does: total = per_month * months.
-    # So let's override the total calculation for devices to be precise.
     
-    devices_price_per_month = additional_devices * settings.PRICE_PER_DEVICE
+    if months_in_period > 0:
+        devices_price_per_month = devices_price_total_original // months_in_period
+    else:
+        devices_price_per_month = devices_price_total_original
     
     devices_discount_percent = _get_discount_percent(
         user,
