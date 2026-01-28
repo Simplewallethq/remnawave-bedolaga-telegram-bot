@@ -52,7 +52,7 @@ from app.keyboards.inline import (
     get_subscription_menu_keyboard,
     get_topup_keyboard,
     get_device_selection_keyboard,
-    get_payment_methods_keyboard,
+    get_simple_payment_methods_keyboard,
 )
 from app.services.user_cart_service import user_cart_service
 from app.localization.texts import get_texts
@@ -2730,7 +2730,7 @@ async def handle_topup_days(
     await edit_or_answer_photo(
         callback=callback,
         caption=text,
-        keyboard=get_payment_methods_keyboard(days=days),
+        keyboard=get_simple_payment_methods_keyboard(days=days),
         parse_mode="HTML",
         photo_path=image_path
     )
@@ -2775,7 +2775,7 @@ async def handle_device_selection_confirm(
     await edit_or_answer_photo(
         callback=callback,
         caption=text,
-        keyboard=get_payment_methods_keyboard(amount_rub=100.0), # Placeholder
+        keyboard=get_simple_payment_methods_keyboard(amount_rub=100.0), # Placeholder
         parse_mode="HTML",
         photo_path=image_path
     )

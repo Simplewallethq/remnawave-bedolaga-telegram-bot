@@ -2904,9 +2904,9 @@ def get_device_selection_keyboard(current_selected: int = 1, back_callback: str 
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, back_callback: str = "topup") -> InlineKeyboardMarkup:
+def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, back_callback: str = "topup") -> InlineKeyboardMarkup:
     """
-    Экран 8: Методы оплаты
+    Экран 8: Методы оплаты (упрощенная версия для новых меню)
     """
     if days > 0:
         sbp_data = f"pay:sbp:{days}"
