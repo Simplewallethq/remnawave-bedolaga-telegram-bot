@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from typing import Optional
+import os
 from aiogram import Dispatcher, types, F, Bot
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramForbiddenError
@@ -27,7 +28,10 @@ from app.keyboards.inline import (
     get_main_menu_keyboard_async,
     get_post_registration_keyboard,
     get_language_selection_keyboard,
+    get_welcome_keyboard,
+    get_new_main_menu_keyboard,
 )
+from app.handlers.menu import get_main_menu_text
 from app.localization.loader import DEFAULT_LANGUAGE
 from app.localization.texts import get_texts, get_rules, get_privacy_policy
 from app.services.referral_service import process_referral_registration
@@ -42,6 +46,7 @@ from app.services.pinned_message_service import (
     get_active_pinned_message,
 )
 from app.utils.user_utils import generate_unique_referral_code
+from app.utils.photo_message import edit_or_answer_photo
 from app.utils.promo_offer import (
     build_promo_offer_hint,
     build_test_access_hint,
@@ -432,32 +437,20 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
 
         menu_text = await get_main_menu_text(user, texts, db)
 
-        is_admin = settings.is_admin(user.telegram_id)
-        is_moderator = (not is_admin) and SupportSettingsService.is_moderator(
-            user.telegram_id
-        )
-
-        custom_buttons = []
-        if not settings.is_text_main_menu_mode():
-            custom_buttons = await MainMenuButtonService.get_buttons_for_user(
-                db,
-                is_admin=is_admin,
-                has_active_subscription=has_active_subscription,
-                subscription_is_active=subscription_is_active,
-            )
-
-        keyboard = await get_main_menu_keyboard_async(
-            db=db,
-            user=user,
-            language=user.language,
-            is_admin=is_admin,
-            has_had_paid_subscription=user.has_had_paid_subscription,
-            has_active_subscription=has_active_subscription,
-            subscription_is_active=subscription_is_active,
-            balance_kopeks=user.balance_kopeks,
-            subscription=user.subscription,
-            is_moderator=is_moderator,
-            custom_buttons=custom_buttons,
+        # Determine status for keyboard
+        subscription = user.subscription
+        is_active = subscription and subscription.is_active
+        is_trial = subscription and getattr(subscription, "is_trial", False)
+        
+        trial_active = bool(is_active and is_trial)
+        has_active_sub = bool(is_active and not is_trial)
+        trial_used = (subscription is not None)
+    
+        keyboard = get_new_main_menu_keyboard(
+            balance_rub=user.balance_kopeks / 100,
+            trial_used=trial_used,
+            trial_active=trial_active,
+            has_active_subscription=has_active_sub
         )
         await message.answer(
             menu_text,
@@ -1243,81 +1236,29 @@ async def complete_registration_from_callback(
         except Exception as e:
             logger.error(f"Ошибка отправки сообщения о бонусе кампании: {e}")
 
-    from app.database.crud.welcome_text import get_welcome_text_for_user
-    offer_text = await get_welcome_text_for_user(db, callback.from_user)
+    # Send Welcome Screen as per documentation (MENU_DOCUMENTATION.md)
+    welcome_text = (
+        "⛱ Привет, тебе уже доступна бесплатная подписка на 3 дня!\n\n"
+        "Всего 5 минут — и у тебя будет подключен самый быстрый VPN.\n"
+        "Нажми «✨ Активировать» и начнём."
+    )
+    
+    try:
+        image_path = os.path.join("images", "start_screen.png")
+        if not os.path.exists(image_path):
+             image_path = None
 
-    skip_welcome_offer = bool(campaign_id) and is_new_user_registration
-
-    if skip_welcome_offer:
-        logger.info(
-            "ℹ️ Пропускаем приветственное предложение для нового пользователя %s из рекламной кампании %s",
-            user.telegram_id,
-            campaign_id,
+        await edit_or_answer_photo(
+            callback=callback,
+            caption=welcome_text,
+            keyboard=get_welcome_keyboard(),
+            photo_path=image_path
         )
-
-    if offer_text and not skip_welcome_offer:
-        try:
-            await callback.message.answer(
-                offer_text,
-                reply_markup=get_post_registration_keyboard(user.language),
-            )
-            logger.info(f"✅ Приветственное сообщение отправлено пользователю {user.telegram_id}")
-            await _send_pinned_message(callback.bot, db, user)
-        except Exception as e:
-            logger.error(f"Ошибка при отправке приветственного сообщения: {e}")
-    else:
-        logger.info(f"ℹ️ Приветственные сообщения отключены, показываем главное меню для пользователя {user.telegram_id}")
-
-        has_active_subscription, subscription_is_active = _calculate_subscription_flags(
-            getattr(user, "subscription", None)
-        )
-
-        menu_text = await get_main_menu_text(user, texts, db)
-
-        is_admin = settings.is_admin(user.telegram_id)
-        is_moderator = (
-            (not is_admin)
-            and SupportSettingsService.is_moderator(user.telegram_id)
-        )
-
-        custom_buttons = []
-        if not settings.is_text_main_menu_mode():
-            custom_buttons = await MainMenuButtonService.get_buttons_for_user(
-                db,
-                is_admin=is_admin,
-                has_active_subscription=has_active_subscription,
-                subscription_is_active=subscription_is_active,
-            )
-
-        try:
-            keyboard = await get_main_menu_keyboard_async(
-                db=db,
-                user=user,
-                language=user.language,
-                is_admin=is_admin,
-                has_had_paid_subscription=user.has_had_paid_subscription,
-                has_active_subscription=has_active_subscription,
-                subscription_is_active=subscription_is_active,
-                balance_kopeks=user.balance_kopeks,
-                subscription=user.subscription,
-                is_moderator=is_moderator,
-                custom_buttons=custom_buttons,
-            )
-            await callback.message.answer(
-                menu_text,
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
-            await _send_pinned_message(callback.bot, db, user)
-            logger.info(f"✅ Главное меню показано пользователю {user.telegram_id}")
-        except Exception as e:
-            logger.error(f"Ошибка при показе главного меню: {e}")
-            await callback.message.answer(
-                texts.t(
-                    "WELCOME_FALLBACK",
-                    "Добро пожаловать, {user_name}!",
-                ).format(user_name=user.full_name)
-            )
+        await _send_pinned_message(callback.bot, db, user)
+        logger.info(f"✅ Приветственный экран показан пользователю {user.telegram_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при отправке приветственного экрана из колбэка: {e}")
+        logger.error(f"Ошибка при отправке приветственного экрана: {e}")
 
     logger.info(f"✅ Регистрация завершена для пользователя: {user.telegram_id}")
 
@@ -1372,34 +1313,21 @@ async def complete_registration(
 
         menu_text = await get_main_menu_text(existing_user, texts, db)
 
-        is_admin = settings.is_admin(existing_user.telegram_id)
-        is_moderator = (
-            (not is_admin)
-            and SupportSettingsService.is_moderator(existing_user.telegram_id)
-        )
-
-        custom_buttons = []
-        if not settings.is_text_main_menu_mode():
-            custom_buttons = await MainMenuButtonService.get_buttons_for_user(
-                db,
-                is_admin=is_admin,
-                has_active_subscription=has_active_subscription,
-                subscription_is_active=subscription_is_active,
-            )
+        # Determine status for keyboard
+        subscription = existing_user.subscription
+        is_active = subscription and subscription.is_active
+        is_trial = subscription and getattr(subscription, "is_trial", False)
+        
+        trial_active = bool(is_active and is_trial)
+        has_active_sub = bool(is_active and not is_trial)
+        trial_used = (subscription is not None)
 
         try:
-            keyboard = await get_main_menu_keyboard_async(
-                db=db,
-                user=existing_user,
-                language=existing_user.language,
-                is_admin=is_admin,
-                has_had_paid_subscription=existing_user.has_had_paid_subscription,
-                has_active_subscription=has_active_subscription,
-                subscription_is_active=subscription_is_active,
-                balance_kopeks=existing_user.balance_kopeks,
-                subscription=existing_user.subscription,
-                is_moderator=is_moderator,
-                custom_buttons=custom_buttons,
+            keyboard = get_new_main_menu_keyboard(
+                balance_rub=existing_user.balance_kopeks / 100,
+                trial_used=trial_used,
+                trial_active=trial_active,
+                has_active_subscription=has_active_sub
             )
             await message.answer(
                 menu_text,
@@ -1545,85 +1473,35 @@ async def complete_registration(
 
     if campaign_message:
         try:
-            await message.answer(campaign_message)
+            await callback.message.answer(campaign_message)
         except Exception as e:
             logger.error(f"Ошибка отправки сообщения о бонусе кампании: {e}")
 
-    from app.database.crud.welcome_text import get_welcome_text_for_user
-    offer_text = await get_welcome_text_for_user(db, message.from_user)
-
-    skip_welcome_offer = bool(campaign_id) and is_new_user_registration
-
-    if skip_welcome_offer:
-        logger.info(
-            "ℹ️ Пропускаем приветственное предложение для нового пользователя %s из рекламной кампании %s",
-            user.telegram_id,
-            campaign_id,
-        )
-
-    if offer_text and not skip_welcome_offer:
-        try:
+    # Send Welcome Screen as per documentation (MENU_DOCUMENTATION.md)
+    welcome_text = (
+        "⛱ Привет, тебе уже доступна бесплатная подписка на 3 дня!\n\n"
+        "Всего 5 минут — и у тебя будет подключен самый быстрый VPN.\n"
+        "Нажми «✨ Активировать» и начнём."
+    )
+    
+    try:
+        image_path = os.path.join("images", "start_screen.png")
+        if os.path.exists(image_path):
+             await message.answer_photo(
+                photo=types.FSInputFile(image_path),
+                caption=welcome_text,
+                reply_markup=get_welcome_keyboard(),
+             )
+        else:
             await message.answer(
-                offer_text,
-                reply_markup=get_post_registration_keyboard(user.language),
+                welcome_text,
+                reply_markup=get_welcome_keyboard(),
             )
-            logger.info(f"✅ Приветственное сообщение отправлено пользователю {user.telegram_id}")
-            await _send_pinned_message(message.bot, db, user)
-        except Exception as e:
-            logger.error(f"Ошибка при отправке приветственного сообщения: {e}")
-    else:
-        logger.info(f"ℹ️ Приветственные сообщения отключены, показываем главное меню для пользователя {user.telegram_id}")
+        await _send_pinned_message(message.bot, db, user)
+        logger.info(f"✅ Приветственный экран показан пользователю {user.telegram_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при отправке приветственного экрана: {e}")
 
-        has_active_subscription, subscription_is_active = _calculate_subscription_flags(
-            getattr(user, "subscription", None)
-        )
-
-        menu_text = await get_main_menu_text(user, texts, db)
-
-        is_admin = settings.is_admin(user.telegram_id)
-        is_moderator = (
-            (not is_admin)
-            and SupportSettingsService.is_moderator(user.telegram_id)
-        )
-
-        custom_buttons = []
-        if not settings.is_text_main_menu_mode():
-            custom_buttons = await MainMenuButtonService.get_buttons_for_user(
-                db,
-                is_admin=is_admin,
-                has_active_subscription=has_active_subscription,
-                subscription_is_active=subscription_is_active,
-            )
-
-        try:
-            keyboard = await get_main_menu_keyboard_async(
-                db=db,
-                user=user,
-                language=user.language,
-                is_admin=is_admin,
-                has_had_paid_subscription=user.has_had_paid_subscription,
-                has_active_subscription=has_active_subscription,
-                subscription_is_active=subscription_is_active,
-                balance_kopeks=user.balance_kopeks,
-                subscription=user.subscription,
-                is_moderator=is_moderator,
-                custom_buttons=custom_buttons,
-            )
-            await message.answer(
-                menu_text,
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
-            logger.info(f"✅ Главное меню показано пользователю {user.telegram_id}")
-            await _send_pinned_message(message.bot, db, user)
-        except Exception as e:
-            logger.error(f"Ошибка при показе главного меню: {e}")
-            await message.answer(
-                texts.t(
-                    "WELCOME_FALLBACK",
-                    "Добро пожаловать, {user_name}!",
-                ).format(user_name=user.full_name)
-            )
 
     logger.info(f"✅ Регистрация завершена для пользователя: {user.telegram_id}")
 

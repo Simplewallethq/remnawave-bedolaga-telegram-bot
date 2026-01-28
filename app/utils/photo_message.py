@@ -79,10 +79,11 @@ async def edit_or_answer_photo(
     parse_mode: str | None = "HTML",
     *,
     force_text: bool = False,
+    photo_path: str | None = None,
 ) -> None:
     resolved_parse_mode = parse_mode or "HTML"
     # Если режим логотипа выключен или требуется текстовое сообщение — работаем текстом
-    if force_text or not settings.ENABLE_LOGO_MODE:
+    if force_text or (not settings.ENABLE_LOGO_MODE and not photo_path):
         try:
             if callback.message.photo:
                 await callback.message.delete()
@@ -111,7 +112,10 @@ async def edit_or_answer_photo(
             await _answer_text(callback, caption, keyboard, resolved_parse_mode, error)
         return
 
-    media = _resolve_media(callback.message)
+    if photo_path:
+        media = FSInputFile(photo_path)
+    else:
+        media = _resolve_media(callback.message)
 
     # Retry logic для сетевых ошибок
     for attempt in range(MAX_RETRIES):

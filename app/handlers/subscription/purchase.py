@@ -1,6 +1,8 @@
 import base64
 import json
 import logging
+import os
+import math
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Tuple, Optional
 from urllib.parse import quote
@@ -45,11 +47,17 @@ from app.keyboards.inline import (
     get_happ_download_button_row,
     get_payment_methods_keyboard_with_cart,
     get_subscription_confirm_keyboard_with_cart,
-    get_insufficient_balance_keyboard_with_cart
+    get_insufficient_balance_keyboard_with_cart,
+    get_activation_keyboard,
+    get_subscription_menu_keyboard,
+    get_topup_keyboard,
+    get_device_selection_keyboard,
+    get_payment_methods_keyboard,
 )
 from app.services.user_cart_service import user_cart_service
 from app.localization.texts import get_texts
 from app.services.admin_notification_service import AdminNotificationService
+from app.utils.photo_message import edit_or_answer_photo
 from app.services.remnawave_service import RemnaWaveConfigurationError, RemnaWaveService
 from app.services.blacklist_service import blacklist_service
 from app.services.subscription_checkout_service import (
@@ -67,6 +75,7 @@ from app.services.trial_activation_service import (
     revert_trial_activation,
     rollback_trial_subscription_activation,
 )
+from app.services.payment_service import PaymentService
 
 logger = logging.getLogger(__name__)
 
@@ -319,11 +328,7 @@ async def show_subscription_info(
             devices_used_str = str(devices_used)
 
     servers_names = await get_servers_display_names(subscription.connected_squads)
-    servers_display = (
-        servers_names
-        if servers_names
-        else texts.t("SUBSCRIPTION_NO_SERVERS", "Нет серверов")
-    )
+    servers_display = servers_names if servers_names else ""
 
     message_template = texts.t(
         "SUBSCRIPTION_OVERVIEW_TEMPLATE",
@@ -339,6 +344,12 @@ async def show_subscription_info(
 🌍 Серверы: {servers}
 📱 Устройства: {devices_used} / {device_limit}""",
     )
+
+    if not servers_display:
+        message_template = message_template.replace(
+            "\n🌍 Серверы: {servers}",
+            "",
+        )
 
     if not show_devices:
         message_template = message_template.replace(
@@ -712,152 +723,28 @@ async def activate_trial(
             ).format(amount=settings.format_price(charged_amount))
 
         if remnawave_user and subscription_link:
-            if settings.is_happ_cryptolink_mode():
-                trial_success_text = (
-                    f"{texts.TRIAL_ACTIVATED}\n\n"
-                    + texts.t(
-                        "SUBSCRIPTION_HAPP_LINK_PROMPT",
-                        "🔒 Ссылка на подписку создана. Нажмите кнопку \"Подключиться\" ниже, чтобы открыть её в Happ.",
-                    )
-                    + "\n\n"
-                    + texts.t(
-                        "SUBSCRIPTION_IMPORT_INSTRUCTION_PROMPT",
-                        "📱 Нажмите кнопку ниже, чтобы получить инструкцию по настройке VPN на вашем устройстве",
-                    )
-                )
-            elif hide_subscription_link:
-                trial_success_text = (
-                    f"{texts.TRIAL_ACTIVATED}\n\n"
-                    + texts.t(
-                        "SUBSCRIPTION_LINK_HIDDEN_NOTICE",
-                        "ℹ️ Ссылка подписки доступна по кнопкам ниже или в разделе \"Моя подписка\".",
-                    )
-                    + "\n\n"
-                    + texts.t(
-                        "SUBSCRIPTION_IMPORT_INSTRUCTION_PROMPT",
-                        "📱 Нажмите кнопку ниже, чтобы получить инструкцию по настройке VPN на вашем устройстве",
-                    )
-                )
-            else:
-                subscription_import_link = texts.t(
-                    "SUBSCRIPTION_IMPORT_LINK_SECTION",
-                    "🔗 <b>Ваша ссылка для импорта в VPN приложение:</b>\n<code>{subscription_url}</code>",
-                ).format(subscription_url=subscription_link)
-
-                trial_success_text = (
-                    f"{texts.TRIAL_ACTIVATED}\n\n"
-                    f"{subscription_import_link}\n\n"
-                    f"{texts.t('SUBSCRIPTION_IMPORT_INSTRUCTION_PROMPT', '📱 Нажмите кнопку ниже, чтобы получить инструкцию по настройке VPN на вашем устройстве')}"
-                )
-
+            # Text from MENU_DOCUMENTATION.md
+            trial_success_text = (
+                 "Для подключения тебе нужно скачать приложение <a href=\"https://happ.link/\">Happ</a>, и нажать кнопку «🔗 Подключиться».\n\n"
+                 "<b>1.</b> Скачай приложение Happ.\n"
+                 "<b>2.</b> Нажми <b>«🔗 Подключиться»</b>.\n"
+                 "<b>3.</b> В приложении нажми <b>«Подключить»</b>."
+            )
+            
             trial_success_text += payment_note
 
-            connect_mode = settings.CONNECT_BUTTON_MODE
+            connect_keyboard = get_activation_keyboard(subscription_link)
 
-            if connect_mode == "miniapp_subscription":
-                connect_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=texts.t("CONNECT_BUTTON", "🔗 Подключиться"),
-                            web_app=types.WebAppInfo(url=subscription_link),
-                        )
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "⬅️ В главное меню"),
-                            callback_data="back_to_menu",
-                        )
-                    ],
-                ])
-            elif connect_mode == "miniapp_custom":
-                if not settings.MINIAPP_CUSTOM_URL:
-                    await callback.answer(
-                        texts.t(
-                            "CUSTOM_MINIAPP_URL_NOT_SET",
-                            "⚠ Кастомная ссылка для мини-приложения не настроена",
-                        ),
-                        show_alert=True,
-                    )
-                    return
+            image_path = os.path.join("images", "activation_screen.png")
+            if not os.path.exists(image_path):
+                 image_path = None
 
-                connect_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=texts.t("CONNECT_BUTTON", "🔗 Подключиться"),
-                            web_app=types.WebAppInfo(url=settings.MINIAPP_CUSTOM_URL),
-                        )
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "⬅️ В главное меню"),
-                            callback_data="back_to_menu",
-                        )
-                    ],
-                ])
-            elif connect_mode == "link":
-                rows = [
-                    [
-                        InlineKeyboardButton(
-                            text=texts.t("CONNECT_BUTTON", "🔗 Подключиться"),
-                            url=subscription_link,
-                        )
-                    ]
-                ]
-                happ_row = get_happ_download_button_row(texts)
-                if happ_row:
-                    rows.append(happ_row)
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "⬅️ В главное меню"),
-                            callback_data="back_to_menu",
-                        )
-                    ]
-                )
-                connect_keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
-            elif connect_mode == "happ_cryptolink":
-                rows = [
-                    [
-                        InlineKeyboardButton(
-                            text=texts.t("CONNECT_BUTTON", "🔗 Подключиться"),
-                            callback_data="open_subscription_link",
-                        )
-                    ]
-                ]
-                happ_row = get_happ_download_button_row(texts)
-                if happ_row:
-                    rows.append(happ_row)
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "⬅️ В главное меню"),
-                            callback_data="back_to_menu",
-                        )
-                    ]
-                )
-                connect_keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
-            else:
-                connect_keyboard = InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            InlineKeyboardButton(
-                                text=texts.t("CONNECT_BUTTON", "🔗 Подключиться"),
-                                callback_data="subscription_connect",
-                            )
-                        ],
-                        [
-                            InlineKeyboardButton(
-                                text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "⬅️ В главное меню"),
-                                callback_data="back_to_menu",
-                            )
-                        ],
-                    ]
-                )
-
-            await callback.message.edit_text(
-                trial_success_text,
-                reply_markup=connect_keyboard,
+            await edit_or_answer_photo(
+                callback=callback,
+                caption=trial_success_text,
+                keyboard=connect_keyboard,
                 parse_mode="HTML",
+                photo_path=image_path
             )
         else:
             trial_success_text = (
@@ -1189,8 +1076,12 @@ async def handle_extend_subscription(
     texts = get_texts(db_user.language)
     subscription = db_user.subscription
 
-    if not subscription or subscription.is_trial:
-        await callback.answer("⚠ Продление доступно только для платных подписок", show_alert=True)
+    if not subscription:
+        await callback.answer("⚠ Продление доступно только когда есть подписка", show_alert=True)
+        return
+        
+    if subscription.is_trial:
+        await start_subscription_purchase(callback, state, db_user, db)
         return
 
     subscription_service = SubscriptionService()
@@ -2723,8 +2614,384 @@ async def clear_saved_cart(
 
     await callback.answer("🗑️ Корзина очищена")
 
+
+async def handle_subscription_menu(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    texts = get_texts(db_user.language)
+    subscription = db_user.subscription
+    
+    if not subscription:
+        await callback.answer(texts.t("SUBSCRIPTION_NONE", "Нет активной подписки"), show_alert=True)
+        return
+
+    from app.database.crud.subscription import check_and_update_subscription_status
+    subscription = await check_and_update_subscription_status(db, subscription)
+    
+    current_time = datetime.utcnow()
+    days_left = 0
+    if subscription.end_date and subscription.end_date > current_time:
+        days_left = (subscription.end_date - current_time).days
+    
+    devices_count = subscription.device_limit or 0
+    
+    traffic_text = "Безлимит"
+    if subscription.traffic_limit_gb:
+        traffic_text = f"{subscription.traffic_limit_gb} ГБ"
+        
+    servers_names = await get_servers_display_names(subscription.connected_squads)
+    server_text = servers_names if servers_names else "Любой"
+    
+    text = (
+        f"📦 Ваша подписка:\n"
+        f"📅 Осталось: {days_left} дней\n"
+        f"📱 Устройств: {devices_count} шт.\n"
+        f"🔄 Трафик: {traffic_text}\n"
+        f"🌍 Сервер: {server_text}"
+    )
+    
+    image_path = os.path.join("images", "subscription_page.png")
+    if not os.path.exists(image_path):
+         image_path = None
+
+    await edit_or_answer_photo(
+        callback=callback,
+        caption=text,
+        keyboard=get_subscription_menu_keyboard(),
+        parse_mode="HTML",
+        photo_path=image_path
+    )
+    await callback.answer()
+
+async def handle_sub_add_days(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    text = "Выберите срок действия подписки"
+    image_path = os.path.join("images", "topup_menu.png")
+    if not os.path.exists(image_path):
+         image_path = None
+
+    await edit_or_answer_photo(
+        callback=callback,
+        caption=text,
+        keyboard=get_topup_keyboard(),
+        parse_mode="HTML",
+        photo_path=image_path
+    )
+    await callback.answer()
+
+async def handle_sub_add_devices(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    text = "Выберите количество устройств"
+    
+    subscription = db_user.subscription
+    current_devices = subscription.device_limit if subscription else 1
+    
+    image_path = os.path.join("images", "device_selection.png")
+    if not os.path.exists(image_path):
+         image_path = None
+
+    await edit_or_answer_photo(
+        callback=callback,
+        caption=text,
+        keyboard=get_device_selection_keyboard(current_selected=current_devices, back_callback="subscription"),
+        parse_mode="HTML",
+        photo_path=image_path
+    )
+    await callback.answer()
+
+
+async def handle_topup_days(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db_user: User,
+    db: AsyncSession
+):
+    try:
+        days = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        days = 30 
+        
+    await state.update_data(selected_days=days)
+    
+    text = f"Оплата подписки на {days} дней.\nВыберите способ оплаты:"
+    
+    image_path = os.path.join("images", "payment_methods.png")
+    if not os.path.exists(image_path):
+         image_path = None
+
+    await edit_or_answer_photo(
+        callback=callback,
+        caption=text,
+        keyboard=get_payment_methods_keyboard(days=days),
+        parse_mode="HTML",
+        photo_path=image_path
+    )
+    await callback.answer()
+
+async def handle_device_selection_click(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db_user: User,
+    db: AsyncSession
+):
+    try:
+        selected_devices = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        selected_devices = 1
+
+    await state.update_data(selected_devices=selected_devices)
+    
+    await callback.message.edit_reply_markup(
+        reply_markup=get_device_selection_keyboard(
+            current_selected=selected_devices,
+            back_callback="subscription"
+        )
+    )
+    await callback.answer()
+
+async def handle_device_selection_confirm(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db_user: User,
+    db: AsyncSession
+):
+    data = await state.get_data()
+    selected_devices = data.get('selected_devices', 1)
+    
+    text = f"Выбрано {selected_devices} устройств.\nВыберите способ оплаты:"
+    
+    image_path = os.path.join("images", "payment_methods.png")
+    if not os.path.exists(image_path):
+         image_path = None
+
+    await edit_or_answer_photo(
+        callback=callback,
+        caption=text,
+        keyboard=get_payment_methods_keyboard(amount_rub=100.0), # Placeholder
+        parse_mode="HTML",
+        photo_path=image_path
+    )
+    await callback.answer()
+
+
+def calculate_topup_price_kopeks(days: int) -> int:
+    mapping = {
+        1: 1000,
+        5: 4200,
+        15: 10500,
+        30: 18000,
+        90: 48600,
+        180: 90000,
+        365: 164200
+    }
+    return mapping.get(days, days * 1000)
+
+async def handle_payment_selection(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db_user: User,
+    db: AsyncSession
+):
+    parts = callback.data.split(':')
+    # pay:method:days OR pay_amount:method:amount
+    prefix = parts[0]
+    method = parts[1]
+    value = parts[2]
+    
+    amount_kopeks = 0
+    description = ""
+    is_extension = False
+    
+    if prefix == "pay":
+        days = int(value)
+        amount_kopeks = calculate_topup_price_kopeks(days)
+        amount_rub = amount_kopeks / 100
+        description = f"Подписка на {days} дней"
+        is_extension = True
+    elif prefix == "pay_amount":
+        amount_rub = float(value)
+        amount_kopeks = int(amount_rub * 100)
+        description = f"Пополнение баланса на {amount_rub:.2f} ₽"
+
+    # Use PaymentService to create invoice
+    payment_service = PaymentService(callback.bot)
+    texts = get_texts(db_user.language)
+    
+    current_chat_id = callback.message.chat.id
+    
+    if method == "sbp":
+        # SBP logic via YooKassa
+        if not settings.is_yookassa_enabled():
+             await callback.answer("❌ СБП временно недоступен", show_alert=True)
+             return
+             
+        # create_yookassa_payment logic needs user_id and amount
+        # It typically returns a payment object with confirmation_url
+        try:
+             # We might need to check if SBP is enabled within yookassa setting
+             
+             payment = await payment_service.create_yookassa_payment(
+                 db=db,
+                 user_id=db_user.id,
+                 amount_kopeks=amount_kopeks,
+                 description=description,
+                 payment_method_type="sbp", # Specifically for SBP
+                 initial_status="pending"
+             )
+             
+             if not payment or not payment.confirmation_url:
+                  await callback.answer("❌ Ошибка создания платежа СБП", show_alert=True)
+                  return
+
+             keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                 [InlineKeyboardButton(text="📱 Оплатить через СБП", url=payment.confirmation_url)],
+                 [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"check_payment:sbp:{payment.id}")],
+                 [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+             ])
+             
+             await edit_or_answer_photo(
+                 callback=callback,
+                 caption=(
+                     f"💳 <b>Оплата через СБП</b>\n\n"
+                     f"Сумма: {settings.format_price(amount_kopeks)}\n"
+                     f"Назначение: {description}\n\n"
+                     f"Нажмите кнопку ниже, чтобы перейти к оплате."
+                 ),
+                 keyboard=keyboard,
+                 parse_mode="HTML",
+                 photo_path=os.path.join("images", "payment_methods.png")
+             )
+
+        except Exception as e:
+            logger.error(f"Error creating SBP payment: {e}")
+            await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+            
+    elif method == "cryptobot":
+        if not settings.is_cryptobot_enabled():
+             await callback.answer("❌ CryptoBot временно недоступен", show_alert=True)
+             return
+
+        try:
+             # Convert to USD first? CryptoBot service handles conversion if we pass amount_usd
+             from app.utils.currency_converter import currency_converter
+             rate = await currency_converter.get_usd_to_rub_rate() or 95.0
+             amount_usd = (amount_kopeks / 100) / rate
+             amount_usd = math.ceil(amount_usd * 100) / 100
+
+             result = await payment_service.create_cryptobot_payment(
+                 db=db,
+                 user_id=db_user.id,
+                 amount_usd=amount_usd,
+                 asset=settings.CRYPTOBOT_DEFAULT_ASSET,
+                 description=f"{description} ({amount_usd} USD)",
+                 payload=f"balance_{db_user.id}_{amount_kopeks}"
+             )
+             
+             if not result:
+                  await callback.answer("❌ Ошибка создания платежа CryptoBot", show_alert=True)
+                  return
+             
+             url = result.get("bot_invoice_url") or result.get("mini_app_invoice_url")
+             
+             keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                 [InlineKeyboardButton(text="👛 Оплатить CryptoBot", url=url)],
+                 #[InlineKeyboardButton(text="✅ Проверить статус", callback_data=f"check_payment:cryptobot:{result['invoice_id']}")],
+                 [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+             ])
+             
+             await edit_or_answer_photo(
+                 callback=callback,
+                 caption=(
+                     f"💎 <b>Оплата через CryptoBot</b>\n\n"
+                     f"Сумма: {settings.format_price(amount_kopeks)} (~{amount_usd} USDT)\n"
+                     f"Назначение: {description}\n\n"
+                     f"Нажмите кнопку ниже для оплаты криптовалютой."
+                 ),
+                 keyboard=keyboard,
+                 parse_mode="HTML",
+                 photo_path=os.path.join("images", "payment_methods.png")
+             )
+
+        except Exception as e:
+            logger.error(f"Error creating CryptoBot payment: {e}")
+            await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+
+    elif method == "stars":
+        if not settings.TELEGRAM_STARS_ENABLED:
+             await callback.answer("❌ Telegram Stars временно недоступны", show_alert=True)
+             return
+
+        try:
+             # We need to send an INVOICE message. We cannot edit current message into an invoice.
+             # So we will delete current message or just send new one.
+             await callback.message.delete()
+             
+             payload = f"balance_{db_user.id}_{amount_kopeks}"
+             
+             await payment_service.send_invoice(
+                 chat_id=current_chat_id,
+                 title=f"Пополнение баланса", # Stars invoice title
+                 description=description,
+                 amount_kopeks=amount_kopeks,
+                 payload=payload,
+                 keyboard=InlineKeyboardMarkup(inline_keyboard=[
+                     [InlineKeyboardButton(text=f"⭐️ Оплатить {settings.format_price(amount_kopeks)}", pay=True)],
+                     [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                 ])
+             )
+        except Exception as e:
+             logger.error(f"Error creating Stars invoice: {e}")
+             await callback.answer("❌ Ошибка создания инвойса Stars", show_alert=True)
+             
+    else:
+        await callback.answer("Метод оплаты в разработке", show_alert=True)
+
+
 def register_handlers(dp: Dispatcher):
     update_traffic_prices()
+
+    dp.callback_query.register(
+        handle_payment_selection,
+        F.data.startswith("pay:") | F.data.startswith("pay_amount:")
+    )
+
+    dp.callback_query.register(
+        handle_topup_days,
+        F.data.startswith("topup_days:")
+    )
+
+    dp.callback_query.register(
+        handle_device_selection_click,
+        F.data.startswith("select_device:")
+    )
+
+    dp.callback_query.register(
+        handle_device_selection_confirm,
+        F.data == "device_selection_confirm"
+    )
+
+    dp.callback_query.register(
+        handle_subscription_menu,
+        F.data == "subscription"
+    )
+
+    dp.callback_query.register(
+        handle_sub_add_days,
+        F.data.in_({"sub_add_days", "topup"})
+    )
+
+    dp.callback_query.register(
+        handle_sub_add_devices,
+        F.data == "sub_add_devices"
+    )
 
     dp.callback_query.register(
         show_subscription_info,

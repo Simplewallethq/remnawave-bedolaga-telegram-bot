@@ -7,6 +7,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
+import os
 
 from app.config import settings
 from app.database.crud.user import get_user_by_telegram_id, update_user
@@ -20,7 +21,17 @@ from app.keyboards.inline import (
     get_main_menu_keyboard_async,
     get_language_selection_keyboard,
     get_info_menu_keyboard,
+    get_new_main_menu_keyboard,
+    get_connection_keyboard,
+    get_profile_keyboard,
+    get_referral_keyboard,
+    get_balance_keyboard,
+    get_support_keyboard,
 )
+from app.utils.subscription_utils import get_display_subscription_link
+from app.database.crud.referral import get_user_referral_stats
+from app.database.crud.transaction import get_user_transactions
+from app.database.models import TransactionType
 from app.localization.texts import get_texts, get_rules
 from app.database.models import PromoGroup, User
 from app.database.crud.user_message import get_random_active_message
@@ -168,53 +179,31 @@ async def show_main_menu(
     db_user.last_activity = datetime.utcnow()
     await db.commit()
 
-    has_active_subscription = bool(db_user.subscription and db_user.subscription.is_active)
-    subscription_is_active = False
-
-    if db_user.subscription:
-        subscription_is_active = db_user.subscription.is_active
-
     menu_text = await get_main_menu_text(db_user, texts, db)
 
-    draft_exists = await has_subscription_checkout_draft(db_user.id)
-    show_resume_checkout = should_offer_checkout_resume(db_user, draft_exists)
+    # Determine status for keyboard
+    subscription = db_user.subscription
+    is_active = subscription and subscription.is_active
+    is_trial = subscription and getattr(subscription, "is_trial", False)
+    
+    trial_active = bool(is_active and is_trial)
+    has_active_subscription = bool(is_active and not is_trial)
+    
+    # Logic: if subscription is not None, trial is considered "used" or currently handled.
+    # We might want a more robust check for "has used trial" in the past if sub is currently None.
+    # But for now:
+    trial_used = (subscription is not None or db_user.has_had_paid_subscription)
 
-    # Проверяем наличие сохраненной корзины в Redis
-    try:
-        has_saved_cart = await user_cart_service.has_user_cart(db_user.id)
-    except Exception as e:
-        logger.error(f"Ошибка проверки сохраненной корзины для пользователя {db_user.id}: {e}")
-        has_saved_cart = False
-
-    is_admin = settings.is_admin(db_user.telegram_id)
-    is_moderator = (not is_admin) and SupportSettingsService.is_moderator(
-        db_user.telegram_id
+    keyboard = get_new_main_menu_keyboard(
+        balance_rub=db_user.balance_kopeks / 100,
+        trial_used=trial_used,
+        trial_active=trial_active,
+        has_active_subscription=has_active_subscription
     )
 
-    custom_buttons = []
-    if not settings.is_text_main_menu_mode():
-        custom_buttons = await MainMenuButtonService.get_buttons_for_user(
-            db,
-            is_admin=is_admin,
-            has_active_subscription=has_active_subscription,
-            subscription_is_active=subscription_is_active,
-        )
-
-    keyboard = await get_main_menu_keyboard_async(
-        db=db,
-        user=db_user,
-        language=db_user.language,
-        is_admin=is_admin,
-        is_moderator=is_moderator,
-        has_had_paid_subscription=db_user.has_had_paid_subscription,
-        has_active_subscription=has_active_subscription,
-        subscription_is_active=subscription_is_active,
-        balance_kopeks=db_user.balance_kopeks,
-        subscription=db_user.subscription,
-        show_resume_checkout=show_resume_checkout,
-        has_saved_cart=has_saved_cart,
-        custom_buttons=custom_buttons,
-    )
+    image_path = os.path.join("images", "main_menu.png")
+    if not os.path.exists(image_path):
+        image_path = None
 
     await edit_or_answer_photo(
         callback=callback,
@@ -222,6 +211,7 @@ async def show_main_menu(
         keyboard=keyboard,
         parse_mode="HTML",
         force_text=settings.is_text_main_menu_mode(),
+        photo_path=image_path
     )
     if not skip_callback_answer:
         await callback.answer()
@@ -1020,77 +1010,15 @@ async def handle_back_to_menu(
     db: AsyncSession
 ):
     if db_user is None:
-        # Пользователь не найден, используем язык по умолчанию
         texts = get_texts(settings.DEFAULT_LANGUAGE_CODE)
         await callback.answer(
-            texts.t(
-                "USER_NOT_FOUND_ERROR",
-                "Ошибка: пользователь не найден.",
-            ),
-            show_alert=True,
+             texts.t("USER_NOT_FOUND_ERROR", "Ошибка: пользователь не найден."),
+             show_alert=True
         )
         return
 
     await state.clear()
-
-    texts = get_texts(db_user.language)
-
-    has_active_subscription = bool(db_user.subscription and db_user.subscription.is_active)
-    subscription_is_active = False
-
-    if db_user.subscription:
-        subscription_is_active = db_user.subscription.is_active
-
-    menu_text = await get_main_menu_text(db_user, texts, db)
-
-    draft_exists = await has_subscription_checkout_draft(db_user.id)
-    show_resume_checkout = should_offer_checkout_resume(db_user, draft_exists)
-
-    # Проверяем наличие сохраненной корзины в Redis
-    try:
-        has_saved_cart = await user_cart_service.has_user_cart(db_user.id)
-    except Exception as e:
-        logger.error(f"Ошибка проверки сохраненной корзины для пользователя {db_user.id}: {e}")
-        has_saved_cart = False
-
-    is_admin = settings.is_admin(db_user.telegram_id)
-    is_moderator = (not is_admin) and SupportSettingsService.is_moderator(
-        db_user.telegram_id
-    )
-
-    custom_buttons = []
-    if not settings.is_text_main_menu_mode():
-        custom_buttons = await MainMenuButtonService.get_buttons_for_user(
-            db,
-            is_admin=is_admin,
-            has_active_subscription=has_active_subscription,
-            subscription_is_active=subscription_is_active,
-        )
-
-    keyboard = await get_main_menu_keyboard_async(
-        db=db,
-        user=db_user,
-        language=db_user.language,
-        is_admin=is_admin,
-        is_moderator=is_moderator,
-        has_had_paid_subscription=db_user.has_had_paid_subscription,
-        has_active_subscription=has_active_subscription,
-        subscription_is_active=subscription_is_active,
-        balance_kopeks=db_user.balance_kopeks,
-        subscription=db_user.subscription,
-        show_resume_checkout=show_resume_checkout,
-        has_saved_cart=has_saved_cart,
-        custom_buttons=custom_buttons,
-    )
-
-    await edit_or_answer_photo(
-        callback=callback,
-        caption=menu_text,
-        keyboard=keyboard,
-        parse_mode="HTML",
-        force_text=settings.is_text_main_menu_mode(),
-    )
-    await callback.answer()
+    await show_main_menu(callback, db_user, db)
 
 def _get_subscription_status(user: User, texts) -> str:
     subscription = getattr(user, "subscription", None)
@@ -1185,50 +1113,35 @@ def _insert_random_message(base_text: str, random_message: str, action_prompt: s
 
 
 async def get_main_menu_text(user, texts, db: AsyncSession):
+    # New simplified logic based on MENU_DOCUMENTATION.md
 
-    base_text = texts.MAIN_MENU.format(
-        user_name=user.full_name,
-        subscription_status=_get_subscription_status(user, texts)
-    )
+    subscription = user.subscription
+    is_active = subscription and subscription.is_active
+    is_trial = subscription and getattr(subscription, "is_trial", False)
+    
+    trial_active = is_active and is_trial
+    has_active_subscription = is_active and not is_trial
+    trial_used = (subscription is not None)
 
-    action_prompt = texts.t("MAIN_MENU_ACTION_PROMPT", "Выберите действие:")
-
-    info_sections: list[str] = []
-
-    try:
-        promo_hint = await build_promo_offer_hint(db, user, texts)
-        if promo_hint:
-            info_sections.append(promo_hint.strip())
-    except Exception as hint_error:
-        logger.debug(
-            "Не удалось построить подсказку промо-предложения для пользователя %s: %s",
-            getattr(user, "id", None),
-            hint_error,
-        )
-
-    try:
-        test_access_hint = await build_test_access_hint(db, user, texts)
-        if test_access_hint:
-            info_sections.append(test_access_hint.strip())
-    except Exception as test_error:
-        logger.debug(
-            "Не удалось построить подсказку тестового доступа для пользователя %s: %s",
-            getattr(user, "id", None),
-            test_error,
-        )
-
-    if info_sections:
-        extra_block = "\n\n".join(section for section in info_sections if section)
-        if extra_block:
-            base_text = _insert_random_message(base_text, extra_block, action_prompt)
-
-    try:
-        random_message = await get_random_active_message(db)
-        if random_message:
-            return _insert_random_message(base_text, random_message, action_prompt)
-
-    except Exception as e:
-        logger.error(f"Ошибка получения случайного сообщения: {e}")
+    base_text = "🏠 Главное меню\n"
+    
+    date_fmt = "%Y-%m-%d %H:%M UTC"
+    
+    if trial_active and subscription.end_date:
+        end_str = subscription.end_date.strftime(date_fmt)
+        base_text += f"Бесплатная подписка активна до {end_str}"
+    elif has_active_subscription and subscription.end_date:
+        end_str = subscription.end_date.strftime(date_fmt)
+        base_text += f"Подписка активна до {end_str}"
+    elif not trial_used:
+         base_text += "Вам доступно 3 дня бесплатно 🎁"
+    elif is_trial and not is_active and subscription and subscription.end_date: # Expired trial
+         end_str = subscription.end_date.strftime(date_fmt)
+         base_text += f"Бесплатная подписка закончилась {end_str}"
+    else:
+         base_text += "Подписка не активна"
+         
+    base_text += "\n\nЕсли что-то пошло не так введи /start"
 
     return base_text
 
@@ -1312,11 +1225,233 @@ async def handle_activate_button(
         )
 
 
+
+async def handle_howto(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db: AsyncSession,
+    from_toggle: bool = False
+):
+    user = await get_user_by_telegram_id(db, callback.from_user.id)
+    if not user:
+        return
+
+    texts = get_texts(user.language)
+    
+    # Text from MENU_DOCUMENTATION.md for Screen 4
+    connection_text = (
+        "Инструкция по подключению:\n\n"
+        "<b>1.</b> Скачай приложение <a href=\"https://happ.link/\">Happ</a>.\n"
+        "<b>2.</b> Нажми <b>«🔗 Подключиться»</b>.\n"
+        "<b>3.</b> В приложении нажми <b>«Подключить»</b>."
+    )
+    
+    # State data for link visibility
+    data = await state.get_data()
+    show_link = data.get('howto_show_link', False)
+    
+    keyboard = get_connection_keyboard(happ_link_shown=show_link, show_link_toggle=bool(user.subscription))
+    
+    if show_link and user.subscription:
+        link = get_display_subscription_link(user.subscription)
+        if link:
+             connection_text += f"\n\n🔗 <b>Ваша ссылка подключения:</b>\n<code>{link}</code>"
+    
+    image_path = os.path.join("images", "connection_screen.png")
+    if not os.path.exists(image_path):
+         image_path = None
+
+    if from_toggle:
+        await edit_or_answer_photo(callback, connection_text, keyboard, parse_mode="HTML", photo_path=image_path)
+    else:
+        await edit_or_answer_photo(callback, connection_text, keyboard, parse_mode="HTML", photo_path=image_path)
+
+async def handle_connection_link_toggle(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db: AsyncSession
+):
+    action = callback.data # hide_link_howto or show_link_howto
+    show = (action == "show_link_howto")
+    await state.update_data(howto_show_link=show)
+    await handle_howto(callback, state, db, from_toggle=True)
+
+
+async def handle_profile(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
+    reg_date = format_local_datetime(db_user.created_at, "%Y-%m-%d")
+    
+    text = (
+        f"👤 Профиль\n\n"
+        f"ID пользователя: {db_user.telegram_id}\n"
+        f"Дата регистрации: {reg_date}"
+    )
+    
+    image_path = os.path.join("images", "profile_screen.png")
+    if not os.path.exists(image_path):
+         image_path = None
+
+    await edit_or_answer_photo(
+        callback,
+        text, 
+        get_profile_keyboard(), 
+        parse_mode="HTML",
+        photo_path=image_path
+    )
+    await callback.answer()
+
+async def handle_referral(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
+    stats = await get_user_referral_stats(db, db_user.id)
+    
+    count = stats.get("invited_count", 0)
+    amount = stats.get("total_earned_kopeks", 0) / 100
+    
+    bot = await callback.bot.get_me()
+    referral_link = f"https://t.me/{bot.username}?start=ref_{db_user.telegram_id}"
+    
+    text = (
+        f"🤝 Реферальная программа\n\n"
+        f"👥 Приглашено друзей: {count}\n"
+        f"💰 Заработано: {int(amount)}₽\n\n"
+        f"Ваша реферальная ссылка:\n"
+        f"<code>{referral_link}</code>\n\n"
+        f"Получайте 20₽ за каждого друга, который активирует подписку!"
+    )
+    
+    invite_text = f"🔥 Лови 3 дня бесплатного VPN!\n{referral_link}"
+    
+    image_path = os.path.join("images", "referral_screen.png")
+    if not os.path.exists(image_path):
+         image_path = None
+
+    await edit_or_answer_photo(
+        callback,
+        text, 
+        get_referral_keyboard(referral_link, invite_text), 
+        parse_mode="HTML",
+        photo_path=image_path
+    )
+    await callback.answer()
+
+async def handle_copy_referral_link(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
+    bot = await callback.bot.get_me()
+    referral_link = f"https://t.me/{bot.username}?start=ref_{db_user.telegram_id}"
+    await callback.message.answer(f"Ваша ссылка:\n<code>{referral_link}</code>", parse_mode="HTML")
+    await callback.answer()
+
+async def handle_balance(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
+    balance = db_user.balance_kopeks / 100
+    
+    # Estimate days (approx 10 rub/day)
+    estimated_days = int(balance / 10)
+    
+    # Last topup
+    transactions = await get_user_transactions(db, db_user.id, limit=20)
+    last_deposit = None
+    for t in transactions:
+        if t.type == TransactionType.DEPOSIT.value and t.is_completed:
+            last_deposit = t
+            break
+    
+    last_topup_text = ""
+    if last_deposit:
+         date_str = format_local_datetime(last_deposit.created_at, "%d.%m.%Y")
+         amount_dep = last_deposit.amount_kopeks / 100
+         last_topup_text = f"\n\nПоследнее пополнение: {date_str} на {int(amount_dep)}₽"
+    
+    text = (
+        f"💳 Ваш баланс\n\n"
+        f"Текущий баланс: {int(balance)}₽\n"
+        f"Это ~{estimated_days} дней подписки"
+        f"{last_topup_text}"
+    )
+    
+    image_path = os.path.join("images", "balance_screen.png")
+    if not os.path.exists(image_path):
+         image_path = None
+
+    await edit_or_answer_photo(callback, text, get_balance_keyboard(), parse_mode="HTML", photo_path=image_path)
+    await callback.answer()
+
+async def handle_purchases_history(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
+    # Retrieve history
+    transactions = await get_user_transactions(db, db_user.id, limit=10)
+    lines = []
+    for t in transactions:
+        if t.is_completed:
+            date_str = format_local_datetime(t.created_at, "%d.%m")
+            amt = t.amount_kopeks / 100
+            type_icon = "➕" if t.type == TransactionType.DEPOSIT.value else "➖"
+            lines.append(f"{date_str} {type_icon} {amt:.0f}₽")
+    
+    if not lines:
+        lines.append("История пуста")
+        
+    history_text = "📜 Последние операции:\n\n" + "\n".join(lines)
+    await callback.answer(history_text, show_alert=True)
+
+async def handle_support(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
+    text = (
+        "🛠 Поддержка\n\n"
+        "Возникли вопросы или проблемы?\n"
+        "Свяжитесь с нашей службой поддержки:\n\n"
+        "📧 Email: support@letovpn.com\n"
+        "💬 Telegram: @letovpn_support\n\n"
+        "Мы отвечаем в течение 24 часов."
+    )
+    
+    image_path = os.path.join("images", "support_screen.png")
+    if not os.path.exists(image_path):
+         image_path = None
+
+    await edit_or_answer_photo(callback, text, get_support_keyboard(), parse_mode="HTML", photo_path=image_path)
+    await callback.answer()
+
+
 def register_handlers(dp: Dispatcher):
 
     dp.callback_query.register(
+        handle_howto,
+        F.data == "howto"
+    )
+
+    dp.callback_query.register(
+        handle_connection_link_toggle,
+        F.data.in_({"show_link_howto", "hide_link_howto"})
+    )
+
+    dp.callback_query.register(
         handle_back_to_menu,
-        F.data == "back_to_menu"
+        F.data.in_({"back_to_menu", "main_menu"})
+    )
+    
+    dp.callback_query.register(
+        handle_profile,
+        F.data == "profile"
+    )
+
+    dp.callback_query.register(
+        handle_referral,
+        F.data == "referral"
+    )
+
+    dp.callback_query.register(
+        handle_copy_referral_link,
+        F.data == "copy_referral_link"
+    )
+
+    dp.callback_query.register(
+        handle_balance,
+        F.data == "balance"
+    )
+    
+    dp.callback_query.register(
+         handle_purchases_history,
+         F.data == "purchases_history"
+    )
+
+    dp.callback_query.register(
+        handle_support,
+        F.data == "support"
     )
 
     dp.callback_query.register(
@@ -1351,7 +1486,7 @@ def register_handlers(dp: Dispatcher):
 
     dp.callback_query.register(
         show_privacy_policy,
-        F.data == "menu_privacy_policy",
+        F.data.in_({"menu_privacy_policy", "profile_privacy"}),
     )
 
     dp.callback_query.register(
@@ -1361,7 +1496,7 @@ def register_handlers(dp: Dispatcher):
 
     dp.callback_query.register(
         show_public_offer,
-        F.data == "menu_public_offer",
+        F.data.in_({"menu_public_offer", "profile_terms"}),
     )
 
     dp.callback_query.register(
@@ -1371,7 +1506,7 @@ def register_handlers(dp: Dispatcher):
 
     dp.callback_query.register(
         show_language_menu,
-        F.data == "menu_language"
+        F.data.in_({"menu_language", "profile_language"})
     )
 
     dp.callback_query.register(

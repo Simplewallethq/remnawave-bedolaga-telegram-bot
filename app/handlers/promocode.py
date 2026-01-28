@@ -141,7 +141,7 @@ def register_handlers(dp: Dispatcher):
     
     dp.callback_query.register(
         show_promocode_menu,
-        F.data == "menu_promocode"
+        F.data.in_({"menu_promocode", "profile_promo"})
     )
     
     dp.message.register(
