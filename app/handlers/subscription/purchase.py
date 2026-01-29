@@ -3001,8 +3001,19 @@ async def handle_payment_selection(
             return
         
         try:
-            from app.handlers.balance.platega import process_platega_payment_amount
-            await process_platega_payment_amount(callback.message, db_user, db, amount_kopeks, state)
+            # Check if platega method is selected
+            data = await state.get_data()
+            method_code = int(data.get("platega_method", 0)) if data else 0
+            
+            if method_code > 0:
+                # Method selected, process payment
+                from app.handlers.balance.platega import process_platega_payment_amount
+                await process_platega_payment_amount(callback.message, db_user, db, amount_kopeks, state)
+            else:
+                # Method not selected, save amount and show method selection
+                await state.update_data(platega_pending_amount=amount_kopeks)
+                from app.handlers.balance.platega import start_platega_payment
+                await start_platega_payment(callback, db_user, state)
         except Exception as e:
             logger.error(f"Error creating Platega payment: {e}")
             await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
