@@ -1445,7 +1445,7 @@ def get_payment_methods_keyboard(amount_kopeks: int, language: str = DEFAULT_LAN
         ])
 
     keyboard.append([
-        InlineKeyboardButton(text=texts.BACK, callback_data="menu_balance")
+        InlineKeyboardButton(text=texts.BACK, callback_data="back_to_menu")
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -2807,11 +2807,20 @@ def get_activation_keyboard(happ_link_shown: bool = False) -> InlineKeyboardMark
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: bool = True) -> InlineKeyboardMarkup:
+def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: bool = True, subscription=None) -> InlineKeyboardMarkup:
     """
     Экран 4: Экран подключения
     """
-    buttons = [
+    buttons = []
+    
+    # Add "Connect" button if user has active subscription
+    if subscription:
+        subscription_link = get_display_subscription_link(subscription)
+        if subscription_link:
+            buttons.append([InlineKeyboardButton(text="🔗 Подключиться", url=subscription_link)])
+    
+    # App download buttons
+    buttons.extend([
         [
             InlineKeyboardButton(text="🍎 iPhone", url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"),
             InlineKeyboardButton(text="🤖 Android", url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru")
@@ -2820,7 +2829,7 @@ def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: boo
             InlineKeyboardButton(text="💻 Windows", url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"),
             InlineKeyboardButton(text="🍎 macOS", url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973")
         ]
-    ]
+    ])
     
     if show_link_toggle:
         if happ_link_shown:

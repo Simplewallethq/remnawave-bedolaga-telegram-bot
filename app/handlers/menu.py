@@ -1250,7 +1250,7 @@ async def handle_howto(
     data = await state.get_data()
     show_link = data.get('howto_show_link', False)
     
-    keyboard = get_connection_keyboard(happ_link_shown=show_link, show_link_toggle=bool(user.subscription))
+    keyboard = get_connection_keyboard(happ_link_shown=show_link, show_link_toggle=bool(user.subscription), subscription=user.subscription)
     
     if show_link and user.subscription:
         link = get_display_subscription_link(user.subscription)
