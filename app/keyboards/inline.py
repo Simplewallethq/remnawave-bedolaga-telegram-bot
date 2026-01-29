@@ -2817,10 +2817,10 @@ def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: boo
     if subscription:
         subscription_link = get_display_subscription_link(subscription)
         if subscription_link:
-            # Use WebAppInfo to support happ:// protocol through mini app
+            # Use callback to show subscription link (handles happ:// protocol correctly)
             buttons.append([InlineKeyboardButton(
                 text="🔗 Подключиться",
-                web_app=types.WebAppInfo(url=subscription_link)
+                callback_data="open_subscription_link"
             )])
     
     # App download buttons
