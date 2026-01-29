@@ -2994,8 +2994,7 @@ def get_profile_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏷 Промокод", callback_data="profile_promo")],
         [InlineKeyboardButton(text="🌐 Язык", callback_data="profile_language")],
-        [InlineKeyboardButton(text="🔒 Политика конф.", callback_data="profile_privacy")],
-        [InlineKeyboardButton(text="📄 Правила сервиса", callback_data="profile_terms")],
+        [InlineKeyboardButton(text="ℹ️ Инфо", callback_data="menu_info")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
