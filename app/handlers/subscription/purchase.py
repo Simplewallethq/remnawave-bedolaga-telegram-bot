@@ -2951,6 +2951,134 @@ async def handle_payment_selection(
              logger.error(f"Error creating Stars invoice: {e}")
              await callback.answer("❌ Ошибка создания инвойса Stars", show_alert=True)
              
+    elif method == "yookassa" or method == "yookassa_sbp":
+        if not settings.is_yookassa_enabled():
+            await callback.answer("❌ YooKassa временно недоступна", show_alert=True)
+            return
+        
+        try:
+            payment_method_type = "sbp" if method == "yookassa_sbp" else None
+            
+            payment = await payment_service.create_yookassa_payment(
+                db=db,
+                user_id=db_user.id,
+                amount_kopeks=amount_kopeks,
+                description=description,
+                payment_method_type=payment_method_type,
+                initial_status="pending"
+            )
+            
+            if not payment or not payment.confirmation_url:
+                await callback.answer("❌ Ошибка создания платежа", show_alert=True)
+                return
+            
+            method_name = "СБП" if method == "yookassa_sbp" else "Карту"
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"💳 Оплатить через {method_name}", url=payment.confirmation_url)],
+                [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"check_payment:yookassa:{payment.id}")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ])
+            
+            await edit_or_answer_photo(
+                callback=callback,
+                caption=(
+                    f"💳 <b>Оплата через {method_name} (YooKassa)</b>\n\n"
+                    f"Сумма: {settings.format_price(amount_kopeks)}\n"
+                    f"Назначение: {description}\n\n"
+                    f"Нажмите кнопку ниже, чтобы перейти к оплате."
+                ),
+                keyboard=keyboard,
+                parse_mode="HTML",
+                photo_path=os.path.join("images", "payment_methods.png")
+            )
+        except Exception as e:
+            logger.error(f"Error creating YooKassa payment: {e}")
+            await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+    
+    elif method == "platega":
+        if not settings.is_platega_enabled():
+            await callback.answer("❌ Platega временно недоступна", show_alert=True)
+            return
+        
+        try:
+            from app.handlers.balance.platega import start_platega_payment
+            await start_platega_payment(callback, db_user, db, amount_kopeks, state)
+        except Exception as e:
+            logger.error(f"Error creating Platega payment: {e}")
+            await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+    
+    elif method == "pal24":
+        if not settings.is_pal24_enabled():
+            await callback.answer("❌ PayPalych временно недоступен", show_alert=True)
+            return
+        
+        try:
+            from app.handlers.balance.pal24 import start_pal24_payment
+            await start_pal24_payment(callback, db_user, db, amount_kopeks, state)
+        except Exception as e:
+            logger.error(f"Error creating PayPalych payment: {e}")
+            await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+    
+    elif method == "wata":
+        if not settings.is_wata_enabled():
+            await callback.answer("❌ WATA временно недоступна", show_alert=True)
+            return
+        
+        try:
+            from app.handlers.balance.wata import start_wata_payment
+            await start_wata_payment(callback, db_user, db, amount_kopeks, state)
+        except Exception as e:
+            logger.error(f"Error creating WATA payment: {e}")
+            await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+    
+    elif method == "mulenpay":
+        if not settings.is_mulenpay_enabled():
+            await callback.answer("❌ Mulenpay временно недоступен", show_alert=True)
+            return
+        
+        try:
+            from app.handlers.balance.mulenpay import start_mulenpay_payment
+            await start_mulenpay_payment(callback, db_user, db, amount_kopeks, state)
+        except Exception as e:
+            logger.error(f"Error creating Mulenpay payment: {e}")
+            await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+    
+    elif method == "heleket":
+        if not settings.is_heleket_enabled():
+            await callback.answer("❌ Heleket временно недоступен", show_alert=True)
+            return
+        
+        try:
+            from app.handlers.balance.heleket import start_heleket_payment
+            await start_heleket_payment(callback, db_user, db, amount_kopeks, state)
+        except Exception as e:
+            logger.error(f"Error creating Heleket payment: {e}")
+            await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+    
+    elif method == "cloudpayments":
+        if not settings.is_cloudpayments_enabled():
+            await callback.answer("❌ CloudPayments временно недоступен", show_alert=True)
+            return
+        
+        try:
+            from app.handlers.balance.cloudpayments import start_cloudpayments_payment
+            await start_cloudpayments_payment(callback, db_user, db, amount_kopeks, state)
+        except Exception as e:
+            logger.error(f"Error creating CloudPayments payment: {e}")
+            await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+    
+    elif method == "tribute":
+        if not settings.TRIBUTE_ENABLED:
+            await callback.answer("❌ Tribute временно недоступен", show_alert=True)
+            return
+        
+        try:
+            from app.handlers.balance.tribute import start_tribute_payment
+            await start_tribute_payment(callback, db_user, db, amount_kopeks, state)
+        except Exception as e:
+            logger.error(f"Error creating Tribute payment: {e}")
+            await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+             
     else:
         await callback.answer("Метод оплаты в разработке", show_alert=True)
 

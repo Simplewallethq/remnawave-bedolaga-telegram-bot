@@ -2907,25 +2907,71 @@ def get_device_selection_keyboard(current_selected: int = 1, back_callback: str 
 def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, back_callback: str = "topup") -> InlineKeyboardMarkup:
     """
     Экран 8: Методы оплаты (упрощенная версия для новых меню)
+    Динамически показывает только доступные методы оплаты
     """
-    if days > 0:
-        sbp_data = f"pay:sbp:{days}"
-        cb_data = f"pay:cryptobot:{days}"
-        stars_data = f"pay:stars:{days}"
-    else:
-        sbp_data = f"pay_amount:sbp:{amount_rub}"
-        cb_data = f"pay_amount:cryptobot:{amount_rub}"
-        stars_data = f"pay_amount:stars:{amount_rub}"
+    from app.config import settings
     
-    buttons = [
-        [
-            InlineKeyboardButton(text="🇷🇺 СБП (RUB)", callback_data=sbp_data),
-            InlineKeyboardButton(text="💎 CryptoBot", callback_data=cb_data)
-        ],
-        [InlineKeyboardButton(text="⭐️ Telegram Stars", callback_data=stars_data)],
-        [InlineKeyboardButton(text="← Назад", callback_data=back_callback)],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ]
+    buttons = []
+    
+    # Helper function to build callback data
+    def _build_callback(method: str) -> str:
+        if days > 0:
+            return f"pay:{method}:{days}"
+        else:
+            return f"pay_amount:{method}:{amount_rub}"
+    
+    # Telegram Stars
+    if settings.TELEGRAM_STARS_ENABLED:
+        buttons.append([InlineKeyboardButton(text="⭐️ Telegram Stars", callback_data=_build_callback("stars"))])
+    
+    # YooKassa (SBP or Card)
+    if settings.is_yookassa_enabled():
+        if settings.YOOKASSA_SBP_ENABLED:
+            buttons.append([InlineKeyboardButton(text="🏦 СБП (YooKassa)", callback_data=_build_callback("yookassa_sbp"))])
+        buttons.append([InlineKeyboardButton(text="💳 Карта (YooKassa)", callback_data=_build_callback("yookassa"))])
+    
+    # Platega
+    if settings.is_platega_enabled() and settings.get_platega_active_methods():
+        platega_name = settings.get_platega_display_name()
+        buttons.append([InlineKeyboardButton(text=f"💳 {platega_name}", callback_data=_build_callback("platega"))])
+    
+    # PayPalych (pal24)
+    if settings.is_pal24_enabled():
+        buttons.append([InlineKeyboardButton(text="🏦 СБП (PayPalych)", callback_data=_build_callback("pal24"))])
+    
+    # WATA
+    if settings.is_wata_enabled():
+        buttons.append([InlineKeyboardButton(text="💳 Карта (WATA)", callback_data=_build_callback("wata"))])
+    
+    # Mulenpay
+    if settings.is_mulenpay_enabled():
+        mulenpay_name = settings.get_mulenpay_display_name()
+        buttons.append([InlineKeyboardButton(text=f"💳 {mulenpay_name}", callback_data=_build_callback("mulenpay"))])
+    
+    # CryptoBot
+    if settings.is_cryptobot_enabled():
+        buttons.append([InlineKeyboardButton(text="🪙 CryptoBot", callback_data=_build_callback("cryptobot"))])
+    
+    # Heleket
+    if settings.is_heleket_enabled():
+        buttons.append([InlineKeyboardButton(text="🪙 Heleket", callback_data=_build_callback("heleket"))])
+    
+    # CloudPayments
+    if settings.is_cloudpayments_enabled():
+        buttons.append([InlineKeyboardButton(text="💳 CloudPayments", callback_data=_build_callback("cloudpayments"))])
+    
+    # Tribute
+    if settings.TRIBUTE_ENABLED:
+        buttons.append([InlineKeyboardButton(text="💳 Tribute", callback_data=_build_callback("tribute"))])
+    
+    # If no payment methods available
+    if not buttons:
+        buttons.append([InlineKeyboardButton(text="⚠️ Способы оплаты временно недоступны", callback_data="payment_methods_unavailable")])
+    
+    # Add back and main menu buttons
+    buttons.append([InlineKeyboardButton(text="← Назад", callback_data=back_callback)])
+    buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_profile_keyboard() -> InlineKeyboardMarkup:
