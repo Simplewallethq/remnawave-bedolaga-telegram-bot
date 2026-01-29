@@ -3001,8 +3001,8 @@ async def handle_payment_selection(
             return
         
         try:
-            from app.handlers.balance.platega import start_platega_payment
-            await start_platega_payment(callback, db_user, db, amount_kopeks, state)
+            from app.handlers.balance.platega import process_platega_payment_amount
+            await process_platega_payment_amount(callback.message, db_user, db, amount_kopeks, state)
         except Exception as e:
             logger.error(f"Error creating Platega payment: {e}")
             await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
@@ -3013,8 +3013,8 @@ async def handle_payment_selection(
             return
         
         try:
-            from app.handlers.balance.pal24 import start_pal24_payment
-            await start_pal24_payment(callback, db_user, db, amount_kopeks, state)
+            from app.handlers.balance.pal24 import process_pal24_payment_amount
+            await process_pal24_payment_amount(callback.message, db_user, db, amount_kopeks, state)
         except Exception as e:
             logger.error(f"Error creating PayPalych payment: {e}")
             await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
@@ -3025,8 +3025,8 @@ async def handle_payment_selection(
             return
         
         try:
-            from app.handlers.balance.wata import start_wata_payment
-            await start_wata_payment(callback, db_user, db, amount_kopeks, state)
+            from app.handlers.balance.wata import process_wata_payment_amount
+            await process_wata_payment_amount(callback.message, db_user, db, amount_kopeks, state)
         except Exception as e:
             logger.error(f"Error creating WATA payment: {e}")
             await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
@@ -3037,8 +3037,8 @@ async def handle_payment_selection(
             return
         
         try:
-            from app.handlers.balance.mulenpay import start_mulenpay_payment
-            await start_mulenpay_payment(callback, db_user, db, amount_kopeks, state)
+            from app.handlers.balance.mulenpay import process_mulenpay_payment_amount
+            await process_mulenpay_payment_amount(callback.message, db_user, db, amount_kopeks, state)
         except Exception as e:
             logger.error(f"Error creating Mulenpay payment: {e}")
             await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
@@ -3049,8 +3049,8 @@ async def handle_payment_selection(
             return
         
         try:
-            from app.handlers.balance.heleket import start_heleket_payment
-            await start_heleket_payment(callback, db_user, db, amount_kopeks, state)
+            from app.handlers.balance.heleket import process_heleket_payment_amount
+            await process_heleket_payment_amount(callback.message, db_user, db, amount_kopeks, state)
         except Exception as e:
             logger.error(f"Error creating Heleket payment: {e}")
             await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
@@ -3061,8 +3061,8 @@ async def handle_payment_selection(
             return
         
         try:
-            from app.handlers.balance.cloudpayments import start_cloudpayments_payment
-            await start_cloudpayments_payment(callback, db_user, db, amount_kopeks, state)
+            from app.handlers.balance.cloudpayments import process_cloudpayments_payment_amount
+            await process_cloudpayments_payment_amount(callback.message, db_user, db, amount_kopeks, state)
         except Exception as e:
             logger.error(f"Error creating CloudPayments payment: {e}")
             await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
@@ -3073,8 +3073,8 @@ async def handle_payment_selection(
             return
         
         try:
-            from app.handlers.balance.tribute import start_tribute_payment
-            await start_tribute_payment(callback, db_user, db, amount_kopeks, state)
+            from app.handlers.balance.tribute import process_tribute_payment_amount
+            await process_tribute_payment_amount(callback.message, db_user, db, amount_kopeks, state)
         except Exception as e:
             logger.error(f"Error creating Tribute payment: {e}")
             await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
