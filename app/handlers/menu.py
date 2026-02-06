@@ -194,11 +194,16 @@ async def show_main_menu(
     # But for now:
     trial_used = (subscription is not None or db_user.has_had_paid_subscription)
 
+    # Проверяем, является ли пользователь администратором
+    is_admin = settings.is_admin(db_user.telegram_id)
+
     keyboard = get_new_main_menu_keyboard(
         balance_rub=db_user.balance_kopeks / 100,
         trial_used=trial_used,
         trial_active=trial_active,
-        has_active_subscription=has_active_subscription
+        has_active_subscription=has_active_subscription,
+        is_admin=is_admin,
+        language=db_user.language,
     )
 
     image_path = os.path.join("images", "main_menu.png")

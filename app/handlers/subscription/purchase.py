@@ -2936,7 +2936,11 @@ async def handle_payment_selection(
              
              payload = f"balance_{db_user.id}_{amount_kopeks}"
              
-             await payment_service.send_invoice(
+             # Use TelegramStarsService to send invoice
+             from app.external.telegram_stars import TelegramStarsService
+             stars_service = TelegramStarsService(callback.bot)
+             
+             await stars_service.send_invoice(
                  chat_id=current_chat_id,
                  title=f"Пополнение баланса", # Stars invoice title
                  description=description,

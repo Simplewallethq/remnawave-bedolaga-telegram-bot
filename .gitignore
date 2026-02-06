@@ -14,7 +14,7 @@ docker-compose.override.yml
 !docs/**
 !migrations/
 !migrations/**
-logo.png
+
 
 # Разрешаем папку app/ и все её содержимое рекурсивно
 !app/
@@ -38,3 +38,6 @@ app/**/*.pyd
 *.pyc
 *.pyo
 *.pyd
+
+logo.png
+docker-compose.yml

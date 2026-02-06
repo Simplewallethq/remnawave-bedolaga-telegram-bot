@@ -445,12 +445,17 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
         trial_active = bool(is_active and is_trial)
         has_active_sub = bool(is_active and not is_trial)
         trial_used = (subscription is not None)
+        
+        # Проверяем, является ли пользователь администратором
+        is_admin = settings.is_admin(user.telegram_id)
     
         keyboard = get_new_main_menu_keyboard(
             balance_rub=user.balance_kopeks / 100,
             trial_used=trial_used,
             trial_active=trial_active,
-            has_active_subscription=has_active_sub
+            has_active_subscription=has_active_sub,
+            is_admin=is_admin,
+            language=user.language,
         )
         await message.answer(
             menu_text,
@@ -1321,13 +1326,18 @@ async def complete_registration(
         trial_active = bool(is_active and is_trial)
         has_active_sub = bool(is_active and not is_trial)
         trial_used = (subscription is not None)
+        
+        # Проверяем, является ли пользователь администратором
+        is_admin = settings.is_admin(existing_user.telegram_id)
 
         try:
             keyboard = get_new_main_menu_keyboard(
                 balance_rub=existing_user.balance_kopeks / 100,
                 trial_used=trial_used,
                 trial_active=trial_active,
-                has_active_subscription=has_active_sub
+                has_active_subscription=has_active_sub,
+                is_admin=is_admin,
+                language=existing_user.language,
             )
             await message.answer(
                 menu_text,

@@ -2753,10 +2753,13 @@ def get_new_main_menu_keyboard(
     trial_used: bool = False,
     trial_active: bool = False,
     has_active_subscription: bool = False,
+    is_admin: bool = False,
+    language: str = DEFAULT_LANGUAGE,
 ) -> InlineKeyboardMarkup:
     """
     Экран 2: Главное меню
     """
+    texts = get_texts(language)
     keyboard = []
     
     # Всегда отображается баланс
@@ -2779,6 +2782,12 @@ def get_new_main_menu_keyboard(
         InlineKeyboardButton(text="🛠 Поддержка", callback_data="support"),
         InlineKeyboardButton(text="👤 Профиль", callback_data="profile")
     ])
+    
+    # Кнопка админ панели для администраторов
+    if is_admin:
+        keyboard.append([
+            InlineKeyboardButton(text=texts.MENU_ADMIN, callback_data="admin_panel")
+        ])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
