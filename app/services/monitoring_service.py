@@ -1584,10 +1584,41 @@ class MonitoringService:
             async with self.subscription_service.get_api_client() as api:
                 system_stats = await api.get_system_stats()
                 
+                # Проверяем подключения пользователей к VPN
+                result = await db.execute(
+                    select(User)
+                    .options(selectinload(User.subscription))
+                    .where(
+                        and_(
+                            User.has_connected_to_vpn == False,
+                            User.remnawave_uuid.isnot(None)
+                        )
+                    )
+                )
+                users_to_check = result.scalars().all()
+                
+                updated_count = 0
+                for user in users_to_check:
+                    try:
+                        remnawave_user = await api.get_user_by_uuid(user.remnawave_uuid)
+                        if remnawave_user and remnawave_user.first_connected_at:
+                            user.has_connected_to_vpn = True
+                            updated_count += 1
+                            logger.info(
+                                f"✅ Пользователь {user.telegram_id} подключился к VPN в {remnawave_user.first_connected_at}"
+                            )
+                    except Exception as user_error:
+                        logger.debug(f"Ошибка проверки пользователя {user.telegram_id}: {user_error}")
+                        continue
+                
+                if updated_count > 0:
+                    await db.commit()
+                    logger.info(f"🔄 Обновлено флагов подключения к VPN: {updated_count}")
+                
                 await self._log_monitoring_event(
                     db, "remnawave_sync",
                     "Синхронизация с RemnaWave завершена",
-                    {"stats": system_stats}
+                    {"stats": system_stats, "vpn_connections_updated": updated_count}
                 )
                 
         except Exception as e:

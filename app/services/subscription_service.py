@@ -457,6 +457,11 @@ class SubscriptionService:
                 used_gb = self._bytes_to_gb(remnawave_user.used_traffic_bytes)
                 subscription.traffic_used_gb = used_gb
                 
+                # Проверяем и обновляем флаг подключения к VPN
+                if not user.has_connected_to_vpn and remnawave_user.first_connected_at:
+                    user.has_connected_to_vpn = True
+                    logger.info(f"✅ Пользователь {user.telegram_id} впервые подключился к VPN в {remnawave_user.first_connected_at}")
+                
                 await db.commit()
                 
                 logger.debug(f"Синхронизирован трафик для подписки {subscription.id}: {used_gb} ГБ")
