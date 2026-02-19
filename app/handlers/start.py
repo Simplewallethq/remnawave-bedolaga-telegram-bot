@@ -30,7 +30,15 @@ from app.keyboards.inline import (
     get_language_selection_keyboard,
     get_welcome_keyboard,
     get_new_main_menu_keyboard,
+    get_onboarding_device_selection_keyboard,
+    get_onboarding_welcome_keyboard,
 )
+from app.database.crud.subscription import create_trial_subscription
+from app.services.trial_activation_service import (
+    charge_trial_activation_if_required,
+    preview_trial_activation_charge,
+)
+from app.utils.subscription_utils import get_display_subscription_link
 from app.handlers.menu import get_main_menu_text
 from app.localization.loader import DEFAULT_LANGUAGE
 from app.localization.texts import get_texts, get_rules, get_privacy_policy
@@ -69,6 +77,109 @@ def _calculate_subscription_flags(subscription):
     subscription_is_active = bool(getattr(subscription, "is_active", False))
 
     return has_active_subscription, subscription_is_active
+
+
+async def _auto_activate_trial_and_show_device_selection(
+    bot,
+    db: AsyncSession,
+    user,
+    message_or_callback,
+    is_callback: bool = False,
+):
+    """
+    Auto-activate trial subscription during registration and show device selection.
+    Used by both complete_registration (message) and complete_registration_from_callback (callback).
+    """
+    logger.info(f"🎁 AUTO-TRIAL: Автоматическая активация триала для {user.telegram_id}")
+
+    try:
+        forced_devices = None
+        if not settings.is_devices_selection_enabled():
+            forced_devices = settings.get_disabled_mode_device_limit()
+
+        subscription = await create_trial_subscription(
+            db,
+            user.id,
+            device_limit=forced_devices,
+        )
+
+        await db.refresh(user)
+
+        try:
+            charged_amount = await charge_trial_activation_if_required(
+                db,
+                user,
+                description="Активация триала при регистрации",
+            )
+        except Exception as charge_err:
+            logger.warning("Ошибка списания за триал (продолжаем): %s", charge_err)
+            charged_amount = 0
+
+        subscription_service = SubscriptionService()
+        try:
+            remnawave_user = await subscription_service.create_remnawave_user(
+                db,
+                subscription,
+            )
+        except Exception as rw_err:
+            logger.error("Ошибка создания RemnaWave пользователя (продолжаем): %s", rw_err)
+            remnawave_user = None
+
+        await db.refresh(user, ['subscription'])
+
+        try:
+            notification_service = AdminNotificationService(bot)
+            await notification_service.send_trial_activation_notification(
+                db,
+                user,
+                subscription,
+                charged_amount_kopeks=charged_amount,
+            )
+        except Exception as notify_err:
+            logger.error(f"Ошибка отправки уведомления о триале: {notify_err}")
+
+        logger.info(f"✅ Триал автоматически активирован для {user.telegram_id}")
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка авто-активации триала для {user.telegram_id}: {e}")
+        # Fallback: show main menu if trial activation fails
+        return False
+
+    # Show Screen 1: Welcome with free trial CTA
+    welcome_text = (
+        "Привет!\n"
+        "Тебе доступен 3-дневный бесплатный период 🎁\n\n"
+        "Он начнётся после первого подключения. Это займёт меньше 30 секунд."
+    )
+
+    image_path = os.path.join("images", "start_screen.png")
+    if not os.path.exists(image_path):
+        image_path = None
+
+    keyboard = get_onboarding_welcome_keyboard()
+
+    if is_callback:
+        await edit_or_answer_photo(
+            callback=message_or_callback,
+            caption=welcome_text,
+            keyboard=keyboard,
+            photo_path=image_path,
+        )
+    else:
+        # For message-based registration
+        if image_path:
+            await message_or_callback.answer_photo(
+                photo=types.FSInputFile(image_path),
+                caption=welcome_text,
+                reply_markup=keyboard,
+            )
+        else:
+            await message_or_callback.answer(
+                welcome_text,
+                reply_markup=keyboard,
+            )
+
+    return True
 
 
 async def _send_pinned_message(
@@ -250,58 +361,22 @@ async def _continue_registration_after_language(
 ) -> None:
     data = await state.get_data() or {}
     language = data.get('language', DEFAULT_LANGUAGE)
-    texts = get_texts(language)
 
-    target_message = callback.message if callback else message
-    if not target_message:
-        logger.warning("⚠️ LANGUAGE: Нет доступного сообщения для продолжения регистрации")
-        return
+    # Process referral code if present in state data (from /start payload)
+    if data.get('referral_code'):
+        referrer = await get_user_by_referral_code(db, data['referral_code'])
+        if referrer:
+            data['referrer_id'] = referrer.id
+            await state.set_data(data)
+            logger.info(f"✅ LANGUAGE: Реферер найден: {referrer.id}")
 
-    async def _complete_registration_wrapper():
-        if callback:
-            await complete_registration_from_callback(callback, state, db)
-        else:
-            await complete_registration(message, state, db)
+    # Skip rules and referral prompt — go straight to registration + onboarding
+    logger.info("⚙️ LANGUAGE: Пропускаем правила и реферальный код, переходим к регистрации")
+    if callback:
+        await complete_registration_from_callback(callback, state, db)
+    else:
+        await complete_registration(message, state, db)
 
-    if settings.SKIP_RULES_ACCEPT:
-        logger.info("⚙️ LANGUAGE: SKIP_RULES_ACCEPT включен - пропускаем правила")
-
-        if data.get('referral_code'):
-            referrer = await get_user_by_referral_code(db, data['referral_code'])
-            if referrer:
-                data['referrer_id'] = referrer.id
-                await state.set_data(data)
-                logger.info(f"✅ LANGUAGE: Реферер найден: {referrer.id}")
-
-        if settings.SKIP_REFERRAL_CODE or data.get('referral_code'):
-            await _complete_registration_wrapper()
-        else:
-            try:
-                await target_message.answer(
-                    texts.t(
-                        "REFERRAL_CODE_QUESTION",
-                        "У вас есть реферальный код? Введите его или нажмите 'Пропустить'",
-                    ),
-                    reply_markup=get_referral_code_keyboard(language)
-                )
-                await state.set_state(RegistrationStates.waiting_for_referral_code)
-                logger.info("🔍 LANGUAGE: Ожидание ввода реферального кода")
-            except Exception as error:
-                logger.error(f"Ошибка при показе вопроса о реферальном коде после выбора языка: {error}")
-                await _complete_registration_wrapper()
-        return
-
-    rules_text = await get_rules(language)
-    try:
-        await target_message.answer(
-            rules_text,
-            reply_markup=get_rules_keyboard(language)
-        )
-    except TelegramForbiddenError:
-        logger.warning(f"⚠️ Пользователь {callback.from_user.id if callback else message.from_user.id} заблокировал бота, пропускаем отправку правил")
-        return
-    await state.set_state(RegistrationStates.waiting_for_rules_accept)
-    logger.info("📋 LANGUAGE: Правила отправлены после выбора языка")
 
 
 async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession, db_user=None):
@@ -534,10 +609,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
 
     data = await state.get_data() or {}
     if not data.get('language'):
-        if settings.is_language_selection_enabled():
-            await _prompt_language_selection(message, state)
-            return
-
+        # Always set default language, skip language selection prompt
         default_language = (
             (settings.DEFAULT_LANGUAGE or DEFAULT_LANGUAGE)
             if isinstance(settings.DEFAULT_LANGUAGE, str)
@@ -547,7 +619,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
         data['language'] = normalized_default
         await state.set_data(data)
         logger.info(
-            "🌐 LANGUAGE: выбор языка отключен, устанавливаем язык по умолчанию '%s'",
+            "🌐 LANGUAGE: устанавливаем язык по умолчанию '%s' (выбор пропущен)",
             normalized_default,
         )
 
@@ -1241,29 +1313,36 @@ async def complete_registration_from_callback(
         except Exception as e:
             logger.error(f"Ошибка отправки сообщения о бонусе кампании: {e}")
 
-    # Send Welcome Screen as per documentation (MENU_DOCUMENTATION.md)
-    welcome_text = (
-        "⛱ Привет, тебе уже доступна бесплатная подписка на 3 дня!\n\n"
-        "Всего 5 минут — и у тебя будет подключен самый быстрый VPN.\n"
-        "Нажми «✨ Активировать» и начнём."
-    )
-    
+    # Auto-activate trial and show device selection
     try:
-        image_path = os.path.join("images", "start_screen.png")
-        if not os.path.exists(image_path):
-             image_path = None
-
-        await edit_or_answer_photo(
-            callback=callback,
-            caption=welcome_text,
-            keyboard=get_welcome_keyboard(),
-            photo_path=image_path
+        trial_success = await _auto_activate_trial_and_show_device_selection(
+            callback.bot, db, user, callback, is_callback=True
         )
-        await _send_pinned_message(callback.bot, db, user)
-        logger.info(f"✅ Приветственный экран показан пользователю {user.telegram_id}")
     except Exception as e:
-        logger.error(f"Ошибка при отправке приветственного экрана из колбэка: {e}")
-        logger.error(f"Ошибка при отправке приветственного экрана: {e}")
+        logger.error(f"Ошибка авто-активации триала при регистрации (callback): {e}")
+        trial_success = False
+
+    if not trial_success:
+        # Fallback: show welcome screen if trial failed
+        welcome_text = (
+            "⛱ Привет, тебе уже доступна бесплатная подписка на 3 дня!\n\n"
+            "Всего 5 минут — и у тебя будет подключен самый быстрый VPN.\n"
+            "Нажми «✨ Активировать» и начнём."
+        )
+        try:
+            image_path = os.path.join("images", "start_screen.png")
+            if not os.path.exists(image_path):
+                image_path = None
+            await edit_or_answer_photo(
+                callback=callback,
+                caption=welcome_text,
+                keyboard=get_welcome_keyboard(),
+                photo_path=image_path,
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при отправке приветственного экрана из колбэка: {e}")
+
+    await _send_pinned_message(callback.bot, db, user)
 
     logger.info(f"✅ Регистрация завершена для пользователя: {user.telegram_id}")
 
@@ -1487,30 +1566,39 @@ async def complete_registration(
         except Exception as e:
             logger.error(f"Ошибка отправки сообщения о бонусе кампании: {e}")
 
-    # Send Welcome Screen as per documentation (MENU_DOCUMENTATION.md)
-    welcome_text = (
-        "⛱ Привет, тебе уже доступна бесплатная подписка на 3 дня!\n\n"
-        "Всего 5 минут — и у тебя будет подключен самый быстрый VPN.\n"
-        "Нажми «✨ Активировать» и начнём."
-    )
-    
+    # Auto-activate trial and show device selection
     try:
-        image_path = os.path.join("images", "start_screen.png")
-        if os.path.exists(image_path):
-             await message.answer_photo(
-                photo=types.FSInputFile(image_path),
-                caption=welcome_text,
-                reply_markup=get_welcome_keyboard(),
-             )
-        else:
-            await message.answer(
-                welcome_text,
-                reply_markup=get_welcome_keyboard(),
-            )
-        await _send_pinned_message(message.bot, db, user)
-        logger.info(f"✅ Приветственный экран показан пользователю {user.telegram_id}")
+        trial_success = await _auto_activate_trial_and_show_device_selection(
+            message.bot, db, user, message, is_callback=False
+        )
     except Exception as e:
-        logger.error(f"Ошибка при отправке приветственного экрана: {e}")
+        logger.error(f"Ошибка авто-активации триала при регистрации: {e}")
+        trial_success = False
+
+    if not trial_success:
+        # Fallback: show welcome screen if trial failed
+        welcome_text = (
+            "⛱ Привет, тебе уже доступна бесплатная подписка на 3 дня!\n\n"
+            "Всего 5 минут — и у тебя будет подключен самый быстрый VPN.\n"
+            "Нажми «✨ Активировать» и начнём."
+        )
+        try:
+            image_path = os.path.join("images", "start_screen.png")
+            if os.path.exists(image_path):
+                await message.answer_photo(
+                    photo=types.FSInputFile(image_path),
+                    caption=welcome_text,
+                    reply_markup=get_welcome_keyboard(),
+                )
+            else:
+                await message.answer(
+                    welcome_text,
+                    reply_markup=get_welcome_keyboard(),
+                )
+        except Exception as e:
+            logger.error(f"Ошибка при отправке приветственного экрана: {e}")
+
+    await _send_pinned_message(message.bot, db, user)
 
 
     logger.info(f"✅ Регистрация завершена для пользователя: {user.telegram_id}")

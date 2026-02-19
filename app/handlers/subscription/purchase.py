@@ -211,7 +211,10 @@ async def show_subscription_info(
     if not subscription:
         await callback.message.edit_text(
             texts.SUBSCRIPTION_NONE,
-            reply_markup=get_back_keyboard(db_user.language)
+            reply_markup=get_subscription_keyboard(
+                db_user.language,
+                has_subscription=False,
+            )
         )
         await callback.answer()
         return
@@ -419,7 +422,8 @@ async def show_subscription_info(
             db_user.language,
             has_subscription=True,
             is_trial=subscription.is_trial,
-            subscription=subscription
+            subscription=subscription,
+            subscription_is_expired=(actual_status == "expired"),
         ),
         parse_mode="HTML"
     )

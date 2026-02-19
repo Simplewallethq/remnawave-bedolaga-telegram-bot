@@ -27,6 +27,9 @@ from app.keyboards.inline import (
     get_referral_keyboard,
     get_balance_keyboard,
     get_support_keyboard,
+    get_onboarding_device_selection_keyboard,
+    get_onboarding_connection_keyboard,
+    get_onboarding_connected_keyboard,
 )
 from app.utils.subscription_utils import get_display_subscription_link
 from app.database.crud.referral import get_user_referral_stats
@@ -1237,39 +1240,210 @@ async def handle_howto(
     db: AsyncSession,
     from_toggle: bool = False
 ):
+    """Redirects to device selection screen (Screen 2)."""
     user = await get_user_by_telegram_id(db, callback.from_user.id)
     if not user:
         return
 
-    texts = get_texts(user.language)
-    
-    # Text from MENU_DOCUMENTATION.md for Screen 4
-    connection_text = (
-        "Инструкция по подключению:\n\n"
-        "<b>1.</b> Скачай приложение <a href=\"https://happ.link/\">Happ</a>.\n"
-        "<b>2.</b> Нажми <b>«🔗 Подключиться»</b>.\n"
-        "<b>3.</b> В приложении нажми <b>«Подключить»</b>."
+    device_selection_text = (
+        "Выбери свой тип устройства.\n\n"
+        "Мы не храним логи и не отслеживаем активность пользователей."
     )
-    
-    # State data for link visibility
-    data = await state.get_data()
-    show_link = data.get('howto_show_link', False)
-    
-    keyboard = get_connection_keyboard(happ_link_shown=show_link, show_link_toggle=bool(user.subscription), subscription=user.subscription)
-    
-    if show_link and user.subscription:
-        link = get_display_subscription_link(user.subscription)
-        if link:
-             connection_text += f"\n\n🔗 <b>Ваша ссылка подключения:</b>\n<code>{link}</code>"
-    
+
+    image_path = os.path.join("images", "device_selection_screen.png")
+    if not os.path.exists(image_path):
+        image_path = None
+
+    await edit_or_answer_photo(
+        callback,
+        device_selection_text,
+        get_onboarding_device_selection_keyboard(),
+        parse_mode="HTML",
+        photo_path=image_path,
+    )
+    await callback.answer()
+
+
+async def handle_onboarding_connect_free(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db: AsyncSession,
+):
+    """Screen 1 -> Screen 2: User clicks 'Подключиться бесплатно', show device selection."""
+    user = await get_user_by_telegram_id(db, callback.from_user.id)
+    if not user:
+        return
+
+    device_selection_text = (
+        "Выбери свой тип устройства.\n\n"
+        "Мы не храним логи и не отслеживаем активность пользователей."
+    )
+
+    image_path = os.path.join("images", "device_selection_screen.png")
+    if not os.path.exists(image_path):
+        image_path = None
+
+    await edit_or_answer_photo(
+        callback,
+        device_selection_text,
+        get_onboarding_device_selection_keyboard(),
+        parse_mode="HTML",
+        photo_path=image_path,
+    )
+    await callback.answer()
+
+
+async def handle_onboarding_device_selection(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db: AsyncSession,
+):
+    """Screen 2 -> Screen 3: Show device-specific connection instructions."""
+    user = await get_user_by_telegram_id(db, callback.from_user.id)
+    if not user:
+        return
+
+    device_map = {
+        "onboarding_device_iphone": "iphone",
+        "onboarding_device_android": "android",
+        "onboarding_device_windows": "windows",
+        "onboarding_device_macos": "macos",
+    }
+    device_type = device_map.get(callback.data, "iphone")
+    await state.update_data(onboarding_device_type=device_type, onboarding_link_sent=False)
+
+    connection_text = (
+        "Установи приложение Happ по кнопке ниже.\n\n"
+        "После установки нажми «Подключиться» — всё настроится автоматически."
+    )
+
+    keyboard = get_onboarding_connection_keyboard(device_type)
+
     image_path = os.path.join("images", "connection_screen.png")
     if not os.path.exists(image_path):
-         image_path = None
+        image_path = None
 
-    if from_toggle:
-        await edit_or_answer_photo(callback, connection_text, keyboard, parse_mode="HTML", photo_path=image_path)
+    await edit_or_answer_photo(
+        callback,
+        connection_text,
+        keyboard,
+        parse_mode="HTML",
+        photo_path=image_path,
+    )
+    await callback.answer()
+
+
+async def handle_onboarding_connect(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db: AsyncSession,
+):
+    """Handle 'Подключиться' button on Screen 3: send deep link, prevent duplicates, update message."""
+    logger.info(f"🔗 ONBOARDING_CONNECT: Нажатие кнопки Подключиться от {callback.from_user.id}")
+
+    # Answer callback immediately to remove loader
+    await callback.answer()
+
+    user = await get_user_by_telegram_id(db, callback.from_user.id)
+    if not user:
+        return
+
+    # Duplicate protection via FSM state
+    data = await state.get_data() or {}
+    if data.get("onboarding_link_sent"):
+        logger.info(f"⚠️ ONBOARDING_CONNECT: Повторное нажатие от {callback.from_user.id}, игнорируем")
+        return
+
+    # Mark link as sent to prevent duplicates
+    await state.update_data(onboarding_link_sent=True)
+
+    # Send deep link if subscription exists
+    subscription = user.subscription
+    if subscription:
+        subscription_link = get_display_subscription_link(subscription)
+        if subscription_link:
+            from app.utils.subscription_utils import get_happ_cryptolink_redirect_link
+            redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
+
+            if redirect_link:
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                link_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔗 Открыть Happ", url=redirect_link)],
+                ])
+                await callback.message.answer(
+                    "🔗 Нажми кнопку ниже, чтобы открыть Happ:",
+                    reply_markup=link_keyboard,
+                )
+                logger.info(f"✅ ONBOARDING_CONNECT: Deep link отправлен пользователю {callback.from_user.id}")
+            else:
+                logger.warning(f"⚠️ ONBOARDING_CONNECT: Не удалось сгенерировать redirect link для {callback.from_user.id}")
+        else:
+            logger.warning(f"⚠️ ONBOARDING_CONNECT: Нет subscription_link для {callback.from_user.id}")
     else:
-        await edit_or_answer_photo(callback, connection_text, keyboard, parse_mode="HTML", photo_path=image_path)
+        logger.warning(f"⚠️ ONBOARDING_CONNECT: Нет подписки у {callback.from_user.id}")
+
+    # Update the message to post-connect screen
+    post_connect_text = (
+        "🔐 Открой Happ и нажми «Подключить».\n"
+        "Это займёт 5–10 секунд."
+    )
+
+    await edit_or_answer_photo(
+        callback,
+        post_connect_text,
+        get_onboarding_connected_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+async def handle_onboarding_manual_link(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    """Show subscription link as copyable code for manual connection."""
+    if db_user is None:
+        texts = get_texts(settings.DEFAULT_LANGUAGE_CODE)
+        await callback.answer(
+            texts.t("USER_NOT_FOUND_ERROR", "Ошибка: пользователь не найден."),
+            show_alert=True,
+        )
+        return
+
+    subscription = db_user.subscription
+    if not subscription:
+        await callback.answer("❌ У вас нет активной подписки", show_alert=True)
+        return
+
+    link = get_display_subscription_link(subscription)
+    if not link:
+        await callback.answer("❌ Ссылка подписки недоступна", show_alert=True)
+        return
+
+    manual_text = (
+        "🔐 Открой Happ и нажми «Подключить».\n"
+        "Это займёт 5–10 секунд.\n\n"
+        "Для ручного подключения скопируй ключ и добавь его в Happ\n\n"
+        f"<blockquote expandable><code>{link}</code></blockquote>"
+    )
+
+    support_url = settings.get_support_contact_url() or "https://t.me/letovpn_support"
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Я подключился", callback_data="main_menu")],
+        [InlineKeyboardButton(text="💬 Поддержка", url=support_url)],
+    ])
+
+    await edit_or_answer_photo(
+        callback,
+        manual_text,
+        keyboard,
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
 
 async def handle_connection_link_toggle(
     callback: types.CallbackQuery,
@@ -1417,6 +1591,26 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         handle_howto,
         F.data == "howto"
+    )
+
+    dp.callback_query.register(
+        handle_onboarding_connect_free,
+        F.data == "onboarding_connect_free"
+    )
+
+    dp.callback_query.register(
+        handle_onboarding_device_selection,
+        F.data.in_({"onboarding_device_iphone", "onboarding_device_android", "onboarding_device_windows", "onboarding_device_macos"})
+    )
+
+    dp.callback_query.register(
+        handle_onboarding_connect,
+        F.data == "onboarding_connect"
+    )
+
+    dp.callback_query.register(
+        handle_onboarding_manual_link,
+        F.data == "onboarding_manual_link"
     )
 
     dp.callback_query.register(

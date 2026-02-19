@@ -906,7 +906,8 @@ def get_subscription_keyboard(
     language: str = DEFAULT_LANGUAGE, 
     has_subscription: bool = False, 
     is_trial: bool = False,
-    subscription=None
+    subscription=None,
+    subscription_is_expired: bool = False,
 ) -> InlineKeyboardMarkup:
     from app.config import settings 
     
@@ -991,6 +992,29 @@ def get_subscription_keyboard(
                     callback_data="subscription_settings",
                 )
             ])
+
+        # If subscription is expired, show activate button
+        if subscription_is_expired:
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=texts.t("ACTIVATE_SUBSCRIPTION_BUTTON", "🚀 Активировать подписку"),
+                    callback_data="menu_buy",
+                )
+            ])
+    else:
+        # No subscription — show Extend + Activate buttons
+        keyboard.append([
+            InlineKeyboardButton(
+                text=texts.MENU_EXTEND_SUBSCRIPTION,
+                callback_data="subscription_extend",
+            )
+        ])
+        keyboard.append([
+            InlineKeyboardButton(
+                text=texts.t("ACTIVATE_SUBSCRIPTION_BUTTON", "🚀 Активировать подписку"),
+                callback_data="menu_buy",
+            )
+        ])
     
     keyboard.append([
         InlineKeyboardButton(text=texts.BACK, callback_data="back_to_menu")
@@ -2815,6 +2839,90 @@ def get_activation_keyboard(happ_link_shown: bool = False) -> InlineKeyboardMark
     buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_onboarding_welcome_keyboard() -> InlineKeyboardMarkup:
+    """
+    Onboarding Screen 1: Welcome screen with free trial CTA.
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚀 Подключиться бесплатно", callback_data="onboarding_connect_free")],
+    ])
+
+
+def get_onboarding_device_selection_keyboard() -> InlineKeyboardMarkup:
+    """
+    Onboarding Screen 2: Device selection (4 buttons).
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🍎 iPhone", callback_data="onboarding_device_iphone")],
+        [InlineKeyboardButton(text="🤖 Android", callback_data="onboarding_device_android")],
+        [InlineKeyboardButton(text="💻 Windows", callback_data="onboarding_device_windows")],
+        [InlineKeyboardButton(text="🍎 MacOS", callback_data="onboarding_device_macos")],
+    ])
+
+
+def get_onboarding_connection_keyboard(device_type: str) -> InlineKeyboardMarkup:
+    """
+    Onboarding Screen 3: Device-specific connection instructions.
+    device_type: 'iphone', 'android', 'windows', or 'macos'
+    """
+    buttons = []
+
+    if device_type == "iphone":
+        buttons.append([
+            InlineKeyboardButton(
+                text="🍎 Скачать Happ (Apple ID Россия)",
+                url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973",
+            ),
+        ])
+        buttons.append([
+            InlineKeyboardButton(
+                text="🍎 Скачать Happ (Apple ID International)",
+                url="https://apps.apple.com/app/happ-proxy-utility-plus/id6746188973",
+            ),
+        ])
+    elif device_type == "android":
+        buttons.append([
+            InlineKeyboardButton(
+                text="🤖 Скачать Happ",
+                url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru",
+            ),
+        ])
+    elif device_type == "windows":
+        buttons.append([
+            InlineKeyboardButton(
+                text="💻 Скачать Happ",
+                url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
+            ),
+        ])
+    elif device_type == "macos":
+        buttons.append([
+            InlineKeyboardButton(
+                text="🍎 Скачать Happ",
+                url="https://apps.apple.com/app/happ-proxy-utility-plus/id6746188973",
+            ),
+        ])
+
+    # Connect button (callback, not URL)
+    buttons.append([
+        InlineKeyboardButton(text="🚀 Подключиться", callback_data="onboarding_connect"),
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_onboarding_connected_keyboard() -> InlineKeyboardMarkup:
+    """
+    Shown after user clicks Подключиться and deep link is sent.
+    """
+    support_url = settings.get_support_contact_url() or "https://t.me/letovpn_support"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Я подключился", callback_data="main_menu")],
+        [InlineKeyboardButton(text="🔗 Ручное подключение", callback_data="onboarding_manual_link")],
+        [InlineKeyboardButton(text="💬 Поддержка", url=support_url)],
+    ])
+
 
 def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: bool = True, subscription=None) -> InlineKeyboardMarkup:
     """
