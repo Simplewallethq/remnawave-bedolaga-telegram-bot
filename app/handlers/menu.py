@@ -1357,24 +1357,16 @@ async def handle_onboarding_connect(
     # Mark link as sent to prevent duplicates
     await state.update_data(onboarding_link_sent=True)
 
-    # Send deep link if subscription exists
+    # Build combined post-connect keyboard with deep link
+    redirect_link = None
     subscription = user.subscription
     if subscription:
         subscription_link = get_display_subscription_link(subscription)
         if subscription_link:
             from app.utils.subscription_utils import get_happ_cryptolink_redirect_link
             redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
-
             if redirect_link:
-                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                link_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🔗 Открыть Happ", url=redirect_link)],
-                ])
-                await callback.message.answer(
-                    "🔗 Нажми кнопку ниже, чтобы открыть Happ:",
-                    reply_markup=link_keyboard,
-                )
-                logger.info(f"✅ ONBOARDING_CONNECT: Deep link отправлен пользователю {callback.from_user.id}")
+                logger.info(f"✅ ONBOARDING_CONNECT: Deep link сгенерирован для {callback.from_user.id}")
             else:
                 logger.warning(f"⚠️ ONBOARDING_CONNECT: Не удалось сгенерировать redirect link для {callback.from_user.id}")
         else:
@@ -1382,16 +1374,30 @@ async def handle_onboarding_connect(
     else:
         logger.warning(f"⚠️ ONBOARDING_CONNECT: Нет подписки у {callback.from_user.id}")
 
-    # Update the message to post-connect screen
+    # Build single message with all buttons
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    support_url = settings.get_support_contact_url() or "https://t.me/letovpn_support"
+    buttons = []
+    if redirect_link:
+        buttons.append([InlineKeyboardButton(text="🔗 Открыть Happ", url=redirect_link)])
+    buttons.append([InlineKeyboardButton(text="✅ Я подключился", callback_data="main_menu")])
+    buttons.append([InlineKeyboardButton(text="🔗 Ручное подключение", callback_data="onboarding_manual_link")])
+    buttons.append([InlineKeyboardButton(text="💬 Поддержка", url=support_url)])
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
     post_connect_text = (
-        "🔐 Открой Happ и нажми «Подключить».\n"
-        "Это займёт 5–10 секунд."
+        "Нажми � Открыть Happ → в приложении выбери Подключить (займет 5–10 сек).\n\n"
+        "Вернись сюда:\n\n"
+        "Если всё ок — нажми Я подключился. "
+        "Если не получилось — выбери Ручное подключение или Поддержка."
     )
 
     await edit_or_answer_photo(
         callback,
         post_connect_text,
-        get_onboarding_connected_keyboard(),
+        keyboard,
         parse_mode="HTML",
     )
 
