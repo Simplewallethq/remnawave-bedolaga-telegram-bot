@@ -1246,8 +1246,8 @@ async def handle_howto(
         return
 
     device_selection_text = (
-        "Выбери свой тип устройства.\n\n"
-        "Мы не храним логи и не отслеживаем активность пользователей."
+        "Выбери устройство и подключайся бесплатно.\n"
+        "Это займёт меньше 30 секунд."
     )
 
     image_path = os.path.join("images", "device_selection_screen.png")
@@ -1275,8 +1275,8 @@ async def handle_onboarding_connect_free(
         return
 
     device_selection_text = (
-        "Выбери свой тип устройства.\n\n"
-        "Мы не храним логи и не отслеживаем активность пользователей."
+        "Выбери устройство и подключайся бесплатно.\n"
+        "Это займёт меньше 30 секунд."
     )
 
     image_path = os.path.join("images", "device_selection_screen.png")

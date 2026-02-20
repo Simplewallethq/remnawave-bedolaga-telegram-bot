@@ -145,37 +145,35 @@ async def _auto_activate_trial_and_show_device_selection(
         # Fallback: show main menu if trial activation fails
         return False
 
-    # Show Screen 1: Welcome with free trial CTA
-    welcome_text = (
-        "Привет!\n"
-        "Тебе доступен 3-дневный бесплатный период 🎁\n\n"
-        "Он начнётся после первого подключения. Это займёт меньше 30 секунд."
+    # Show device selection directly (Screen 2)
+    device_selection_text = (
+        "Выбери устройство и подключайся бесплатно.\n"
+        "Это займёт меньше 30 секунд."
     )
 
-    image_path = os.path.join("images", "start_screen.png")
+    image_path = os.path.join("images", "device_selection_screen.png")
     if not os.path.exists(image_path):
         image_path = None
 
-    keyboard = get_onboarding_welcome_keyboard()
+    keyboard = get_onboarding_device_selection_keyboard()
 
     if is_callback:
         await edit_or_answer_photo(
             callback=message_or_callback,
-            caption=welcome_text,
+            caption=device_selection_text,
             keyboard=keyboard,
             photo_path=image_path,
         )
     else:
-        # For message-based registration
         if image_path:
             await message_or_callback.answer_photo(
                 photo=types.FSInputFile(image_path),
-                caption=welcome_text,
+                caption=device_selection_text,
                 reply_markup=keyboard,
             )
         else:
             await message_or_callback.answer(
-                welcome_text,
+                device_selection_text,
                 reply_markup=keyboard,
             )
 

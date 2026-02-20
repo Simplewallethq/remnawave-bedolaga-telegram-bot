@@ -2909,6 +2909,11 @@ def get_onboarding_connection_keyboard(device_type: str) -> InlineKeyboardMarkup
         InlineKeyboardButton(text="🚀 Подключиться", callback_data="onboarding_connect"),
     ])
 
+    # Back to device selection
+    buttons.append([
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="onboarding_connect_free"),
+    ])
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
