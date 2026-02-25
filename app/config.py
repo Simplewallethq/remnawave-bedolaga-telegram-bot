@@ -390,6 +390,7 @@ class Settings(BaseSettings):
     HIDE_SUBSCRIPTION_LINK: bool = False
     ENABLE_LOGO_MODE: bool = True
     LOGO_FILE: str = "vpn_logo.png"
+    MIRROR_BOTS: str = "[]"
     SKIP_RULES_ACCEPT: bool = False
     SKIP_REFERRAL_CODE: bool = False
 
@@ -1717,6 +1718,29 @@ class Settings(BaseSettings):
     
     def is_support_contact_enabled(self) -> bool:
         return self.get_support_system_mode() in {"contact", "both"}
+
+    def get_mirror_bots(self) -> list[dict]:
+        import json, logging
+        raw = (self.MIRROR_BOTS or "").strip()
+        if not raw or raw == "[]":
+            return []
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            logging.getLogger(__name__).warning("MIRROR_BOTS invalid JSON, ignoring: %s", exc)
+            return []
+        if not isinstance(parsed, list):
+            return []
+        result = []
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            token = (item.get("token") or "").strip()
+            if not token:
+                continue
+            logo = (item.get("logo") or self.LOGO_FILE).strip()
+            result.append({"token": token, "logo": logo})
+        return result
 
     def get_bot_run_mode(self) -> str:
         mode = (self.BOT_RUN_MODE or "polling").strip().lower()

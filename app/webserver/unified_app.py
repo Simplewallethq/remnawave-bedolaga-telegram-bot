@@ -83,7 +83,7 @@ def _mount_miniapp_static(app: FastAPI) -> tuple[bool, Path]:
 
 
 def create_unified_app(
-    bot: Bot,
+    all_bots: list[Bot],
     dispatcher: Dispatcher,
     payment_service: PaymentService,
     *,
@@ -91,6 +91,7 @@ def create_unified_app(
 ) -> FastAPI:
     app = _create_base_app()
 
+    bot = all_bots[0]
     app.state.bot = bot
     app.state.dispatcher = dispatcher
     app.state.payment_service = payment_service
@@ -109,25 +110,35 @@ def create_unified_app(
     }
 
     if enable_telegram_webhook:
-        telegram_processor = telegram.TelegramWebhookProcessor(
-            bot=bot,
-            dispatcher=dispatcher,
-            queue_maxsize=settings.get_webhook_queue_maxsize(),
-            worker_count=settings.get_webhook_worker_count(),
-            enqueue_timeout=settings.get_webhook_enqueue_timeout(),
-            shutdown_timeout=settings.get_webhook_shutdown_timeout(),
-        )
+        processors: list[telegram.TelegramWebhookProcessor] = []
+        primary_path = settings.get_telegram_webhook_path()
+        for idx, b in enumerate(all_bots):
+            path = primary_path if idx == 0 else f"{primary_path}/mirror/{idx}"
+            proc = telegram.TelegramWebhookProcessor(
+                bot=b,
+                dispatcher=dispatcher,
+                queue_maxsize=settings.get_webhook_queue_maxsize(),
+                worker_count=settings.get_webhook_worker_count(),
+                enqueue_timeout=settings.get_webhook_enqueue_timeout(),
+                shutdown_timeout=settings.get_webhook_shutdown_timeout(),
+            )
+            processors.append(proc)
+            app.include_router(
+                telegram.create_telegram_router(b, dispatcher, processor=proc, webhook_path=path)
+            )
+
+        telegram_processor = processors[0] if processors else None
         app.state.telegram_webhook_processor = telegram_processor
 
         @app.on_event("startup")
-        async def start_telegram_webhook_processor() -> None:  # pragma: no cover - event hook
-            await telegram_processor.start()
+        async def start_telegram_webhook_processors() -> None:  # pragma: no cover - event hook
+            for proc in processors:
+                await proc.start()
 
         @app.on_event("shutdown")
-        async def stop_telegram_webhook_processor() -> None:  # pragma: no cover - event hook
-            await telegram_processor.stop()
-
-        app.include_router(telegram.create_telegram_router(bot, dispatcher, processor=telegram_processor))
+        async def stop_telegram_webhook_processors() -> None:  # pragma: no cover - event hook
+            for proc in processors:
+                await proc.stop()
     else:
         telegram_processor = None
 

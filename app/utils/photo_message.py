@@ -7,12 +7,12 @@ from aiogram.types import FSInputFile, InputMediaPhoto
 
 from app.config import settings
 from .message_patch import (
-    LOGO_PATH,
     append_privacy_hint,
     is_privacy_restricted_error,
     is_qr_message,
     prepare_privacy_safe_kwargs,
 )
+from app.utils.bot_registry import get_logo_for_bot
 
 logger = logging.getLogger(__name__)
 
@@ -21,14 +21,15 @@ RETRY_DELAY = 0.5
 
 
 def _resolve_media(message: types.Message):
+    logo_path = get_logo_for_bot(message.bot.id if message.bot else None)
     # Всегда используем логотип если включен режим логотипа,
     # кроме специальных случаев (QR сообщения)
     if settings.ENABLE_LOGO_MODE and not is_qr_message(message):
-        return FSInputFile(LOGO_PATH)
+        return FSInputFile(logo_path)
     # Только если режим логотипа выключен, используем фото из сообщения
     elif message.photo:
         return message.photo[-1].file_id
-    return FSInputFile(LOGO_PATH)
+    return FSInputFile(logo_path)
 
 
 def _get_language(callback: types.CallbackQuery) -> str | None:
@@ -157,8 +158,9 @@ async def edit_or_answer_photo(
                 pass
             try:
                 # Отправим как фото с логотипом
+                _fb_logo = get_logo_for_bot(callback.message.bot.id if callback.message.bot else None)
                 await callback.message.answer_photo(
-                    photo=media if isinstance(media, FSInputFile) else FSInputFile(LOGO_PATH),
+                    photo=media if isinstance(media, FSInputFile) else FSInputFile(_fb_logo),
                     caption=caption,
                     reply_markup=keyboard,
                     parse_mode=resolved_parse_mode,

@@ -83,23 +83,44 @@ async def debug_callback_handler(callback: types.CallbackQuery):
     logger.info(f"  - Username: {callback.from_user.username}")
 
 
-async def setup_bot() -> tuple[Bot, Dispatcher]:
-    
+async def setup_bot() -> tuple[list[Bot], Dispatcher]:
+
     try:
         await cache.connect()
         logger.info("Кеш инициализирован")
     except Exception as e:
         logger.warning(f"Кеш не инициализирован: {e}")
-    
+
+    from pathlib import Path
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
+    from app.utils import bot_registry
 
-    bot = Bot(
-        token=settings.BOT_TOKEN, 
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-    )
-    
-    maintenance_service.set_bot(bot)
+    _default = DefaultBotProperties(parse_mode=ParseMode.HTML)
+
+    primary_bot = Bot(token=settings.BOT_TOKEN, default=_default)
+    primary_bot_id = (await primary_bot.get_me()).id
+    bot_registry.register_bot(primary_bot_id, Path(settings.LOGO_FILE))
+    logger.info("Primary bot registered: id=%s", primary_bot_id)
+
+    all_bots: list[Bot] = [primary_bot]
+    for mirror_cfg in settings.get_mirror_bots():
+        try:
+            m_bot = Bot(token=mirror_cfg["token"], default=_default)
+            m_me = await m_bot.get_me()
+            bot_registry.register_bot(m_me.id, Path(mirror_cfg["logo"]))
+            all_bots.append(m_bot)
+            logger.info(
+                "Mirror bot registered: @%s id=%s logo=%s",
+                m_me.username, m_me.id, mirror_cfg["logo"],
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to init mirror bot (token %s...): %s",
+                mirror_cfg["token"][:10], exc,
+            )
+
+    maintenance_service.set_bot(primary_bot)
     logger.info("Бот установлен в maintenance_service")
     
     try:
@@ -213,7 +234,7 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
     logger.info("🛡️ GlobalErrorMiddleware активирован - бот защищен от устаревших callback queries")
     logger.info("Бот успешно настроен")
     
-    return bot, dp
+    return all_bots, dp
 
 
 async def shutdown_bot():

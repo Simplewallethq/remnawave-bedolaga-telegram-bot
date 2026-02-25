@@ -1807,7 +1807,7 @@ async def required_sub_channel_check(
 
             menu_text = await get_main_menu_text(user, texts, db)
 
-            from app.utils.message_patch import LOGO_PATH
+            from app.utils.bot_registry import get_logo_for_bot
             from aiogram.types import FSInputFile
 
             is_admin = settings.is_admin(user.telegram_id)
@@ -1840,7 +1840,7 @@ async def required_sub_channel_check(
             if settings.ENABLE_LOGO_MODE:
                 await bot.send_photo(
                     chat_id=query.from_user.id,
-                    photo=FSInputFile(LOGO_PATH),
+                    photo=FSInputFile(get_logo_for_bot(bot.id)),
                     caption=menu_text,
                     reply_markup=keyboard,
                     parse_mode="HTML",
@@ -1890,7 +1890,7 @@ async def required_sub_channel_check(
                     )
                     await state.set_state(RegistrationStates.waiting_for_referral_code)
             else:
-                from app.utils.message_patch import LOGO_PATH
+                from app.utils.bot_registry import get_logo_for_bot
                 from aiogram.types import FSInputFile
 
                 rules_text = await get_rules(language)
@@ -1898,7 +1898,7 @@ async def required_sub_channel_check(
                 if settings.ENABLE_LOGO_MODE:
                     await bot.send_photo(
                         chat_id=query.from_user.id,
-                        photo=FSInputFile(LOGO_PATH),
+                        photo=FSInputFile(get_logo_for_bot(bot.id)),
                         caption=rules_text,
                         reply_markup=get_rules_keyboard(language),
                     )

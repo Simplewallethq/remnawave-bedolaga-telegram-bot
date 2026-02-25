@@ -66,10 +66,9 @@ from app.external.remnawave_api import (
     UserStatus,
 )
 
+from app.utils.bot_registry import get_primary_logo
+
 logger = logging.getLogger(__name__)
-
-
-LOGO_PATH = Path(settings.LOGO_FILE)
 
 
 class MonitoringService:
@@ -94,15 +93,16 @@ class MonitoringService:
         if not self.bot:
             raise RuntimeError("Bot instance is not available")
 
+        logo_path = get_primary_logo()
         if (
             settings.ENABLE_LOGO_MODE
-            and LOGO_PATH.exists()
+            and logo_path.exists()
             and (text is None or len(text) <= 1000)
         ):
             try:
                 return await self.bot.send_photo(
                     chat_id=chat_id,
-                    photo=FSInputFile(LOGO_PATH),
+                    photo=FSInputFile(logo_path),
                     caption=text,
                     reply_markup=reply_markup,
                     parse_mode=parse_mode,

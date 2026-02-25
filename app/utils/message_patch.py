@@ -6,6 +6,7 @@ from aiogram.types import FSInputFile, InputMediaPhoto, Message
 
 from app.config import settings
 from app.localization.texts import get_texts
+from app.utils.bot_registry import get_logo_for_bot
 
 LOGO_PATH = Path(settings.LOGO_FILE)
 _PRIVACY_RESTRICTED_CODE = "BUTTON_USER_PRIVACY_RESTRICTED"
@@ -90,10 +91,11 @@ async def _answer_with_photo(self: Message, text: str = None, **kwargs):
         pass
     language = _get_language(self)
 
-    if LOGO_PATH.exists():
+    logo_path = get_logo_for_bot(self.bot.id if self.bot else None)
+    if logo_path.exists():
         try:
             # Отправляем caption как есть; при ошибке парсинга ниже сработает фоллбек
-            return await self.answer_photo(FSInputFile(LOGO_PATH), caption=text, **kwargs)
+            return await self.answer_photo(FSInputFile(logo_path), caption=text, **kwargs)
         except TelegramBadRequest as error:
             if is_privacy_restricted_error(error):
                 fallback_text = append_privacy_hint(text, language)
@@ -124,10 +126,11 @@ async def _edit_with_photo(self: Message, text: str, **kwargs):
             pass
         # Всегда используем логотип если включен режим логотипа,
         # кроме специальных случаев (QR сообщения)
-        if settings.ENABLE_LOGO_MODE and LOGO_PATH.exists() and not is_qr_message(self):
-            media = FSInputFile(LOGO_PATH)
-        elif is_qr_message(self) and LOGO_PATH.exists():
-            media = FSInputFile(LOGO_PATH)
+        logo_path = get_logo_for_bot(self.bot.id if self.bot else None)
+        if settings.ENABLE_LOGO_MODE and logo_path.exists() and not is_qr_message(self):
+            media = FSInputFile(logo_path)
+        elif is_qr_message(self) and logo_path.exists():
+            media = FSInputFile(logo_path)
         else:
             media = self.photo[-1].file_id
         media_kwargs = {"media": media, "caption": text}

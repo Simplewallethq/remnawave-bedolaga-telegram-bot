@@ -156,10 +156,11 @@ async def main():
                 stage.warning(f"Не удалось загрузить конфигурацию: {error}")
                 logger.error(f"❌ Не удалось загрузить конфигурацию: {error}")
 
-        bot = None
+        all_bots = None
         dp = None
         async with timeline.stage("Настройка бота", "🤖", success_message="Бот настроен") as stage:
-            bot, dp = await setup_bot()
+            all_bots, dp = await setup_bot()
+            bot = all_bots[0]
             stage.log("Кеш и FSM подготовлены")
 
         monitoring_service.bot = bot
@@ -380,7 +381,7 @@ async def main():
 
             if should_start_web_app:
                 web_app = create_unified_app(
-                    bot,
+                    all_bots,
                     dp,
                     payment_service,
                     enable_telegram_webhook=telegram_webhook_enabled,
@@ -427,6 +428,20 @@ async def main():
                     )
                     stage.log(f"Webhook установлен: {webhook_url}")
                     stage.log(f"Allowed updates: {', '.join(sorted(allowed_updates)) if allowed_updates else 'all'}")
+                    primary_path = settings.get_telegram_webhook_path()
+                    for idx, mirror_bot in enumerate(all_bots[1:], start=1):
+                        mirror_path = f"{primary_path}/mirror/{idx}"
+                        mirror_webhook_url = f"{settings.WEBHOOK_URL.rstrip('/')}{mirror_path}"
+                        try:
+                            await mirror_bot.set_webhook(
+                                url=mirror_webhook_url,
+                                secret_token=settings.WEBHOOK_SECRET_TOKEN,
+                                drop_pending_updates=settings.WEBHOOK_DROP_PENDING_UPDATES,
+                                allowed_updates=allowed_updates,
+                            )
+                            stage.log(f"Mirror webhook установлен: {mirror_webhook_url}")
+                        except Exception as mirror_exc:
+                            logger.error("Ошибка установки webhook для mirror бота %s: %s", mirror_bot.id, mirror_exc)
                     stage.success("Telegram webhook активен")
             else:
                 stage.skip("Режим webhook отключен")
@@ -477,7 +492,7 @@ async def main():
             success_message="Aiogram polling запущен",
         ) as stage:
             if polling_enabled:
-                polling_task = asyncio.create_task(dp.start_polling(bot, skip_updates=True))
+                polling_task = asyncio.create_task(dp.start_polling(*all_bots, skip_updates=True))
                 stage.log("skip_updates=True")
             else:
                 polling_task = None
@@ -660,13 +675,14 @@ async def main():
             except asyncio.CancelledError:
                 pass
         
-        if telegram_webhook_enabled and 'bot' in locals():
+        if telegram_webhook_enabled and all_bots:
             logger.info("ℹ️ Снятие Telegram webhook...")
-            try:
-                await bot.delete_webhook(drop_pending_updates=False)
-                logger.info("✅ Telegram webhook удалён")
-            except Exception as error:
-                logger.error(f"Ошибка удаления Telegram webhook: {error}")
+            for _b in all_bots:
+                try:
+                    await _b.delete_webhook(drop_pending_updates=False)
+                    logger.info("✅ Telegram webhook удалён для бота %s", _b.id)
+                except Exception as error:
+                    logger.error(f"Ошибка удаления Telegram webhook: {error}")
 
         if web_api_server:
             try:
@@ -675,12 +691,13 @@ async def main():
             except Exception as error:
                 logger.error(f"Ошибка остановки веб-API: {error}")
         
-        if 'bot' in locals():
-            try:
-                await bot.session.close()
-                logger.info("✅ Сессия бота закрыта")
-            except Exception as e:
-                logger.error(f"Ошибка закрытия сессии бота: {e}")
+        if all_bots:
+            for _b in all_bots:
+                try:
+                    await _b.session.close()
+                    logger.info("✅ Сессия бота %s закрыта", _b.id)
+                except Exception as e:
+                    logger.error(f"Ошибка закрытия сессии бота: {e}")
         
         logger.info("✅ Завершение работы бота завершено")
 

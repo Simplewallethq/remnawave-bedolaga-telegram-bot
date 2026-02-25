@@ -202,12 +202,13 @@ def create_telegram_router(
     dispatcher: Dispatcher,
     *,
     processor: TelegramWebhookProcessor | None = None,
+    webhook_path: str | None = None,
 ) -> APIRouter:
     router = APIRouter()
-    webhook_path = settings.get_telegram_webhook_path()
+    effective_path = webhook_path or settings.get_telegram_webhook_path()
     secret_token = settings.WEBHOOK_SECRET_TOKEN
 
-    @router.post(webhook_path)
+    @router.post(effective_path)
     async def telegram_webhook(request: Request) -> JSONResponse:
         if secret_token:
             header_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
@@ -240,7 +241,7 @@ def create_telegram_router(
             {
                 "status": "ok",
                 "mode": settings.get_bot_run_mode(),
-                "path": webhook_path,
+                "path": effective_path,
                 "webhook_configured": bool(settings.get_telegram_webhook_url()),
                 "queue_maxsize": settings.get_webhook_queue_maxsize(),
                 "workers": settings.get_webhook_worker_count(),
