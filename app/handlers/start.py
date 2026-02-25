@@ -1241,8 +1241,10 @@ async def complete_registration_from_callback(
         except Exception as e:
             logger.error(f"Ошибка отправки сообщения о бонусе кампании: {e}")
 
-    # Send Welcome Screen as per documentation (MENU_DOCUMENTATION.md)
-    welcome_text = (
+    # Send Welcome Screen (localized)
+    texts = get_texts(language)
+    welcome_text = texts.t(
+        "WELCOME_TEXT",
         "⛱ Привет, тебе уже доступна бесплатная подписка на 3 дня!\n\n"
         "Всего 5 минут — и у тебя будет подключен самый быстрый VPN.\n"
         "Нажми «✨ Активировать» и начнём."
@@ -1256,7 +1258,7 @@ async def complete_registration_from_callback(
         await edit_or_answer_photo(
             callback=callback,
             caption=welcome_text,
-            keyboard=get_welcome_keyboard(),
+            keyboard=get_welcome_keyboard(language=language),
             photo_path=image_path
         )
         await _send_pinned_message(callback.bot, db, user)
@@ -1487,8 +1489,10 @@ async def complete_registration(
         except Exception as e:
             logger.error(f"Ошибка отправки сообщения о бонусе кампании: {e}")
 
-    # Send Welcome Screen as per documentation (MENU_DOCUMENTATION.md)
-    welcome_text = (
+    # Send Welcome Screen (localized)
+    texts = get_texts(language)
+    welcome_text = texts.t(
+        "WELCOME_TEXT",
         "⛱ Привет, тебе уже доступна бесплатная подписка на 3 дня!\n\n"
         "Всего 5 минут — и у тебя будет подключен самый быстрый VPN.\n"
         "Нажми «✨ Активировать» и начнём."
@@ -1500,12 +1504,12 @@ async def complete_registration(
              await message.answer_photo(
                 photo=types.FSInputFile(image_path),
                 caption=welcome_text,
-                reply_markup=get_welcome_keyboard(),
+                reply_markup=get_welcome_keyboard(language=language),
              )
         else:
             await message.answer(
                 welcome_text,
-                reply_markup=get_welcome_keyboard(),
+                reply_markup=get_welcome_keyboard(language=language),
             )
         await _send_pinned_message(message.bot, db, user)
         logger.info(f"✅ Приветственный экран показан пользователю {user.telegram_id}")

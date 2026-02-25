@@ -747,9 +747,10 @@ async def activate_trial(
                 photo_path=image_path
             )
         else:
-            trial_success_text = (
-                f"{texts.TRIAL_ACTIVATED}\n\n⚠️ Ссылка генерируется, попробуйте перейти в раздел 'Моя подписка' через несколько секунд."
-            )
+            trial_success_text = texts.t(
+                "SUBSCRIPTION_LINK_GENERATING_NOTICE",
+                "{purchase_text}\n\nСсылка генерируется, перейдите в раздел 'Моя подписка' через несколько секунд.",
+            ).format(purchase_text=texts.TRIAL_ACTIVATED)
             trial_success_text += payment_note
             await callback.message.edit_text(
                 trial_success_text,

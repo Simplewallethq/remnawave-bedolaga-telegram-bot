@@ -1128,25 +1128,25 @@ async def get_main_menu_text(user, texts, db: AsyncSession):
     has_active_subscription = is_active and not is_trial
     trial_used = (subscription is not None)
 
-    base_text = "🏠 Главное меню\n"
+    base_text = texts.t("MAIN_MENU_TITLE", "🏠 Главное меню\n")
     
     date_fmt = "%Y-%m-%d %H:%M UTC"
     
     if trial_active and subscription.end_date:
         end_str = subscription.end_date.strftime(date_fmt)
-        base_text += f"Бесплатная подписка активна до {end_str}"
+        base_text += texts.t("MAIN_MENU_TRIAL_ACTIVE", "Бесплатная подписка активна до {end_date}").format(end_date=end_str)
     elif has_active_subscription and subscription.end_date:
         end_str = subscription.end_date.strftime(date_fmt)
-        base_text += f"Подписка активна до {end_str}"
+        base_text += texts.t("MAIN_MENU_SUBSCRIPTION_ACTIVE", "Подписка активна до {end_date}").format(end_date=end_str)
     elif not trial_used:
-         base_text += "Вам доступно 3 дня бесплатно 🎁"
+         base_text += texts.t("MAIN_MENU_TRIAL_AVAILABLE", "Вам доступно 3 дня бесплатно 🎁")
     elif is_trial and not is_active and subscription and subscription.end_date: # Expired trial
          end_str = subscription.end_date.strftime(date_fmt)
-         base_text += f"Бесплатная подписка закончилась {end_str}"
+         base_text += texts.t("MAIN_MENU_TRIAL_EXPIRED", "Бесплатная подписка закончилась {end_date}").format(end_date=end_str)
     else:
-         base_text += "Подписка не активна"
+         base_text += texts.t("MAIN_MENU_NO_SUBSCRIPTION", "Подписка не активна")
          
-    base_text += "\n\nЕсли что-то пошло не так введи /start"
+    base_text += texts.t("MAIN_MENU_RESTART_HINT", "\n\nЕсли что-то пошло не так введи /start")
 
     return base_text
 
@@ -1243,24 +1243,24 @@ async def handle_howto(
 
     texts = get_texts(user.language)
     
-    # Text from MENU_DOCUMENTATION.md for Screen 4
+    # Localized connection instructions
     connection_text = (
-        "Инструкция по подключению:\n\n"
-        "<b>1.</b> Скачай приложение <a href=\"https://happ.link/\">Happ</a>.\n"
-        "<b>2.</b> Нажми <b>«🔗 Подключиться»</b>.\n"
-        "<b>3.</b> В приложении нажми <b>«Подключить»</b>."
+        texts.t("HOWTO_TITLE", "Инструкция по подключению:\n\n")
+        + texts.t("HOWTO_STEP1", "<b>1.</b> Скачай приложение <a href=\"https://happ.link/\">Happ</a>.\n")
+        + texts.t("HOWTO_STEP2", "<b>2.</b> Нажми <b>«🔗 Подключиться»</b>.\n")
+        + texts.t("HOWTO_STEP3", "<b>3.</b> В приложении нажми <b>«Подключить»</b>.")
     )
     
     # State data for link visibility
     data = await state.get_data()
     show_link = data.get('howto_show_link', False)
     
-    keyboard = get_connection_keyboard(happ_link_shown=show_link, show_link_toggle=bool(user.subscription), subscription=user.subscription)
+    keyboard = get_connection_keyboard(happ_link_shown=show_link, show_link_toggle=bool(user.subscription), subscription=user.subscription, language=user.language)
     
     if show_link and user.subscription:
         link = get_display_subscription_link(user.subscription)
         if link:
-             connection_text += f"\n\n🔗 <b>Ваша ссылка подключения:</b>\n<code>{link}</code>"
+             connection_text += texts.t("HOWTO_LINK_LABEL", "\n\n🔗 <b>Ваша ссылка подключения:</b>\n") + f"<code>{link}</code>"
     
     image_path = os.path.join("images", "connection_screen.png")
     if not os.path.exists(image_path):
@@ -1283,12 +1283,13 @@ async def handle_connection_link_toggle(
 
 
 async def handle_profile(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
+    texts = get_texts(db_user.language)
     reg_date = format_local_datetime(db_user.created_at, "%Y-%m-%d")
     
     text = (
-        f"👤 Профиль\n\n"
-        f"ID пользователя: {db_user.telegram_id}\n"
-        f"Дата регистрации: {reg_date}"
+        texts.t("PROFILE_TITLE", "👤 Профиль\n\n")
+        + texts.t("PROFILE_USER_ID", "ID пользователя: {user_id}").format(user_id=db_user.telegram_id) + "\n"
+        + texts.t("PROFILE_REG_DATE", "Дата регистрации: {reg_date}").format(reg_date=reg_date)
     )
     
     image_path = os.path.join("images", "profile_screen.png")
@@ -1298,13 +1299,14 @@ async def handle_profile(callback: types.CallbackQuery, db_user: User, db: Async
     await edit_or_answer_photo(
         callback,
         text, 
-        get_profile_keyboard(), 
+        get_profile_keyboard(language=db_user.language), 
         parse_mode="HTML",
         photo_path=image_path
     )
     await callback.answer()
 
 async def handle_referral(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
+    texts = get_texts(db_user.language)
     stats = await get_user_referral_stats(db, db_user.id)
     
     count = stats.get("invited_count", 0)
@@ -1314,15 +1316,15 @@ async def handle_referral(callback: types.CallbackQuery, db_user: User, db: Asyn
     referral_link = f"https://t.me/{bot.username}?start=ref_{db_user.telegram_id}"
     
     text = (
-        f"🤝 Реферальная программа\n\n"
-        f"👥 Приглашено друзей: {count}\n"
-        f"💰 Заработано: {int(amount)}₽\n\n"
-        f"Ваша реферальная ссылка:\n"
-        f"<code>{referral_link}</code>\n\n"
-        f"Получайте 20₽ за каждого друга, который активирует подписку!"
+        texts.t("REFERRAL_TITLE", "🤝 Реферальная программа\n\n")
+        + texts.t("REFERRAL_INVITED", "👥 Приглашено друзей: {count}").format(count=count) + "\n"
+        + texts.t("REFERRAL_EARNED", "💰 Заработано: {amount}₽").format(amount=int(amount)) + "\n\n"
+        + texts.t("REFERRAL_YOUR_LINK", "Ваша реферальная ссылка:") + "\n"
+        + f"<code>{referral_link}</code>\n\n"
+        + texts.t("REFERRAL_REWARD", "Получайте 20₽ за каждого друга, который активирует подписку!")
     )
     
-    invite_text = f"🔥 Лови 3 дня бесплатного VPN!\n{referral_link}"
+    invite_text = texts.t("REFERRAL_INVITE_TEXT", "🔥 Лови 3 дня бесплатного VPN!\n{link}").format(link=referral_link)
     
     image_path = os.path.join("images", "referral_screen.png")
     if not os.path.exists(image_path):
@@ -1331,19 +1333,22 @@ async def handle_referral(callback: types.CallbackQuery, db_user: User, db: Asyn
     await edit_or_answer_photo(
         callback,
         text, 
-        get_referral_keyboard(referral_link, invite_text), 
+        get_referral_keyboard(referral_link, invite_text, language=db_user.language), 
         parse_mode="HTML",
         photo_path=image_path
     )
     await callback.answer()
 
 async def handle_copy_referral_link(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
+    texts = get_texts(db_user.language)
     bot = await callback.bot.get_me()
     referral_link = f"https://t.me/{bot.username}?start=ref_{db_user.telegram_id}"
-    await callback.message.answer(f"Ваша ссылка:\n<code>{referral_link}</code>", parse_mode="HTML")
+    copy_text = texts.t("REFERRAL_COPY_LABEL", "Ваша ссылка:\n<code>{link}</code>").format(link=referral_link)
+    await callback.message.answer(copy_text, parse_mode="HTML")
     await callback.answer()
 
 async def handle_balance(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
+    texts = get_texts(db_user.language)
     balance = db_user.balance_kopeks / 100
     
     # Estimate days (approx 10 rub/day)
@@ -1361,23 +1366,24 @@ async def handle_balance(callback: types.CallbackQuery, db_user: User, db: Async
     if last_deposit:
          date_str = format_local_datetime(last_deposit.created_at, "%d.%m.%Y")
          amount_dep = last_deposit.amount_kopeks / 100
-         last_topup_text = f"\n\nПоследнее пополнение: {date_str} на {int(amount_dep)}₽"
+         last_topup_text = texts.t("BALANCE_LAST_TOPUP", "\n\nПоследнее пополнение: {date} на {amount}₽").format(date=date_str, amount=int(amount_dep))
     
     text = (
-        f"💳 Ваш баланс\n\n"
-        f"Текущий баланс: {int(balance)}₽\n"
-        f"Это ~{estimated_days} дней подписки"
-        f"{last_topup_text}"
+        texts.t("BALANCE_TITLE", "💳 Ваш баланс\n\n")
+        + texts.t("BALANCE_CURRENT", "Текущий баланс: {amount}₽").format(amount=int(balance)) + "\n"
+        + texts.t("BALANCE_ESTIMATED_DAYS", "Это ~{days} дней подписки").format(days=estimated_days)
+        + last_topup_text
     )
     
     image_path = os.path.join("images", "balance_screen.png")
     if not os.path.exists(image_path):
          image_path = None
 
-    await edit_or_answer_photo(callback, text, get_balance_keyboard(), parse_mode="HTML", photo_path=image_path)
+    await edit_or_answer_photo(callback, text, get_balance_keyboard(language=db_user.language), parse_mode="HTML", photo_path=image_path)
     await callback.answer()
 
 async def handle_purchases_history(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
+    texts = get_texts(db_user.language)
     # Retrieve history
     transactions = await get_user_transactions(db, db_user.id, limit=10)
     lines = []
@@ -1389,26 +1395,23 @@ async def handle_purchases_history(callback: types.CallbackQuery, db_user: User,
             lines.append(f"{date_str} {type_icon} {amt:.0f}₽")
     
     if not lines:
-        lines.append("История пуста")
+        lines.append(texts.t("HISTORY_EMPTY", "История пуста"))
         
-    history_text = "📜 Последние операции:\n\n" + "\n".join(lines)
+    history_text = texts.t("HISTORY_TITLE", "📜 Последние операции:\n\n") + "\n".join(lines)
     await callback.answer(history_text, show_alert=True)
 
 async def handle_support(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
+    texts = get_texts(db_user.language)
     text = (
-        "🛠 Поддержка\n\n"
-        "Возникли вопросы или проблемы?\n"
-        "Свяжитесь с нашей службой поддержки:\n\n"
-        "📧 Email: support@letovpn.com\n"
-        "💬 Telegram: @letovpn_support\n\n"
-        "Мы отвечаем в течение 24 часов."
+        texts.t("SUPPORT_TITLE", "🛠 Поддержка\n\n")
+        + texts.t("SUPPORT_TEXT", "Возникли вопросы или проблемы?\nСвяжитесь с нашей службой поддержки:\n\n📧 Email: support@letovpn.com\n💬 Telegram: @letovpn_support\n\nМы отвечаем в течение 24 часов.")
     )
     
     image_path = os.path.join("images", "support_screen.png")
     if not os.path.exists(image_path):
          image_path = None
 
-    await edit_or_answer_photo(callback, text, get_support_keyboard(), parse_mode="HTML", photo_path=image_path)
+    await edit_or_answer_photo(callback, text, get_support_keyboard(language=db_user.language), parse_mode="HTML", photo_path=image_path)
     await callback.answer()
 
 

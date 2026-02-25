@@ -2739,13 +2739,14 @@ def get_admin_ticket_reply_cancel_keyboard(language: str = DEFAULT_LANGUAGE) -> 
 # NEW MENUS IMPLEMENTATION (Based on MENU_DOCUMENTATION.md)
 # =================================================================================================
 
-def get_welcome_keyboard() -> InlineKeyboardMarkup:
+def get_welcome_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """
     Экран 1: Приветственный экран
     """
+    texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✨ Активировать", callback_data="trial_activate")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("ACTIVATE_TRIAL_BUTTON", "✨ Активировать"), callback_data="trial_activate")],
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
     ])
 
 def get_new_main_menu_keyboard(
@@ -2762,28 +2763,36 @@ def get_new_main_menu_keyboard(
     texts = get_texts(language)
     keyboard = []
     
-    # Всегда отображается баланс
-    keyboard.append([InlineKeyboardButton(text=f"💳 Баланс: {int(balance_rub)}₽", callback_data="balance")])
+    # Balance button
+    keyboard.append([InlineKeyboardButton(
+        text=texts.t("MENU_BALANCE_BUTTON", "💳 Баланс: {balance}₽").format(balance=int(balance_rub)),
+        callback_data="balance"
+    )])
     
     if not trial_used and not trial_active and not has_active_subscription:
-        # Если trial НЕ активирован и нет подписки
-        keyboard.append([InlineKeyboardButton(text="🎁 3 дня бесплатно", callback_data="trial_activate")])
-        keyboard.append([InlineKeyboardButton(text="⚙️ Подключить", callback_data="howto")])
+        keyboard.append([InlineKeyboardButton(
+            text=texts.t("MENU_TRIAL_BUTTON", "🎁 3 дня бесплатно"),
+            callback_data="trial_activate"
+        )])
+        keyboard.append([InlineKeyboardButton(
+            text=texts.t("MENU_CONNECT_BUTTON", "⚙️ Подключить"),
+            callback_data="howto"
+        )])
     elif trial_active or has_active_subscription:
-        # Если trial активирован или есть подписка
-        keyboard.append([InlineKeyboardButton(text="⚙️ Подключить", callback_data="howto")])
+        keyboard.append([InlineKeyboardButton(
+            text=texts.t("MENU_CONNECT_BUTTON", "⚙️ Подключить"),
+            callback_data="howto"
+        )])
         
-    # Нижний ряд кнопок (всегда)
     keyboard.append([
-        InlineKeyboardButton(text="📦 Подписка", callback_data="subscription"),
-        InlineKeyboardButton(text="🤝 Рефералка", callback_data="referral")
+        InlineKeyboardButton(text=texts.t("MENU_SUBSCRIPTION_BUTTON", "📦 Подписка"), callback_data="subscription"),
+        InlineKeyboardButton(text=texts.t("MENU_REFERRAL_BUTTON", "🤝 Рефералка"), callback_data="referral")
     ])
     keyboard.append([
-        InlineKeyboardButton(text="🛠 Поддержка", callback_data="support"),
-        InlineKeyboardButton(text="👤 Профиль", callback_data="profile")
+        InlineKeyboardButton(text=texts.t("MENU_SUPPORT_BUTTON", "🛠 Поддержка"), callback_data="support"),
+        InlineKeyboardButton(text=texts.t("MENU_PROFILE_BUTTON", "👤 Профиль"), callback_data="profile")
     ])
     
-    # Кнопка админ панели для администраторов
     if is_admin:
         keyboard.append([
             InlineKeyboardButton(text=texts.MENU_ADMIN, callback_data="admin_panel")
@@ -2791,10 +2800,11 @@ def get_new_main_menu_keyboard(
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def get_activation_keyboard(happ_link_shown: bool = False) -> InlineKeyboardMarkup:
+def get_activation_keyboard(happ_link_shown: bool = False, language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """
     Экран 3: Экран активации подписки
     """
+    texts = get_texts(language)
     buttons = [
         [
             InlineKeyboardButton(text="🍎 iPhone", url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"),
@@ -2807,32 +2817,32 @@ def get_activation_keyboard(happ_link_shown: bool = False) -> InlineKeyboardMark
     ]
     
     if happ_link_shown:
-        buttons.append([InlineKeyboardButton(text="🙈 Скрыть ссылку", callback_data="hide_link_activated")])
+        buttons.append([InlineKeyboardButton(text=texts.t("HIDE_LINK_BUTTON", "🙈 Скрыть ссылку"), callback_data="hide_link_activated")])
     else:
-        buttons.append([InlineKeyboardButton(text="🔗 Показать ссылку", callback_data="show_link_activated")])
+        buttons.append([InlineKeyboardButton(text=texts.t("SHOW_LINK_BUTTON", "🔗 Показать ссылку"), callback_data="show_link_activated")])
         
-    buttons.append([InlineKeyboardButton(text="🎥 Видео инструкция", url="https://t.me/+ua95WK9beKZkNDAy")])
-    buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+    buttons.append([InlineKeyboardButton(text=texts.t("VIDEO_INSTRUCTION_BUTTON", "🎥 Видео инструкция"), url="https://t.me/+ua95WK9beKZkNDAy")])
+    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: bool = True, subscription=None) -> InlineKeyboardMarkup:
+def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: bool = True, subscription=None, language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """
     Экран 4: Экран подключения
     """
+    texts = get_texts(language)
     buttons = []
     
     # Add "Connect" button if user has active subscription
     if subscription:
         subscription_link = get_display_subscription_link(subscription)
         if subscription_link:
-            # Use callback to show subscription link (handles happ:// protocol correctly)
             buttons.append([InlineKeyboardButton(
-                text="🔗 Подключиться",
+                text=texts.t("CONNECT_BUTTON", "🔗 Подключиться"),
                 callback_data="open_subscription_link"
             )])
     
-    # App download buttons
+    # App download buttons (OS names stay as-is, no translation needed)
     buttons.extend([
         [
             InlineKeyboardButton(text="🍎 iPhone", url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"),
@@ -2846,55 +2856,57 @@ def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: boo
     
     if show_link_toggle:
         if happ_link_shown:
-            buttons.append([InlineKeyboardButton(text="🙈 Скрыть ссылку", callback_data="hide_link_howto")])
+            buttons.append([InlineKeyboardButton(text=texts.t("HIDE_LINK_BUTTON", "🙈 Скрыть ссылку"), callback_data="hide_link_howto")])
         else:
-            buttons.append([InlineKeyboardButton(text="🔗 Показать ссылку", callback_data="show_link_howto")])
+            buttons.append([InlineKeyboardButton(text=texts.t("SHOW_LINK_BUTTON", "🔗 Показать ссылку"), callback_data="show_link_howto")])
         
-    buttons.append([InlineKeyboardButton(text="🎥 Видео инструкция", url="https://t.me/+ua95WK9beKZkNDAy")])
-    buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+    buttons.append([InlineKeyboardButton(text=texts.t("VIDEO_INSTRUCTION_BUTTON", "🎥 Видео инструкция"), url="https://t.me/+ua95WK9beKZkNDAy")])
+    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_subscription_menu_keyboard() -> InlineKeyboardMarkup:
+def get_subscription_menu_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """
     Экран 5: Меню подписки
     """
+    texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить дни", callback_data="sub_add_days")],
-        [InlineKeyboardButton(text="➕ Добавить устройства", callback_data="sub_add_devices")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("SUB_ADD_DAYS_BUTTON", "➕ Добавить дни"), callback_data="sub_add_days")],
+        [InlineKeyboardButton(text=texts.t("SUB_ADD_DEVICES_BUTTON", "➕ Добавить устройства"), callback_data="sub_add_devices")],
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
     ])
 
-def get_topup_keyboard() -> InlineKeyboardMarkup:
+def get_topup_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """
     Экран 6: Меню пополнения баланса
     """
+    texts = get_texts(language)
     buttons = [
         [
-            InlineKeyboardButton(text="1 день • 10₽", callback_data="topup_days:1"),
-            InlineKeyboardButton(text="5 дней • 42₽ -16%", callback_data="topup_days:5")
+            InlineKeyboardButton(text=texts.t("TOPUP_1DAY", "1 день • 10₽"), callback_data="topup_days:1"),
+            InlineKeyboardButton(text=texts.t("TOPUP_5DAYS", "5 дней • 42₽ -16%"), callback_data="topup_days:5")
         ],
         [
-            InlineKeyboardButton(text="15 дней • 105₽ -30%", callback_data="topup_days:15"),
-            InlineKeyboardButton(text="Месяц • 180₽", callback_data="topup_days:30")
+            InlineKeyboardButton(text=texts.t("TOPUP_15DAYS", "15 дней • 105₽ -30%"), callback_data="topup_days:15"),
+            InlineKeyboardButton(text=texts.t("TOPUP_1MONTH", "Месяц • 180₽"), callback_data="topup_days:30")
         ],
         [
-            InlineKeyboardButton(text="3 месяца • 486₽", callback_data="topup_days:90"),
-            InlineKeyboardButton(text="6 месяцев • 900₽", callback_data="topup_days:180")
+            InlineKeyboardButton(text=texts.t("TOPUP_3MONTHS", "3 месяца • 486₽"), callback_data="topup_days:90"),
+            InlineKeyboardButton(text=texts.t("TOPUP_6MONTHS", "6 месяцев • 900₽"), callback_data="topup_days:180")
         ],
         [
-            InlineKeyboardButton(text="Год • 1642₽", callback_data="topup_days:365")
-        ], 
-        [InlineKeyboardButton(text="✍️ Свое кол-во дней", callback_data="topup_custom")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            InlineKeyboardButton(text=texts.t("TOPUP_1YEAR", "Год • 1642₽"), callback_data="topup_days:365")
+        ],
+        [InlineKeyboardButton(text=texts.t("TOPUP_CUSTOM", "✍️ Свое кол-во дней"), callback_data="topup_custom")],
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
     ]
-    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_device_selection_keyboard(current_selected: int = 1, back_callback: str = "subscription") -> InlineKeyboardMarkup:
+def get_device_selection_keyboard(current_selected: int = 1, back_callback: str = "subscription", language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """
     Экран 7: Выбор устройств
     """
+    texts = get_texts(language)
     buttons = []
     row = []
     for i in range(1, 11):
@@ -2902,7 +2914,6 @@ def get_device_selection_keyboard(current_selected: int = 1, back_callback: str 
         if i > 1:
             extra_price = (70 * (i - 1)) / 3
             
-        text = ""
         if i == current_selected:
             text = f"✅ {i} (вкл.)"
         else:
@@ -2919,19 +2930,19 @@ def get_device_selection_keyboard(current_selected: int = 1, back_callback: str 
     if row:
         buttons.append(row)
 
-    buttons.append([InlineKeyboardButton(text="Далее ➡️", callback_data="device_selection_confirm")])
-            
-    buttons.append([InlineKeyboardButton(text="← Назад", callback_data=back_callback)])
-    buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+    buttons.append([InlineKeyboardButton(text=texts.t("NEXT_BUTTON", "Далее ➡️"), callback_data="device_selection_confirm")])
+    buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)])
+    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, back_callback: str = "topup") -> InlineKeyboardMarkup:
+def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, back_callback: str = "topup", language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """
     Экран 8: Методы оплаты (упрощенная версия для новых меню)
     Динамически показывает только доступные методы оплаты
     """
     from app.config import settings
+    texts = get_texts(language)
     
     buttons = []
     
@@ -2988,57 +2999,59 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
     
     # If no payment methods available
     if not buttons:
-        buttons.append([InlineKeyboardButton(text="⚠️ Способы оплаты временно недоступны", callback_data="payment_methods_unavailable")])
+        buttons.append([InlineKeyboardButton(text=texts.t("PAYMENT_UNAVAILABLE", "⚠️ Способы оплаты временно недоступны"), callback_data="payment_methods_unavailable")])
     
     # Add back and main menu buttons
-    buttons.append([InlineKeyboardButton(text="← Назад", callback_data=back_callback)])
-    buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
-    
+    buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)])
+    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_profile_keyboard() -> InlineKeyboardMarkup:
+def get_profile_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """
     Экран 9: Профиль пользователя
     """
+    texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏷 Промокод", callback_data="profile_promo")],
-        [InlineKeyboardButton(text="🌐 Язык", callback_data="profile_language")],
-        [InlineKeyboardButton(text="ℹ️ Инфо", callback_data="menu_info")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("MENU_PROMOCODE", "🏷 Промокод"), callback_data="profile_promo")],
+        [InlineKeyboardButton(text=texts.t("MENU_LANGUAGE", "🌐 Язык"), callback_data="profile_language")],
+        [InlineKeyboardButton(text=texts.t("MENU_INFO", "ℹ️ Инфо"), callback_data="menu_info")],
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
     ])
 
-def get_referral_keyboard(referral_link: str, invite_text: str = "") -> InlineKeyboardMarkup:
+def get_referral_keyboard(referral_link: str, invite_text: str = "", language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """
     Экран 10: Реферальная программа
     """
+    texts = get_texts(language)
     url = f"tg://msg_url?url={referral_link}"
     if invite_text:
-        # Simple simple append, assuming nice chars
         url += f"&text={invite_text}"
         
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📤 Поделиться ссылкой", url=url)],
-        [InlineKeyboardButton(text="📋 Скопировать ссылку", callback_data="copy_referral_link")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("SHARE_REFERRAL_BUTTON", "📤 Поделиться ссылкой"), url=url)],
+        [InlineKeyboardButton(text=texts.t("COPY_REFERRAL_BUTTON", "📋 Скопировать ссылку"), callback_data="copy_referral_link")],
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
     ])
 
-def get_balance_keyboard() -> InlineKeyboardMarkup:
+def get_balance_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """
     Экран 11: Баланс
     """
+    texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📜 История покупок", callback_data="purchases_history")],
-        [InlineKeyboardButton(text="💰 Пополнить", callback_data="topup")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("BALANCE_HISTORY_BUTTON", "📜 История покупок"), callback_data="purchases_history")],
+        [InlineKeyboardButton(text=texts.t("BALANCE_TOPUP_BUTTON", "💰 Пополнить"), callback_data="topup")],
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
     ])
 
-def get_support_keyboard() -> InlineKeyboardMarkup:
+def get_support_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """
     Экран 12: Поддержка
     """
+    texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Написать в поддержку", url="https://t.me/letovpn_support")],
-        [InlineKeyboardButton(text="📚 База знаний", url="https://help.letovpn.com")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("CONTACT_SUPPORT_BUTTON", "💬 Написать в поддержку"), url="https://t.me/letovpn_support")],
+        [InlineKeyboardButton(text=texts.t("FAQ_BUTTON", "📚 База знаний"), url="https://help.letovpn.com")],
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
     ])
 
