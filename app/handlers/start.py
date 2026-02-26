@@ -1189,7 +1189,7 @@ async def complete_registration_from_callback(
             language=language,
             referred_by_id=referrer_id,
             referral_code=referral_code,
-            bot_id=bot.id,
+            bot_id=callback.bot.id if callback.bot else None,
         )
         await db.refresh(user, ['subscription'])
     else:
@@ -1415,7 +1415,7 @@ async def complete_registration(
             language=language,
             referred_by_id=referrer_id,
             referral_code=referral_code,
-            bot_id=bot.id,
+            bot_id=message.bot.id if message.bot else None,
         )
         await db.refresh(user, ['subscription'])
     else:
@@ -1875,7 +1875,7 @@ async def required_sub_channel_check(
                         last_name=query.from_user.last_name,
                         language=language,
                         referral_code=referral_code,
-                        bot_id=bot.id,
+                        bot_id=query.bot.id if query.bot else None,
                     )
 
                     await bot.send_message(
