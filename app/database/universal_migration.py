@@ -3165,6 +3165,20 @@ async def ensure_user_last_pinned_column():
         logger.error(f"Ошибка добавления поля last_pinned_message_id: {e}")
         return False
 
+async def ensure_user_bot_id_column():
+    try:
+        async with engine.begin() as conn:
+            if not await check_column_exists("users", "bot_id"):
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN bot_id BIGINT NULL")
+                )
+        logger.info("✅ Поле bot_id у пользователей готово")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления поля bot_id: {e}")
+        return False
+
+
 async def add_media_fields_to_broadcast_history():
     logger.info("=== ДОБАВЛЕНИЕ ПОЛЕЙ МЕДИА В BROADCAST_HISTORY ===")
     
@@ -4868,7 +4882,14 @@ async def run_universal_migration():
             logger.info("✅ Колонка last_pinned_message_id добавлена")
         else:
             logger.warning("⚠️ Не удалось обновить колонку last_pinned_message_id")
-        
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ BOT_ID ДЛЯ ПОЛЬЗОВАТЕЛЕЙ ===")
+        bot_id_ready = await ensure_user_bot_id_column()
+        if bot_id_ready:
+            logger.info("✅ Колонка bot_id добавлена")
+        else:
+            logger.warning("⚠️ Не удалось добавить колонку bot_id")
+
         logger.info("=== ДОБАВЛЕНИЕ МЕДИА ПОЛЕЙ В BROADCAST_HISTORY ===")
         media_fields_added = await add_media_fields_to_broadcast_history()
         if media_fields_added:
@@ -5166,6 +5187,7 @@ async def check_migration_status():
         )
 
         status["users_last_pinned_column"] = await check_column_exists('users', 'last_pinned_message_id')
+        status["users_bot_id_column"] = await check_column_exists('users', 'bot_id')
         
         async with engine.begin() as conn:
             duplicates_check = await conn.execute(text("""
@@ -5193,6 +5215,7 @@ async def check_migration_status():
             "pinned_messages_position_column": "Позиция закрепа (до/после меню)",
             "pinned_messages_start_mode_column": "Режим отправки закрепа при /start",
             "users_last_pinned_column": "Колонка last_pinned_message_id у пользователей",
+            "users_bot_id_column": "Колонка bot_id у пользователей",
             "broadcast_history_media_fields": "Медиа поля в broadcast_history",
             "subscription_conversions_table": "Таблица конверсий подписок",
             "subscription_events_table": "Таблица событий подписок",

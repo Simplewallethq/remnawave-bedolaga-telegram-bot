@@ -690,6 +690,7 @@ class User(Base):
     user_promo_groups = relationship("UserPromoGroup", back_populates="user", cascade="all, delete-orphan")
     poll_responses = relationship("PollResponse", back_populates="user")
     last_pinned_message_id = Column(Integer, nullable=True)
+    bot_id = Column(BigInteger, nullable=True)
 
     @property
     def balance_rubles(self) -> float:

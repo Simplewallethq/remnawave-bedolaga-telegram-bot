@@ -190,7 +190,8 @@ async def create_user_no_commit(
     last_name: str = None,
     language: str = "ru",
     referred_by_id: int = None,
-    referral_code: str = None
+    referral_code: str = None,
+    bot_id: int = None,
 ) -> User:
     """
     Создает пользователя без немедленного коммита для пакетной обработки
@@ -216,6 +217,7 @@ async def create_user_no_commit(
         has_had_paid_subscription=False,
         has_made_first_topup=False,
         promo_group_id=promo_group_id,
+        bot_id=bot_id,
     )
 
     db.add(user)
@@ -241,7 +243,8 @@ async def create_user(
     last_name: str = None,
     language: str = "ru",
     referred_by_id: int = None,
-    referral_code: str = None
+    referral_code: str = None,
+    bot_id: int = None,
 ) -> User:
     
     if not referral_code:
@@ -267,6 +270,7 @@ async def create_user(
             has_had_paid_subscription=False,
             has_made_first_topup=False,
             promo_group_id=promo_group_id,
+            bot_id=bot_id,
         )
 
         db.add(user)
