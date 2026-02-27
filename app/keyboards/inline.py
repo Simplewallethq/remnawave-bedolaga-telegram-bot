@@ -2807,12 +2807,12 @@ def get_activation_keyboard(happ_link_shown: bool = False, language: str = DEFAU
     texts = get_texts(language)
     buttons = [
         [
-            InlineKeyboardButton(text="🍎 iPhone", url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"),
-            InlineKeyboardButton(text="🤖 Android", url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru")
+            InlineKeyboardButton(text="🍎 iOS (RU)", url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"),
+            InlineKeyboardButton(text="🍎 iOS (WORLD)", url="https://apps.apple.com/app/happ-proxy-utility/id6504287215")
         ],
         [
-            InlineKeyboardButton(text="💻 Windows", url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"),
-            InlineKeyboardButton(text="🍎 macOS", url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973")
+            InlineKeyboardButton(text="🤖 Android", url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru"),
+            InlineKeyboardButton(text="💻 Windows", url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe")
         ]
     ]
     
@@ -2845,12 +2845,12 @@ def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: boo
     # App download buttons (OS names stay as-is, no translation needed)
     buttons.extend([
         [
-            InlineKeyboardButton(text="🍎 iPhone", url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"),
-            InlineKeyboardButton(text="🤖 Android", url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru")
+            InlineKeyboardButton(text="🍎 iOS (RU)", url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"),
+            InlineKeyboardButton(text="🍎 iOS (WORLD)", url="https://apps.apple.com/app/happ-proxy-utility/id6504287215")
         ],
         [
-            InlineKeyboardButton(text="💻 Windows", url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"),
-            InlineKeyboardButton(text="🍎 macOS", url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973")
+            InlineKeyboardButton(text="🤖 Android", url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru"),
+            InlineKeyboardButton(text="💻 Windows", url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe")
         ]
     ])
     
