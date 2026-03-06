@@ -972,7 +972,7 @@ def get_subscription_keyboard(
 
         if not is_trial:
             keyboard.append([
-                InlineKeyboardButton(text=texts.MENU_EXTEND_SUBSCRIPTION, callback_data="subscription_extend")
+                build_miniapp_or_callback_button(text=texts.MENU_EXTEND_SUBSCRIPTION, callback_data="subscription_extend")
             ])
             keyboard.append([
                 InlineKeyboardButton(
@@ -996,7 +996,7 @@ def get_subscription_keyboard(
         # If subscription is expired, show activate button
         if subscription_is_expired:
             keyboard.append([
-                InlineKeyboardButton(
+                build_miniapp_or_callback_button(
                     text=texts.t("ACTIVATE_SUBSCRIPTION_BUTTON", "🚀 Активировать подписку"),
                     callback_data="menu_buy",
                 )
@@ -1004,13 +1004,13 @@ def get_subscription_keyboard(
     else:
         # No subscription — show Extend + Activate buttons
         keyboard.append([
-            InlineKeyboardButton(
+            build_miniapp_or_callback_button(
                 text=texts.MENU_EXTEND_SUBSCRIPTION,
                 callback_data="subscription_extend",
             )
         ])
         keyboard.append([
-            InlineKeyboardButton(
+            build_miniapp_or_callback_button(
                 text=texts.t("ACTIVATE_SUBSCRIPTION_BUTTON", "🚀 Активировать подписку"),
                 callback_data="menu_buy",
             )
