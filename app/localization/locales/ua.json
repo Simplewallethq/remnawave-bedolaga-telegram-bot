@@ -1552,5 +1552,19 @@
   "POLL_EMPTY": "Опитування поки недоступне.",
   "POLL_ERROR": "Не вдалося обробити опитування. Спробуйте пізніше.",
   "POLL_COMPLETED": "🙏 Дякуємо за участь в опитуванні!",
-  "POLL_REWARD_GRANTED": "Нагороду {amount} зараховано на ваш баланс."
+  "POLL_REWARD_GRANTED": "Нагороду {amount} зараховано на ваш баланс.",
+  "ONBOARDING_DEVICE_SELECTION_TEXT": "Обери пристрій та підключайся безкоштовно.\nЦе займе менше 30 секунд.",
+  "ONBOARDING_CONNECTION_TEXT": "Встанови додаток Happ за кнопкою нижче.\n\nПісля встановлення натисни «Підключитись» — все налаштується автоматично.",
+  "ONBOARDING_POST_CONNECT_TEXT": "Натисни 🔗 Відкрити Happ → у додатку обери Підключити (займе 5–10 сек).\n\nПовернись сюди:\n\nЯкщо все гаразд — натисни Я підключився. Якщо не вийшло — обери Ручне підключення або Підтримка.",
+  "ONBOARDING_MANUAL_LINK_TEXT": "🔐 Відкрий Happ і натисни «Підключити».\nЦе займе 5–10 секунд.\n\nДля ручного підключення скопіюй ключ та додай його до Happ\n\n",
+  "ONBOARDING_CONNECT_FREE_BUTTON": "🚀 Підключитись безкоштовно",
+  "ONBOARDING_CONNECT_BUTTON": "🚀 Підключитись",
+  "ONBOARDING_OPEN_HAPP_BUTTON": "🔗 Відкрити Happ",
+  "ONBOARDING_CONNECTED_BUTTON": "✅ Я підключився",
+  "ONBOARDING_MANUAL_LINK_BUTTON": "🔗 Ручне підключення",
+  "ONBOARDING_SUPPORT_BUTTON": "💬 Підтримка",
+  "ONBOARDING_DOWNLOAD_HAPP_IOS_RU": "🍎 Завантажити Happ (Apple ID Росія)",
+  "ONBOARDING_DOWNLOAD_HAPP_IOS_WORLD": "🍎 Завантажити Happ (Apple ID International)",
+  "ONBOARDING_DOWNLOAD_HAPP_ANDROID": "🤖 Завантажити Happ",
+  "ONBOARDING_DOWNLOAD_HAPP_WINDOWS": "💻 Завантажити Happ"
 }

@@ -548,12 +548,14 @@ class ReportingService:
         )
         active_paid_users = int(active_paid_q.scalar() or 0)
 
+        # Используем поле has_connected_to_vpn из таблицы User
         never_connected_q = await session.execute(
-            select(func.count(func.distinct(Subscription.user_id))).where(
-                or_(
-                    Subscription.connected_squads.is_(None),
-                    func.jsonb_array_length(cast(Subscription.connected_squads, JSONB)) == 0,
-                )
+            select(func.count(func.distinct(User.id)))
+            .join(Subscription, User.id == Subscription.user_id)
+            .where(
+                User.has_connected_to_vpn == false(),
+                Subscription.status == SubscriptionStatus.ACTIVE.value,
+                Subscription.end_date > now_utc,
             )
         )
         never_connected_users = int(never_connected_q.scalar() or 0)

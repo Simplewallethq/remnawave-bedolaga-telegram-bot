@@ -4569,6 +4569,37 @@ async def add_promocode_promo_group_column() -> bool:
         return False
 
 
+async def add_user_has_connected_to_vpn_column() -> bool:
+    """Добавляет колонку has_connected_to_vpn в таблицу users."""
+    column_exists = await check_column_exists('users', 'has_connected_to_vpn')
+    if column_exists:
+        logger.info("Колонка has_connected_to_vpn уже существует в users")
+        return True
+
+    try:
+        db_type = await get_database_type()
+        async with engine.begin() as conn:
+            if db_type == 'sqlite':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN has_connected_to_vpn BOOLEAN NOT NULL DEFAULT 0")
+                )
+            elif db_type == 'postgresql':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN has_connected_to_vpn BOOLEAN NOT NULL DEFAULT FALSE")
+                )
+            elif db_type == 'mysql':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN has_connected_to_vpn TINYINT(1) NOT NULL DEFAULT 0")
+                )
+
+        logger.info("✅ Добавлена колонка has_connected_to_vpn в users")
+        return True
+
+    except Exception as error:
+        logger.error(f"❌ Ошибка добавления has_connected_to_vpn в users: {error}")
+        return False
+
+
 async def run_universal_migration():
     logger.info("=== НАЧАЛО УНИВЕРСАЛЬНОЙ МИГРАЦИИ ===")
     
@@ -5017,6 +5048,13 @@ async def run_universal_migration():
             logger.info("✅ Таблица subscription_events готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей subscription_events")
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ HAS_CONNECTED_TO_VPN В USERS ===")
+        vpn_column_ready = await add_user_has_connected_to_vpn_column()
+        if vpn_column_ready:
+            logger.info("✅ Колонка has_connected_to_vpn в users готова")
+        else:
+            logger.warning("⚠️ Проблемы с добавлением has_connected_to_vpn в users")
 
         async with engine.begin() as conn:
             total_subs = await conn.execute(text("SELECT COUNT(*) FROM subscriptions"))

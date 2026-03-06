@@ -1679,5 +1679,19 @@
   "TOPUP_1YEAR": "Year • 1642₽",
   "TOPUP_CUSTOM": "✍️ Custom number of days",
   "NEXT_BUTTON": "Next ➡️",
-  "PAYMENT_UNAVAILABLE": "⚠️ Payment methods temporarily unavailable"
+  "PAYMENT_UNAVAILABLE": "⚠️ Payment methods temporarily unavailable",
+  "ONBOARDING_DEVICE_SELECTION_TEXT": "Choose your device and connect for free.\nIt will take less than 30 seconds.",
+  "ONBOARDING_CONNECTION_TEXT": "Install the Happ app using the button below.\n\nAfter installation, tap «Connect» — everything will be set up automatically.",
+  "ONBOARDING_POST_CONNECT_TEXT": "Tap 🔗 Open Happ → in the app select Connect (takes 5–10 sec).\n\nCome back here:\n\nIf everything is ok — tap I'm connected. If it didn't work — select Manual connection or Support.",
+  "ONBOARDING_MANUAL_LINK_TEXT": "🔐 Open Happ and tap «Connect».\nIt will take 5–10 seconds.\n\nFor manual connection, copy the key and add it to Happ\n\n",
+  "ONBOARDING_CONNECT_FREE_BUTTON": "🚀 Connect for free",
+  "ONBOARDING_CONNECT_BUTTON": "🚀 Connect",
+  "ONBOARDING_OPEN_HAPP_BUTTON": "🔗 Open Happ",
+  "ONBOARDING_CONNECTED_BUTTON": "✅ I'm connected",
+  "ONBOARDING_MANUAL_LINK_BUTTON": "🔗 Manual connection",
+  "ONBOARDING_SUPPORT_BUTTON": "💬 Support",
+  "ONBOARDING_DOWNLOAD_HAPP_IOS_RU": "🍎 Download Happ (Apple ID Russia)",
+  "ONBOARDING_DOWNLOAD_HAPP_IOS_WORLD": "🍎 Download Happ (Apple ID International)",
+  "ONBOARDING_DOWNLOAD_HAPP_ANDROID": "🤖 Download Happ",
+  "ONBOARDING_DOWNLOAD_HAPP_WINDOWS": "💻 Download Happ"
 }
