@@ -2725,9 +2725,18 @@ async def handle_topup_days(
         days = 30 
         
     await state.update_data(selected_days=days)
-    
-    text = f"Оплата подписки на {days} дней.\nВыберите способ оплаты:"
-    
+
+    price_kopeks = calculate_topup_price_kopeks(days)
+    price_rub = price_kopeks / 100
+    balance_rub = db_user.balance_kopeks / 100
+
+    text = (
+        f"Оплата подписки на {days} дней.\n"
+        f"Стоимость: {price_rub:.0f}₽\n"
+        f"Баланс: {balance_rub:.0f}₽\n\n"
+        f"Выберите способ оплаты:"
+    )
+
     image_path = os.path.join("images", "payment_methods.png")
     if not os.path.exists(image_path):
          image_path = None
@@ -2735,7 +2744,11 @@ async def handle_topup_days(
     await edit_or_answer_photo(
         callback=callback,
         caption=text,
-        keyboard=get_simple_payment_methods_keyboard(days=days),
+        keyboard=get_simple_payment_methods_keyboard(
+            days=days,
+            balance_kopeks=db_user.balance_kopeks,
+            price_kopeks=price_kopeks,
+        ),
         parse_mode="HTML",
         photo_path=image_path
     )
@@ -2829,10 +2842,123 @@ async def handle_payment_selection(
     # Use PaymentService to create invoice
     payment_service = PaymentService(callback.bot)
     texts = get_texts(db_user.language)
-    
+
     current_chat_id = callback.message.chat.id
-    
-    if method == "sbp":
+
+    if method == "balance":
+        # Оплата с баланса — только для продления подписки (prefix == "pay")
+        if not is_extension:
+            await callback.answer("⚠ Оплата с баланса доступна только для продления подписки", show_alert=True)
+            return
+
+        days = int(value)
+
+        if db_user.balance_kopeks < amount_kopeks:
+            await callback.answer("⚠ Недостаточно средств на балансе", show_alert=True)
+            return
+
+        subscription = db_user.subscription
+        if not subscription:
+            await callback.answer("⚠ У вас нет активной подписки", show_alert=True)
+            return
+
+        try:
+            success = await subtract_user_balance(
+                db,
+                db_user,
+                amount_kopeks,
+                f"Продление подписки на {days} дней",
+            )
+
+            if not success:
+                await callback.answer("⚠ Ошибка списания средств", show_alert=True)
+                return
+
+            current_time = datetime.utcnow()
+
+            if subscription.end_date > current_time:
+                new_end_date = subscription.end_date + timedelta(days=days)
+            else:
+                new_end_date = current_time + timedelta(days=days)
+
+            old_end_date = subscription.end_date
+            subscription.end_date = new_end_date
+            subscription.status = SubscriptionStatus.ACTIVE.value
+            subscription.updated_at = current_time
+
+            await db.commit()
+            await db.refresh(subscription)
+            await db.refresh(db_user)
+
+            refreshed_end_date = subscription.end_date
+            refreshed_balance = db_user.balance_kopeks
+
+            subscription_service = SubscriptionService()
+            try:
+                remnawave_result = await subscription_service.update_remnawave_user(
+                    db,
+                    subscription,
+                    reset_traffic=settings.RESET_TRAFFIC_ON_PAYMENT,
+                    reset_reason="продление подписки",
+                )
+                if remnawave_result:
+                    logger.info("✅ RemnaWave обновлен успешно")
+                else:
+                    logger.error("⚠ ОШИБКА ОБНОВЛЕНИЯ REMNAWAVE")
+            except Exception as e:
+                logger.error(f"⚠ ИСКЛЮЧЕНИЕ ПРИ ОБНОВЛЕНИИ REMNAWAVE: {e}")
+
+            transaction = await create_transaction(
+                db=db,
+                user_id=db_user.id,
+                type=TransactionType.SUBSCRIPTION_PAYMENT,
+                amount_kopeks=amount_kopeks,
+                description=f"Продление подписки на {days} дней (с баланса)"
+            )
+
+            try:
+                notification_service = AdminNotificationService(callback.bot)
+                await notification_service.send_subscription_extension_notification(
+                    db,
+                    db_user,
+                    subscription,
+                    transaction,
+                    days,
+                    old_end_date,
+                    new_end_date=refreshed_end_date,
+                    balance_after=refreshed_balance,
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления о продлении: {e}")
+
+            success_message = (
+                "✅ Подписка успешно продлена!\n\n"
+                f"⏰ Добавлено: {days} дней\n"
+                f"Действует до: {format_local_datetime(refreshed_end_date, '%d.%m.%Y %H:%M')}\n\n"
+                f"💰 Списано: {texts.format_price(amount_kopeks)}"
+            )
+
+            await callback.message.edit_text(
+                success_message,
+                reply_markup=get_back_keyboard(db_user.language)
+            )
+
+            logger.info(f"✅ Пользователь {db_user.telegram_id} продлил подписку на {days} дней за {amount_kopeks / 100}₽ (с баланса)")
+
+        except Exception as e:
+            logger.error(f"⚠ КРИТИЧЕСКАЯ ОШИБКА ПРОДЛЕНИЯ С БАЛАНСА: {e}")
+            import traceback
+            logger.error(f"TRACEBACK: {traceback.format_exc()}")
+
+            await callback.message.edit_text(
+                "⚠ Произошла ошибка при продлении подписки. Обратитесь в поддержку.",
+                reply_markup=get_back_keyboard(db_user.language)
+            )
+
+        await callback.answer()
+        return
+
+    elif method == "sbp":
         # SBP logic via YooKassa
         if not settings.is_yookassa_enabled():
              await callback.answer("❌ СБП временно недоступен", show_alert=True)

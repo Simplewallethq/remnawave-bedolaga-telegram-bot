@@ -3070,23 +3070,31 @@ def get_device_selection_keyboard(current_selected: int = 1, back_callback: str 
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, back_callback: str = "topup", language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
+def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, back_callback: str = "topup", language: str = DEFAULT_LANGUAGE, balance_kopeks: int = 0, price_kopeks: int = 0) -> InlineKeyboardMarkup:
     """
     Экран 8: Методы оплаты (упрощенная версия для новых меню)
     Динамически показывает только доступные методы оплаты
     """
     from app.config import settings
     texts = get_texts(language)
-    
+
     buttons = []
-    
+
     # Helper function to build callback data
     def _build_callback(method: str) -> str:
         if days > 0:
             return f"pay:{method}:{days}"
         else:
             return f"pay_amount:{method}:{amount_rub}"
-    
+
+    # Оплата с баланса (если достаточно средств)
+    if balance_kopeks >= price_kopeks > 0:
+        balance_rub = balance_kopeks / 100
+        buttons.append([InlineKeyboardButton(
+            text=f"💰 Оплатить с баланса ({balance_rub:.0f}₽)",
+            callback_data=_build_callback("balance")
+        )])
+
     # Telegram Stars
     if settings.TELEGRAM_STARS_ENABLED:
         buttons.append([InlineKeyboardButton(text="⭐️ Telegram Stars", callback_data=_build_callback("stars"))])
