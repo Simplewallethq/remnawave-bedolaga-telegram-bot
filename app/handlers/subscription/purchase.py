@@ -137,7 +137,7 @@ from app.utils.promo_offer import (
     get_user_active_promo_discount_percent,
 )
 
-from .common import _apply_promo_offer_discount, _get_promo_offer_discount_percent, logger, update_traffic_prices
+from .common import _apply_promo_offer_discount, _get_promo_offer_discount_percent, _get_addon_discount_percent_for_user, logger, update_traffic_prices
 from .autopay import (
     handle_autopay_menu,
     handle_subscription_cancel,
@@ -2783,9 +2783,50 @@ async def handle_device_selection_confirm(
 ):
     data = await state.get_data()
     selected_devices = data.get('selected_devices', 1)
-    
-    text = f"Выбрано {selected_devices} устройств.\nВыберите способ оплаты:"
-    
+
+    subscription = db_user.subscription
+    current_devices = subscription.device_limit if subscription else 1
+    devices_difference = selected_devices - current_devices
+
+    price_kopeks = 0
+    if devices_difference > 0 and subscription:
+        if current_devices < settings.DEFAULT_DEVICE_LIMIT:
+            free_devices = settings.DEFAULT_DEVICE_LIMIT - current_devices
+            chargeable_devices = max(0, devices_difference - free_devices)
+        else:
+            chargeable_devices = devices_difference
+
+        devices_price_per_month = chargeable_devices * settings.PRICE_PER_DEVICE
+        months_hint = get_remaining_months(subscription.end_date)
+        period_hint_days = months_hint * 30 if months_hint > 0 else None
+        devices_discount_percent = _get_addon_discount_percent_for_user(
+            db_user, "devices", period_hint_days,
+        )
+        discounted_per_month, _ = apply_percentage_discount(
+            devices_price_per_month, devices_discount_percent,
+        )
+        price_kopeks, charged_months = calculate_prorated_price(
+            discounted_per_month, subscription.end_date,
+        )
+
+    amount_rub = price_kopeks / 100
+
+    await state.update_data(
+        pending_device_change=True,
+        pending_device_count=selected_devices,
+        pending_device_price_kopeks=price_kopeks,
+    )
+
+    price_rub = price_kopeks / 100
+    balance_rub = db_user.balance_kopeks / 100
+
+    text = (
+        f"Выбрано {selected_devices} устройств.\n"
+        f"Стоимость: {price_rub:.0f}₽\n"
+        f"Баланс: {balance_rub:.0f}₽\n\n"
+        f"Выберите способ оплаты:"
+    )
+
     image_path = os.path.join("images", "payment_methods.png")
     if not os.path.exists(image_path):
          image_path = None
@@ -2793,7 +2834,11 @@ async def handle_device_selection_confirm(
     await edit_or_answer_photo(
         callback=callback,
         caption=text,
-        keyboard=get_simple_payment_methods_keyboard(amount_rub=100.0), # Placeholder
+        keyboard=get_simple_payment_methods_keyboard(
+            amount_rub=amount_rub,
+            balance_kopeks=db_user.balance_kopeks,
+            price_kopeks=price_kopeks,
+        ),
         parse_mode="HTML",
         photo_path=image_path
     )
@@ -2846,9 +2891,100 @@ async def handle_payment_selection(
     current_chat_id = callback.message.chat.id
 
     if method == "balance":
-        # Оплата с баланса — только для продления подписки (prefix == "pay")
-        if not is_extension:
-            await callback.answer("⚠ Оплата с баланса доступна только для продления подписки", show_alert=True)
+        # Проверяем, является ли это изменением устройств (из FSM state)
+        state_data = await state.get_data()
+        is_device_change = state_data.get('pending_device_change', False)
+
+        if not is_extension and not is_device_change:
+            await callback.answer("⚠ Оплата с баланса недоступна для данной операции", show_alert=True)
+            return
+
+        if is_device_change:
+            # Обработка изменения устройств с баланса
+            new_device_count = state_data.get('pending_device_count', 0)
+            device_price = state_data.get('pending_device_price_kopeks', 0)
+
+            if device_price <= 0:
+                await callback.answer("⚠ Ошибка расчета стоимости устройств", show_alert=True)
+                return
+
+            if db_user.balance_kopeks < device_price:
+                await callback.answer("⚠ Недостаточно средств на балансе", show_alert=True)
+                return
+
+            subscription = db_user.subscription
+            if not subscription:
+                await callback.answer("⚠ У вас нет активной подписки", show_alert=True)
+                return
+
+            current_devices = subscription.device_limit
+
+            try:
+                success = await subtract_user_balance(
+                    db, db_user, device_price,
+                    f"Изменение количества устройств с {current_devices} до {new_device_count}"
+                )
+
+                if not success:
+                    await callback.answer("⚠ Ошибка списания средств", show_alert=True)
+                    return
+
+                charged_months = get_remaining_months(subscription.end_date)
+                await create_transaction(
+                    db=db,
+                    user_id=db_user.id,
+                    type=TransactionType.SUBSCRIPTION_PAYMENT,
+                    amount_kopeks=device_price,
+                    description=f"Изменение устройств с {current_devices} до {new_device_count} на {charged_months} мес (с баланса)"
+                )
+
+                subscription.device_limit = new_device_count
+                subscription.updated_at = datetime.utcnow()
+
+                await db.commit()
+
+                subscription_service = SubscriptionService()
+                await subscription_service.update_remnawave_user(db, subscription)
+
+                await db.refresh(db_user)
+                await db.refresh(subscription)
+
+                try:
+                    notification_service = AdminNotificationService(callback.bot)
+                    await notification_service.send_subscription_update_notification(
+                        db, db_user, subscription, "devices", current_devices, new_device_count, device_price
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка отправки уведомления об изменении устройств: {e}")
+
+                success_text = (
+                    "✅ Количество устройств увеличено!\n\n"
+                    f"📱 Было: {current_devices} → Стало: {new_device_count}\n"
+                    f"💰 Списано: {texts.format_price(device_price)}"
+                )
+
+                await callback.message.edit_text(
+                    success_text,
+                    reply_markup=get_back_keyboard(db_user.language)
+                )
+
+                logger.info(
+                    f"✅ Пользователь {db_user.telegram_id} изменил устройства с {current_devices} на {new_device_count}, доплата: {device_price / 100}₽ (с баланса)"
+                )
+
+            except Exception as e:
+                logger.error(f"⚠ КРИТИЧЕСКАЯ ОШИБКА ИЗМЕНЕНИЯ УСТРОЙСТВ С БАЛАНСА: {e}")
+                import traceback
+                logger.error(f"TRACEBACK: {traceback.format_exc()}")
+
+                await callback.message.edit_text(
+                    "⚠ Произошла ошибка при изменении устройств. Обратитесь в поддержку.",
+                    reply_markup=get_back_keyboard(db_user.language)
+                )
+
+            # Очищаем state данные об устройствах
+            await state.update_data(pending_device_change=False, pending_device_count=0, pending_device_price_kopeks=0)
+            await callback.answer()
             return
 
         days = int(value)
