@@ -5,7 +5,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import redis.asyncio as redis
 
 from app.config import settings
-from app.middlewares.global_error import GlobalErrorMiddleware 
+from app.middlewares.global_error import GlobalErrorMiddleware
+from app.middlewares.private_chat_only import PrivateChatOnlyMiddleware
 from app.middlewares.auth import AuthMiddleware
 from app.middlewares.logging import LoggingMiddleware
 from app.middlewares.throttling import ThrottlingMiddleware
@@ -136,6 +137,8 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     
     dp = Dispatcher(storage=storage)
 
+    dp.message.middleware(PrivateChatOnlyMiddleware())
+    dp.callback_query.middleware(PrivateChatOnlyMiddleware())
     dp.message.middleware(GlobalErrorMiddleware())
     dp.callback_query.middleware(GlobalErrorMiddleware())
     dp.pre_checkout_query.middleware(GlobalErrorMiddleware())
