@@ -147,34 +147,37 @@ async def handle_successful_payment(
         )
 
         if success:
-            rubles_amount = TelegramStarsService.calculate_rubles_from_stars(payment.total_amount)
-            amount_kopeks = int((rubles_amount * Decimal(100)).to_integral_value(rounding=ROUND_HALF_UP))
-            amount_text = settings.format_price(amount_kopeks).replace(" ₽", "")
+            # Если автопокупка сработала, не отправляем generic уведомление о пополнении
+            auto_purchased = getattr(payment_service, "_last_auto_purchase_success", False)
+            if not auto_purchased:
+                rubles_amount = TelegramStarsService.calculate_rubles_from_stars(payment.total_amount)
+                amount_kopeks = int((rubles_amount * Decimal(100)).to_integral_value(rounding=ROUND_HALF_UP))
+                amount_text = settings.format_price(amount_kopeks).replace(" ₽", "")
 
-            keyboard = await payment_service.build_topup_success_keyboard(user)
+                keyboard = await payment_service.build_topup_success_keyboard(user)
 
-            transaction_id_short = payment.telegram_payment_charge_id[:8]
+                transaction_id_short = payment.telegram_payment_charge_id[:8]
 
-            await message.answer(
-                texts.t(
-                    "STARS_PAYMENT_SUCCESS",
-                    "🎉 <b>Платеж успешно обработан!</b>\n\n"
-                    "⭐ Потрачено звезд: {stars_spent}\n"
-                    "💰 Зачислено на баланс: {amount} ₽\n"
-                    "🆔 ID транзакции: {transaction_id}...\n\n"
-                    "⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                    "Обязательно активируйте подписку отдельно!\n\n"
-                    "🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
-                    "подписка будет приобретена автоматически после пополнения баланса.\n\n"
-                    "Спасибо за пополнение! 🚀",
-                ).format(
-                    stars_spent=payment.total_amount,
-                    amount=amount_text,
-                    transaction_id=transaction_id_short,
-                ),
-                parse_mode="HTML",
-                reply_markup=keyboard,
-            )
+                await message.answer(
+                    texts.t(
+                        "STARS_PAYMENT_SUCCESS",
+                        "🎉 <b>Платеж успешно обработан!</b>\n\n"
+                        "⭐ Потрачено звезд: {stars_spent}\n"
+                        "💰 Зачислено на баланс: {amount} ₽\n"
+                        "🆔 ID транзакции: {transaction_id}...\n\n"
+                        "⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
+                        "Обязательно активируйте подписку отдельно!\n\n"
+                        "🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
+                        "подписка будет приобретена автоматически после пополнения баланса.\n\n"
+                        "Спасибо за пополнение! 🚀",
+                    ).format(
+                        stars_spent=payment.total_amount,
+                        amount=amount_text,
+                        transaction_id=transaction_id_short,
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
 
             logger.info(
                 "✅ Stars платеж успешно обработан: пользователь %s, %s звезд → %s",

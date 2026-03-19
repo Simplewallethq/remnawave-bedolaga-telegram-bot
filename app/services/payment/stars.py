@@ -592,4 +592,5 @@ class TelegramStarsMixin:
             stars_amount,
             settings.format_price(amount_kopeks),
         )
+        self._last_auto_purchase_success = auto_purchase_success
         return True
