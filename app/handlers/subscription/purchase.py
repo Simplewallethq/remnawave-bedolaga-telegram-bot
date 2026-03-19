@@ -2890,10 +2890,44 @@ async def handle_payment_selection(
 
     current_chat_id = callback.message.chat.id
 
+    # Получаем state_data до ветвления по методам оплаты
+    state_data = await state.get_data()
+    is_device_change = state_data.get('pending_device_change', False)
+
+    # Для внешних платежей сохраняем intent в Redis
+    if method != "balance" and (is_extension or is_device_change):
+        from app.services.user_cart_service import user_cart_service
+
+        if is_extension:
+            days = int(value)
+            cart_data = {
+                "cart_mode": "extend",
+                "period_days": days,
+                "total_price": amount_kopeks,
+                "intent": True,
+            }
+        elif is_device_change:
+            new_device_count = state_data.get('pending_device_count', 0)
+            device_price = state_data.get('pending_device_price_kopeks', 0)
+            subscription = db_user.subscription
+            cart_data = {
+                "cart_mode": "add_devices",
+                "device_count": new_device_count,
+                "current_devices": subscription.device_limit if subscription else 0,
+                "total_price": device_price or amount_kopeks,
+                "subscription_id": subscription.id if subscription else None,
+                "intent": True,
+            }
+
+        await user_cart_service.save_user_cart(db_user.id, cart_data, ttl=3600)
+        logger.info(
+            "Сохранён intent покупки для пользователя %s: %s",
+            db_user.telegram_id,
+            cart_data.get("cart_mode"),
+        )
+
     if method == "balance":
-        # Проверяем, является ли это изменением устройств (из FSM state)
-        state_data = await state.get_data()
-        is_device_change = state_data.get('pending_device_change', False)
+        # state_data и is_device_change уже получены выше
 
         if not is_extension and not is_device_change:
             await callback.answer("⚠ Оплата с баланса недоступна для данной операции", show_alert=True)

@@ -440,6 +440,157 @@ async def _auto_extend_subscription(
     return True
 
 
+async def _auto_add_devices(
+    db: AsyncSession,
+    user: User,
+    cart_data: dict,
+    *,
+    bot: Optional[Bot] = None,
+) -> bool:
+    """Автоматическое добавление устройств после пополнения баланса."""
+    from app.database.crud.subscription import get_subscription_by_user_id
+
+    device_count = _safe_int(cart_data.get("device_count"))
+    current_devices = _safe_int(cart_data.get("current_devices"))
+    price_kopeks = _safe_int(cart_data.get("total_price"))
+    saved_subscription_id = cart_data.get("subscription_id")
+
+    if device_count <= 0 or price_kopeks <= 0:
+        logger.warning(
+            "🔁 Автопокупка устройств: некорректные параметры (devices=%s, price=%s) у пользователя %s",
+            device_count, price_kopeks, user.telegram_id,
+        )
+        return False
+
+    subscription = await get_subscription_by_user_id(db, user.id)
+    if subscription is None:
+        logger.info(
+            "🔁 Автопокупка устройств: у пользователя %s нет активной подписки",
+            user.telegram_id,
+        )
+        return False
+
+    if saved_subscription_id is not None:
+        if _safe_int(saved_subscription_id, subscription.id) != subscription.id:
+            logger.warning(
+                "🔁 Автопокупка устройств: подписка %s не совпадает с текущей %s у пользователя %s",
+                saved_subscription_id, subscription.id, user.telegram_id,
+            )
+            return False
+
+    if user.balance_kopeks < price_kopeks:
+        logger.info(
+            "🔁 Автопокупка устройств: у пользователя %s недостаточно средств (%s < %s)",
+            user.telegram_id, user.balance_kopeks, price_kopeks,
+        )
+        return False
+
+    try:
+        deducted = await subtract_user_balance(
+            db, user, price_kopeks,
+            f"Изменение количества устройств с {current_devices} до {device_count}",
+        )
+    except Exception as error:
+        logger.error(
+            "❌ Автопокупка устройств: ошибка списания средств у пользователя %s: %s",
+            user.telegram_id, error, exc_info=True,
+        )
+        return False
+
+    if not deducted:
+        return False
+
+    old_device_limit = subscription.device_limit
+    subscription.device_limit = device_count
+
+    try:
+        from datetime import datetime
+        subscription.updated_at = datetime.utcnow()
+        await db.commit()
+    except Exception as error:
+        logger.error(
+            "❌ Автопокупка устройств: ошибка коммита для пользователя %s: %s",
+            user.telegram_id, error, exc_info=True,
+        )
+        await db.rollback()
+        return False
+
+    try:
+        await create_transaction(
+            db=db,
+            user_id=user.id,
+            type=TransactionType.SUBSCRIPTION_PAYMENT,
+            amount_kopeks=price_kopeks,
+            description=f"Изменение устройств с {current_devices} до {device_count} (автопокупка)",
+        )
+    except Exception as error:
+        logger.error(
+            "⚠️ Автопокупка устройств: не удалось создать транзакцию для пользователя %s: %s",
+            user.telegram_id, error, exc_info=True,
+        )
+
+    subscription_service = SubscriptionService()
+    try:
+        await subscription_service.update_remnawave_user(db, subscription)
+    except Exception as error:
+        logger.error(
+            "⚠️ Автопокупка устройств: ошибка обновления RemnaWave для пользователя %s: %s",
+            user.telegram_id, error,
+        )
+
+    await user_cart_service.delete_user_cart(user.id)
+
+    texts = get_texts(getattr(user, "language", "ru"))
+
+    if bot:
+        try:
+            notification_service = AdminNotificationService(bot)
+            await notification_service.send_subscription_update_notification(
+                db, user, subscription, "devices", old_device_limit, device_count, price_kopeks
+            )
+        except Exception as error:
+            logger.error(
+                "⚠️ Автопокупка устройств: ошибка уведомления админов для пользователя %s: %s",
+                user.telegram_id, error,
+            )
+
+        try:
+            success_text = (
+                "✅ Количество устройств увеличено!\n\n"
+                f"📱 Было: {old_device_limit} → Стало: {device_count}\n"
+                f"💰 Списано: {texts.format_price(price_kopeks)}"
+            )
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 My subscription"),
+                        callback_data="menu_subscription",
+                    )],
+                    [InlineKeyboardButton(
+                        text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "🏠 Main menu"),
+                        callback_data="back_to_menu",
+                    )],
+                ]
+            )
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text=success_text,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+        except Exception as error:
+            logger.error(
+                "⚠️ Автопокупка устройств: ошибка уведомления пользователя %s: %s",
+                user.telegram_id, error,
+            )
+
+    logger.info(
+        "✅ Автопокупка устройств: %s → %s для пользователя %s",
+        old_device_limit, device_count, user.telegram_id,
+    )
+    return True
+
+
 async def auto_purchase_saved_cart_after_topup(
     db: AsyncSession,
     user: User,
@@ -448,23 +599,32 @@ async def auto_purchase_saved_cart_after_topup(
 ) -> bool:
     """Attempts to automatically purchase a subscription from a saved cart."""
 
-    if not settings.is_auto_purchase_after_topup_enabled():
-        return False
-
     if not user or not getattr(user, "id", None):
         return False
 
     cart_data = await user_cart_service.get_user_cart(user.id)
     if not cart_data:
+        if not settings.is_auto_purchase_after_topup_enabled():
+            return False
+        return False
+
+    # Явные intent-корзины (пользователь нажал "оплатить") обрабатываем всегда,
+    # даже если AUTO_PURCHASE_AFTER_TOPUP_ENABLED выключен
+    is_intent = cart_data.get("intent", False)
+    if not is_intent and not settings.is_auto_purchase_after_topup_enabled():
         return False
 
     logger.info(
-        "🔁 Автопокупка: обнаружена сохранённая корзина у пользователя %s", user.telegram_id
+        "🔁 Автопокупка: обнаружена сохранённая корзина у пользователя %s (intent=%s)",
+        user.telegram_id,
+        is_intent,
     )
 
     cart_mode = cart_data.get("cart_mode") or cart_data.get("mode")
     if cart_mode == "extend":
         return await _auto_extend_subscription(db, user, cart_data, bot=bot)
+    elif cart_mode == "add_devices":
+        return await _auto_add_devices(db, user, cart_data, bot=bot)
 
     try:
         prepared = await _prepare_auto_purchase(db, user, cart_data)

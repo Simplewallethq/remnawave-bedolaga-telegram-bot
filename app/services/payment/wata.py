@@ -523,34 +523,13 @@ class WataPaymentMixin:
             except Exception as error:
                 logger.error("Ошибка отправки админ уведомления WATA: %s", error)
 
-        if getattr(self, "bot", None):
-            try:
-                keyboard = await self.build_topup_success_keyboard(user)
-                await self.bot.send_message(
-                    user.telegram_id,
-                    (
-                        "✅ <b>Пополнение успешно!</b>\n\n"
-                        f"💰 Сумма: {settings.format_price(payment.amount_kopeks)}\n"
-                        "🦊 Способ: WATA\n"
-                        f"🆔 Транзакция: {transaction.id}\n\n"
-                        "⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                        "Обязательно активируйте подписку отдельно!\n\n"
-                        "🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
-                        "подписка будет приобретена автоматически после пополнения баланса.\n\n"
-                        "Баланс пополнен автоматически!"
-                    ),
-                    parse_mode="HTML",
-                    reply_markup=keyboard,
-                )
-            except Exception as error:
-                logger.error("Ошибка отправки уведомления пользователю WATA: %s", error)
-
+        # Сначала пробуем автопокупку
+        auto_purchase_success = False
         try:
             from app.services.user_cart_service import user_cart_service
             from aiogram import types
 
             has_saved_cart = await user_cart_service.has_user_cart(user.id)
-            auto_purchase_success = False
             if has_saved_cart:
                 try:
                     auto_purchase_success = await auto_purchase_saved_cart_after_topup(
@@ -569,7 +548,7 @@ class WataPaymentMixin:
                 if auto_purchase_success:
                     has_saved_cart = False
 
-            if has_saved_cart and getattr(self, "bot", None):
+            if not auto_purchase_success and has_saved_cart and getattr(self, "bot", None):
                 from app.localization.texts import get_texts
 
                 texts = get_texts(user.language)
@@ -609,5 +588,24 @@ class WataPaymentMixin:
                 )
         except Exception as error:
             logger.debug("Не удалось отправить напоминание о корзине после WATA: %s", error)
+
+        # Уведомление пользователю только если автопокупка не сработала
+        if not auto_purchase_success and getattr(self, "bot", None):
+            try:
+                keyboard = await self.build_topup_success_keyboard(user)
+                await self.bot.send_message(
+                    user.telegram_id,
+                    (
+                        "✅ <b>Пополнение успешно!</b>\n\n"
+                        f"💰 Сумма: {settings.format_price(payment.amount_kopeks)}\n"
+                        "🦊 Способ: WATA\n"
+                        f"🆔 Транзакция: {transaction.id}\n\n"
+                        "Баланс пополнен автоматически!"
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+            except Exception as error:
+                logger.error("Ошибка отправки уведомления пользователю WATA: %s", error)
 
         return payment

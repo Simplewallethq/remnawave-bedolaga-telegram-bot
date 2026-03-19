@@ -248,21 +248,25 @@ class CloudPaymentsPaymentMixin:
             user.telegram_id,
         )
 
-        # Send notification to user
+        # Сначала пробуем автопокупку
+        auto_purchase_success = False
         try:
-            await self._send_cloudpayments_success_notification(
-                user=user,
-                amount_kopeks=amount_kopeks,
-                transaction=transaction,
+            auto_purchase_success = await auto_purchase_saved_cart_after_topup(
+                db, user, bot=getattr(self, "bot", None),
             )
         except Exception as error:
-            logger.exception("Ошибка отправки уведомления CloudPayments: %s", error)
-
-        # Auto-purchase if enabled
-        try:
-            await auto_purchase_saved_cart_after_topup(db, user)
-        except Exception as error:
             logger.exception("Ошибка автопокупки после CloudPayments: %s", error)
+
+        # Уведомление пользователю только если автопокупка не сработала
+        if not auto_purchase_success:
+            try:
+                await self._send_cloudpayments_success_notification(
+                    user=user,
+                    amount_kopeks=amount_kopeks,
+                    transaction=transaction,
+                )
+            except Exception as error:
+                logger.exception("Ошибка отправки уведомления CloudPayments: %s", error)
 
         return True
 

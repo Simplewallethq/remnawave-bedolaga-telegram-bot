@@ -508,14 +508,14 @@ class TelegramStarsMixin:
                     exc_info=True,
                 )
 
-        # Проверяем наличие сохраненной корзины для возврата к оформлению подписки
+        # Сначала пробуем автопокупку — если успех, не отправляем generic уведомление
+        auto_purchase_success = False
         try:
             from aiogram import types
             from app.localization.texts import get_texts
             from app.services.user_cart_service import user_cart_service
 
             has_saved_cart = await user_cart_service.has_user_cart(user.id)
-            auto_purchase_success = False
             if has_saved_cart:
                 try:
                     auto_purchase_success = await auto_purchase_saved_cart_after_topup(
@@ -534,7 +534,7 @@ class TelegramStarsMixin:
                 if auto_purchase_success:
                     has_saved_cart = False
 
-            if has_saved_cart and getattr(self, "bot", None):
+            if not auto_purchase_success and has_saved_cart and getattr(self, "bot", None):
                 texts = get_texts(user.language)
                 cart_message = texts.t(
                     "BALANCE_TOPUP_CART_REMINDER_DETAILED",

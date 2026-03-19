@@ -454,33 +454,13 @@ class Pal24PaymentMixin:
                     error,
                 )
 
-        if getattr(self, "bot", None):
-            try:
-                keyboard = await self.build_topup_success_keyboard(user)
-                await self.bot.send_message(
-                    user.telegram_id,
-                    (
-                        "✅ <b>Пополнение успешно!</b>\n\n"
-                        f"💰 Сумма: {settings.format_price(payment.amount_kopeks)}\n"
-                        "🦊 Способ: PayPalych\n"
-                        f"🆔 Транзакция: {transaction.id}\n\n"
-                        "Баланс пополнен автоматически!"
-                    ),
-                    parse_mode="HTML",
-                    reply_markup=keyboard,
-                )
-            except Exception as error:
-                logger.error(
-                    "Ошибка отправки уведомления пользователю Pal24: %s",
-                    error,
-                )
-
+        # Сначала пробуем автопокупку
+        auto_purchase_success = False
         try:
             from app.services.user_cart_service import user_cart_service
             from aiogram import types
 
             has_saved_cart = await user_cart_service.has_user_cart(user.id)
-            auto_purchase_success = False
             if has_saved_cart:
                 try:
                     auto_purchase_success = await auto_purchase_saved_cart_after_topup(
@@ -499,7 +479,7 @@ class Pal24PaymentMixin:
                 if auto_purchase_success:
                     has_saved_cart = False
 
-            if has_saved_cart and getattr(self, "bot", None):
+            if not auto_purchase_success and has_saved_cart and getattr(self, "bot", None):
                 from app.localization.texts import get_texts
 
                 texts = get_texts(user.language)
@@ -544,11 +524,6 @@ class Pal24PaymentMixin:
                     "Отправлено уведомление с кнопкой возврата к оформлению подписки пользователю %s",
                     user.id,
                 )
-            else:
-                logger.info(
-                    "У пользователя %s нет сохраненной корзины или автопокупка выполнена",
-                    user.id,
-                )
         except Exception as error:
             logger.error(
                 "Ошибка при работе с сохраненной корзиной для пользователя %s: %s",
@@ -556,6 +531,28 @@ class Pal24PaymentMixin:
                 error,
                 exc_info=True,
             )
+
+        # Уведомление пользователю только если автопокупка не сработала
+        if not auto_purchase_success and getattr(self, "bot", None):
+            try:
+                keyboard = await self.build_topup_success_keyboard(user)
+                await self.bot.send_message(
+                    user.telegram_id,
+                    (
+                        "✅ <b>Пополнение успешно!</b>\n\n"
+                        f"💰 Сумма: {settings.format_price(payment.amount_kopeks)}\n"
+                        "🦊 Способ: PayPalych\n"
+                        f"🆔 Транзакция: {transaction.id}\n\n"
+                        "Баланс пополнен автоматически!"
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+            except Exception as error:
+                logger.error(
+                    "Ошибка отправки уведомления пользователю Pal24: %s",
+                    error,
+                )
 
         logger.info(
             "✅ Обработан Pal24 платеж %s для пользователя %s (trigger=%s)",

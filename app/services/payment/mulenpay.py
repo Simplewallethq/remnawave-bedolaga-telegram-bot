@@ -349,7 +349,74 @@ class MulenPayPaymentMixin:
                             error,
                         )
 
-                if getattr(self, "bot", None):
+                # Сначала пробуем автопокупку
+                auto_purchase_success = False
+                try:
+                    from app.services.user_cart_service import user_cart_service
+                    from aiogram import types
+
+                    has_saved_cart = await user_cart_service.has_user_cart(user.id)
+                    if has_saved_cart:
+                        try:
+                            auto_purchase_success = await auto_purchase_saved_cart_after_topup(
+                                db,
+                                user,
+                                bot=getattr(self, "bot", None),
+                            )
+                        except Exception as auto_error:
+                            logger.error(
+                                "Ошибка автоматической покупки подписки для пользователя %s: %s",
+                                user.id,
+                                auto_error,
+                                exc_info=True,
+                            )
+
+                        if auto_purchase_success:
+                            has_saved_cart = False
+
+                    if not auto_purchase_success and has_saved_cart and getattr(self, "bot", None):
+                        from app.localization.texts import get_texts
+
+                        texts = get_texts(user.language)
+                        cart_message = texts.t(
+                            "BALANCE_TOPUP_CART_REMINDER_DETAILED",
+                            "🛒 У вас есть неоформленный заказ.\n\n"
+                            "Вы можете продолжить оформление с теми же параметрами."
+                        )
+
+                        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+                            [types.InlineKeyboardButton(
+                                text=texts.RETURN_TO_SUBSCRIPTION_CHECKOUT,
+                                callback_data="return_to_saved_cart"
+                            )],
+                            [types.InlineKeyboardButton(
+                                text="💰 Мой баланс",
+                                callback_data="menu_balance"
+                            )],
+                            [types.InlineKeyboardButton(
+                                text="🏠 Главное меню",
+                                callback_data="back_to_menu"
+                            )]
+                        ])
+
+                        await self.bot.send_message(
+                            chat_id=user.telegram_id,
+                            text=f"✅ Баланс пополнен на {settings.format_price(payment.amount_kopeks)}!\n\n"
+                                 f"⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
+                                 f"Обязательно активируйте подписку отдельно!\n\n"
+                                 f"🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
+                                 f"подписка будет приобретена автоматически после пополнения баланса.\n\n{cart_message}",
+                            reply_markup=keyboard
+                        )
+                        logger.info(
+                            "Отправлено уведомление с кнопкой возврата к оформлению подписки пользователю %s",
+                            user.id,
+                        )
+                except Exception as e:
+                    logger.error(f"Ошибка при работе с сохраненной корзиной для пользователя {user.id}: {e}", exc_info=True)
+
+                # Уведомление пользователю только если автопокупка не сработала
+                if not auto_purchase_success and getattr(self, "bot", None):
                     try:
                         keyboard = await self.build_topup_success_keyboard(user)
                         await self.bot.send_message(
@@ -370,75 +437,6 @@ class MulenPayPaymentMixin:
                             display_name,
                             error,
                         )
-
-                # Проверяем наличие сохраненной корзины для возврата к оформлению подписки
-                try:
-                    from app.services.user_cart_service import user_cart_service
-                    from aiogram import types
-
-                    has_saved_cart = await user_cart_service.has_user_cart(user.id)
-                    auto_purchase_success = False
-                    if has_saved_cart:
-                        try:
-                            auto_purchase_success = await auto_purchase_saved_cart_after_topup(
-                                db,
-                                user,
-                                bot=getattr(self, "bot", None),
-                            )
-                        except Exception as auto_error:
-                            logger.error(
-                                "Ошибка автоматической покупки подписки для пользователя %s: %s",
-                                user.id,
-                                auto_error,
-                                exc_info=True,
-                            )
-
-                        if auto_purchase_success:
-                            has_saved_cart = False
-
-                    if has_saved_cart and getattr(self, "bot", None):
-                        # Если у пользователя есть сохраненная корзина,
-                        # отправляем ему уведомление с кнопкой вернуться к оформлению
-                        from app.localization.texts import get_texts
-                        
-                        texts = get_texts(user.language)
-                        cart_message = texts.t(
-                            "BALANCE_TOPUP_CART_REMINDER_DETAILED",
-                            "🛒 У вас есть неоформленный заказ.\n\n"
-                            "Вы можете продолжить оформление с теми же параметрами."
-                        )
-                        
-                        # Создаем клавиатуру с кнопками
-                        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-                            [types.InlineKeyboardButton(
-                                text=texts.RETURN_TO_SUBSCRIPTION_CHECKOUT,
-                                callback_data="return_to_saved_cart"
-                            )],
-                            [types.InlineKeyboardButton(
-                                text="💰 Мой баланс",
-                                callback_data="menu_balance"
-                            )],
-                            [types.InlineKeyboardButton(
-                                text="🏠 Главное меню",
-                                callback_data="back_to_menu"
-                            )]
-                        ])
-                        
-                        await self.bot.send_message(
-                            chat_id=user.telegram_id,
-                            text=f"✅ Баланс пополнен на {settings.format_price(payment.amount_kopeks)}!\n\n"
-                                 f"⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                                 f"Обязательно активируйте подписку отдельно!\n\n"
-                                 f"🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
-                                 f"подписка будет приобретена автоматически после пополнения баланса.\n\n{cart_message}",
-                            reply_markup=keyboard
-                        )
-                        logger.info(
-                            "Отправлено уведомление с кнопкой возврата к оформлению подписки пользователю %s",
-                            user.id,
-                        )
-                except Exception as e:
-                    logger.error(f"Ошибка при работе с сохраненной корзиной для пользователя {user.id}: {e}", exc_info=True)
 
                 logger.info(
                     "✅ Обработан %s платеж %s для пользователя %s",

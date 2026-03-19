@@ -691,27 +691,8 @@ class YooKassaPaymentMixin:
                                 exc_info=True,  # Добавляем полный стек вызовов для отладки
                             )
 
-                    # Отправляем уведомление пользователю
-                    if getattr(self, "bot", None):
-                        try:
-                            # Передаем только простые данные, чтобы избежать проблем с ленивой загрузкой
-                            await self._send_payment_success_notification(
-                                user.telegram_id,
-                                payment.amount_kopeks,
-                                user=None,  # Передаем None, чтобы _ensure_user_snapshot загрузил данные сам
-                                db=db,
-                                payment_method_title="Банковская карта (YooKassa)",
-                            )
-                            logger.info("Уведомление пользователю о платеже отправлено успешно")
-                        except Exception as error:
-                            logger.error(
-                                "Ошибка отправки уведомления о платеже: %s",
-                                error,
-                                exc_info=True,  # Добавляем полный стек вызовов для отладки
-                            )
-
-                    # Проверяем наличие сохраненной корзины для возврата к оформлению подписки
-                    # ВАЖНО: этот код должен выполняться даже при ошибках в уведомлениях
+                    # Сначала пробуем автопокупку — если успех, не отправляем generic уведомление
+                    auto_purchase_success = False
                     logger.info(f"Проверяем наличие сохраненной корзины для пользователя {user.id}")
                     from app.services.user_cart_service import user_cart_service
                     try:
@@ -722,7 +703,6 @@ class YooKassaPaymentMixin:
                             has_saved_cart,
                         )
 
-                        auto_purchase_success = False
                         if has_saved_cart:
                             try:
                                 auto_purchase_success = await auto_purchase_saved_cart_after_topup(
@@ -741,9 +721,7 @@ class YooKassaPaymentMixin:
                             if auto_purchase_success:
                                 has_saved_cart = False
 
-                        if has_saved_cart and getattr(self, "bot", None):
-                            # Если у пользователя есть сохраненная корзина,
-                            # отправляем ему уведомление с кнопкой вернуться к оформлению
+                        if not auto_purchase_success and has_saved_cart and getattr(self, "bot", None):
                             from app.localization.texts import get_texts
                             from aiogram import types
 
@@ -752,7 +730,6 @@ class YooKassaPaymentMixin:
                                 total_amount=settings.format_price(payment.amount_kopeks)
                             )
 
-                            # Создаем клавиатуру с кнопками
                             keyboard = types.InlineKeyboardMarkup(
                                 inline_keyboard=[
                                     [
@@ -798,6 +775,24 @@ class YooKassaPaymentMixin:
                             f"Критическая ошибка при работе с сохраненной корзиной для пользователя {user.id}: {e}",
                             exc_info=True,
                         )
+
+                    # Отправляем уведомление пользователю только если автопокупка не сработала
+                    if not auto_purchase_success and getattr(self, "bot", None):
+                        try:
+                            await self._send_payment_success_notification(
+                                user.telegram_id,
+                                payment.amount_kopeks,
+                                user=None,
+                                db=db,
+                                payment_method_title="Банковская карта (YooKassa)",
+                            )
+                            logger.info("Уведомление пользователю о платеже отправлено успешно")
+                        except Exception as error:
+                            logger.error(
+                                "Ошибка отправки уведомления о платеже: %s",
+                                error,
+                                exc_info=True,
+                            )
 
                 if is_simple_subscription:
                     logger.info(f"Обнаружен платеж простой покупки подписки для пользователя {user.id}")

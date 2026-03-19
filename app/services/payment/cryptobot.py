@@ -422,7 +422,7 @@ class CryptoBotPaymentMixin:
                 if admin_notification:
                     await self._deliver_admin_topup_notification(admin_notification)
 
-                if user_notification and bot_instance:
+                if user_notification and bot_instance and not auto_purchase_success:
                     await self._deliver_user_topup_notification(user_notification)
 
                 if saved_cart_notification and bot_instance:
