@@ -147,11 +147,12 @@ async def handle_successful_payment(
         )
 
         if success:
+            rubles_amount = TelegramStarsService.calculate_rubles_from_stars(payment.total_amount)
+            amount_kopeks = int((rubles_amount * Decimal(100)).to_integral_value(rounding=ROUND_HALF_UP))
+
             # Если автопокупка сработала, не отправляем generic уведомление о пополнении
             auto_purchased = getattr(payment_service, "_last_auto_purchase_success", False)
             if not auto_purchased:
-                rubles_amount = TelegramStarsService.calculate_rubles_from_stars(payment.total_amount)
-                amount_kopeks = int((rubles_amount * Decimal(100)).to_integral_value(rounding=ROUND_HALF_UP))
                 amount_text = settings.format_price(amount_kopeks).replace(" ₽", "")
 
                 keyboard = await payment_service.build_topup_success_keyboard(user)
