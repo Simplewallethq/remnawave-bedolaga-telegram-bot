@@ -1506,7 +1506,7 @@ async def handle_profile(callback: types.CallbackQuery, db_user: User, db: Async
     await edit_or_answer_photo(
         callback,
         text, 
-        get_profile_keyboard(language=db_user.language), 
+        get_profile_keyboard(language=db_user.language, balance_kopeks=db_user.balance_kopeks),
         parse_mode="HTML",
         photo_path=image_path
     )

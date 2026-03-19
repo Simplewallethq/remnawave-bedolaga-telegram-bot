@@ -3142,13 +3142,14 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
     buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_profile_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
+def get_profile_keyboard(language: str = DEFAULT_LANGUAGE, balance_kopeks: int = 0) -> InlineKeyboardMarkup:
     """
     Экран 9: Профиль пользователя
     """
     texts = get_texts(language)
+    balance_text = texts.t("MENU_BALANCE_BUTTON", "💳 Баланс: {balance}₽").format(balance=int(balance_kopeks / 100))
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=texts.t("MENU_BALANCE", "💰 Баланс"), callback_data="menu_balance")],
+        [InlineKeyboardButton(text=balance_text, callback_data="menu_balance")],
         [InlineKeyboardButton(text=texts.t("MENU_PROMOCODE", "🏷 Промокод"), callback_data="profile_promo")],
         [InlineKeyboardButton(text=texts.t("MENU_LANGUAGE", "🌐 Язык"), callback_data="profile_language")],
         [InlineKeyboardButton(text=texts.t("MENU_INFO", "ℹ️ Инфо"), callback_data="menu_info")],
