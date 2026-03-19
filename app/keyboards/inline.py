@@ -446,7 +446,7 @@ def get_main_menu_keyboard(
             "BALANCE_BUTTON_DEFAULT",
             "💰 Баланс: {balance}",
         ).format(balance=texts.format_price(safe_balance))
-    
+
     keyboard: list[list[InlineKeyboardButton]] = []
     paired_buttons: list[InlineKeyboardButton] = []
 
@@ -519,7 +519,7 @@ def get_main_menu_keyboard(
             )
 
     keyboard.append([InlineKeyboardButton(text=balance_button_text, callback_data="menu_balance")])
-    
+
     show_trial = not has_had_paid_subscription and not has_active_subscription
 
     show_buy = not has_active_subscription or not subscription_is_active
@@ -2787,12 +2787,6 @@ def get_new_main_menu_keyboard(
     texts = get_texts(language)
     keyboard = []
     
-    # Balance button
-    keyboard.append([InlineKeyboardButton(
-        text=texts.t("MENU_BALANCE_BUTTON", "💳 Баланс: {balance}₽").format(balance=int(balance_rub)),
-        callback_data="balance"
-    )])
-    
     if not trial_used and not trial_active and not has_active_subscription:
         keyboard.append([InlineKeyboardButton(
             text=texts.t("MENU_TRIAL_BUTTON", "🎁 3 дня бесплатно"),
@@ -3154,6 +3148,7 @@ def get_profile_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
     """
     texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=texts.t("MENU_BALANCE", "💰 Баланс"), callback_data="menu_balance")],
         [InlineKeyboardButton(text=texts.t("MENU_PROMOCODE", "🏷 Промокод"), callback_data="profile_promo")],
         [InlineKeyboardButton(text=texts.t("MENU_LANGUAGE", "🌐 Язык"), callback_data="profile_language")],
         [InlineKeyboardButton(text=texts.t("MENU_INFO", "ℹ️ Инфо"), callback_data="menu_info")],
@@ -3183,6 +3178,7 @@ def get_balance_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=texts.t("BALANCE_HISTORY_BUTTON", "📜 История покупок"), callback_data="purchases_history")],
         [InlineKeyboardButton(text=texts.t("BALANCE_TOPUP_BUTTON", "💰 Пополнить"), callback_data="topup")],
+        [InlineKeyboardButton(text=texts.BACK, callback_data="profile")],
         [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
     ])
 
