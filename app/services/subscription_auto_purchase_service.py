@@ -209,8 +209,8 @@ def _apply_extension_updates(context: AutoExtendContext) -> None:
     if subscription.is_trial:
         # НЕ удаляем триал здесь! Это будет сделано после успешного extend_subscription()
         # subscription.is_trial = False  # УДАЛЕНО: преждевременное удаление триала
-        if context.traffic_limit_gb is not None:
-            subscription.traffic_limit_gb = context.traffic_limit_gb
+        # При покупке платной подписки трафик всегда безлимитный
+        subscription.traffic_limit_gb = 0
         if context.device_limit is not None:
             subscription.device_limit = max(subscription.device_limit, context.device_limit)
         if context.squad_uuid and context.squad_uuid not in (subscription.connected_squads or []):

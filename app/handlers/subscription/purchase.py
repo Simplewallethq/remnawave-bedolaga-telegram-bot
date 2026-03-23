@@ -1448,7 +1448,6 @@ async def confirm_extend_subscription(
             missing=texts.format_price(missing_kopeks),
         )
 
-        # Подготовим данные для сохранения в корзину
         cart_data = {
             'cart_mode': 'extend',
             'subscription_id': subscription.id,
@@ -1459,6 +1458,7 @@ async def confirm_extend_subscription(
             'missing_amount': missing_kopeks,
             'return_to_cart': True,
             'description': f"Продление подписки на {days} дней",
+            'traffic_limit_gb': 0,
             'consume_promo_offer': bool(promo_component["discount"] > 0),
         }
 

@@ -1523,6 +1523,7 @@ async def create_pending_subscription(
         if (
             existing_subscription.status == SubscriptionStatus.ACTIVE.value
             and existing_subscription.end_date > current_time
+            and not existing_subscription.is_trial
         ):
             logger.warning(
                 "⚠️ Попытка создать pending подписку для активного пользователя %s. Возвращаем существующую запись.",
