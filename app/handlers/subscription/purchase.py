@@ -3056,6 +3056,12 @@ async def handle_payment_selection(
             subscription.status = SubscriptionStatus.ACTIVE.value
             subscription.updated_at = current_time
 
+            # Конвертируем триал в платную подписку с безлимитным трафиком
+            if subscription.is_trial:
+                subscription.is_trial = False
+                subscription.traffic_limit_gb = 0
+                db_user.has_had_paid_subscription = True
+
             await db.commit()
             await db.refresh(subscription)
             await db.refresh(db_user)
