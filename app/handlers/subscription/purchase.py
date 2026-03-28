@@ -2170,7 +2170,7 @@ async def confirm_purchase(
 
             existing_subscription.is_trial = False
             existing_subscription.status = SubscriptionStatus.ACTIVE.value
-            existing_subscription.traffic_limit_gb = final_traffic_gb
+            existing_subscription.traffic_limit_gb = 0  # безлимитный трафик при конверсии триала
             if should_update_devices:
                 existing_subscription.device_limit = selected_devices
             # Проверяем, что при обновлении существующей подписки есть хотя бы одна страна

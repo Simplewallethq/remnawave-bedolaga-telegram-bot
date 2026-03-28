@@ -299,6 +299,7 @@ async def _auto_extend_subscription(
         if was_trial and subscription.is_trial:
             subscription.is_trial = False
             subscription.status = "active"
+            subscription.traffic_limit_gb = 0  # безлимитный трафик при конверсии триала
             user.has_had_paid_subscription = True
             await db.commit()
             logger.info(

@@ -20,7 +20,7 @@ from app.database.crud.subscription import (
 )
 from app.database.crud.transaction import create_transaction
 from app.database.crud.user import subtract_user_balance
-from app.database.models import PaymentMethod, Subscription, Transaction, TransactionType, User
+from app.database.models import PaymentMethod, Subscription, SubscriptionStatus, Transaction, TransactionType, User
 from app.services.admin_notification_service import AdminNotificationService
 from app.services.remnawave_service import RemnaWaveConfigurationError
 from app.services.subscription_service import SubscriptionService
@@ -444,6 +444,15 @@ class SubscriptionRenewalService:
         old_end_date = subscription_before.end_date
 
         subscription_after = await extend_subscription(db, subscription_before, period_days)
+
+        # Конвертируем триал в платную подписку с безлимитным трафиком
+        if subscription_after.is_trial:
+            subscription_after.is_trial = False
+            subscription_after.status = SubscriptionStatus.ACTIVE.value
+            subscription_after.traffic_limit_gb = 0
+            user.has_had_paid_subscription = True
+            await db.commit()
+            await db.refresh(subscription_after)
 
         server_ids = pricing.server_ids or []
         server_prices_for_period = pricing.details.get("servers_individual_prices", [])
