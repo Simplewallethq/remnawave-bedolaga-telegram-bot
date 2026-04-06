@@ -1061,46 +1061,21 @@ def _get_subscription_status(user: User, texts) -> str:
     )
 
     if is_trial_like_status:
-        if days_left > 1 and end_date_text:
-            return texts.t(
-                "SUB_STATUS_TRIAL_ACTIVE",
-                "🎁 Тестовая подписка\n📅 до {end_date} ({days} дн.)",
-            ).format(
-                end_date=end_date_text,
-                days=days_left,
-            )
-        if days_left == 1:
-            return texts.t(
-                "SUB_STATUS_TRIAL_TOMORROW",
-                "🎁 Тестовая подписка\n⚠️ истекает завтра!",
-            )
         return texts.t(
-            "SUB_STATUS_TRIAL_TODAY",
-            "🎁 Тестовая подписка\n⚠️ истекает сегодня!",
+            "SUB_STATUS_TRIAL_ACTIVE",
+            "🎁 Тестовая подписка\n📅 до {end_date} ({days} дн.)",
+        ).format(
+            end_date=end_date_text or "—",
+            days=days_left,
         )
 
     if actual_status == "active":
-        if days_left > 7 and end_date_text:
-            return texts.t(
-                "SUB_STATUS_ACTIVE_LONG",
-                "💎 Активна\n📅 до {end_date} ({days} дн.)",
-            ).format(
-                end_date=end_date_text,
-                days=days_left,
-            )
-        if days_left > 1:
-            return texts.t(
-                "SUB_STATUS_ACTIVE_FEW_DAYS",
-                "💎 Активна\n⚠️ истекает через {days} дн.",
-            ).format(days=days_left)
-        if days_left == 1:
-            return texts.t(
-                "SUB_STATUS_ACTIVE_TOMORROW",
-                "💎 Активна\n⚠️ истекает завтра!",
-            )
         return texts.t(
-            "SUB_STATUS_ACTIVE_TODAY",
-            "💎 Активна\n⚠️ истекает сегодня!",
+            "SUB_STATUS_ACTIVE_LONG",
+            "💎 Активна\n📅 до {end_date} ({days} дн.)",
+        ).format(
+            end_date=end_date_text or "—",
+            days=days_left,
         )
 
     return texts.t("SUB_STATUS_UNKNOWN", "❓ Неизвестно")
@@ -1121,35 +1096,40 @@ def _insert_random_message(base_text: str, random_message: str, action_prompt: s
 
 
 async def get_main_menu_text(user, texts, db: AsyncSession):
-    # New simplified logic based on MENU_DOCUMENTATION.md
-
     subscription = user.subscription
     is_active = subscription and subscription.is_active
     is_trial = subscription and getattr(subscription, "is_trial", False)
-    
+
     trial_active = is_active and is_trial
     has_active_subscription = is_active and not is_trial
     trial_used = (subscription is not None)
 
-    base_text = texts.t("MAIN_MENU_TITLE", "🏠 Главное меню\n")
-    
-    date_fmt = "%Y-%m-%d %H:%M UTC"
-    
+    base_text = texts.t("MAIN_MENU_TITLE", "Главное меню\n\n")
+
+    date_fmt = "%d.%m.%Y"
+
     if trial_active and subscription.end_date:
-        end_str = subscription.end_date.strftime(date_fmt)
-        base_text += texts.t("MAIN_MENU_TRIAL_ACTIVE", "Бесплатная подписка активна до {end_date}").format(end_date=end_str)
+        end_str = format_local_datetime(subscription.end_date, date_fmt)
+        days_left = max(0, (subscription.end_date - datetime.utcnow()).days)
+        device_limit = getattr(subscription, "device_limit", 1) or 1
+        base_text += texts.t(
+            "MAIN_MENU_TRIAL_ACTIVE",
+            "Подписка: 🟢Активна (пробная)\nдо {end_date} ({days} дн.)\n\nУстройств: {devices} шт."
+        ).format(end_date=end_str, days=days_left, devices=device_limit)
     elif has_active_subscription and subscription.end_date:
-        end_str = subscription.end_date.strftime(date_fmt)
-        base_text += texts.t("MAIN_MENU_SUBSCRIPTION_ACTIVE", "Подписка активна до {end_date}").format(end_date=end_str)
+        end_str = format_local_datetime(subscription.end_date, date_fmt)
+        days_left = max(0, (subscription.end_date - datetime.utcnow()).days)
+        device_limit = getattr(subscription, "device_limit", 1) or 1
+        base_text += texts.t(
+            "MAIN_MENU_SUBSCRIPTION_ACTIVE",
+            "Подписка: 🟢Активна\nдо {end_date} ({days} дн.)\n\nУстройств: {devices} шт."
+        ).format(end_date=end_str, days=days_left, devices=device_limit)
     elif not trial_used:
-         base_text += texts.t("MAIN_MENU_TRIAL_AVAILABLE", "Вам доступно 3 дня бесплатно 🎁")
-    elif is_trial and not is_active and subscription and subscription.end_date: # Expired trial
-         end_str = subscription.end_date.strftime(date_fmt)
-         base_text += texts.t("MAIN_MENU_TRIAL_EXPIRED", "Бесплатная подписка закончилась {end_date}").format(end_date=end_str)
+        base_text += texts.t("MAIN_MENU_TRIAL_AVAILABLE", "Вам доступно 3 дня бесплатно 🎁")
     else:
-         base_text += texts.t("MAIN_MENU_NO_SUBSCRIPTION", "Подписка не активна")
-         
-    base_text += texts.t("MAIN_MENU_RESTART_HINT", "\n\nЕсли что-то пошло не так введи /start")
+        base_text += texts.t("MAIN_MENU_NO_SUBSCRIPTION", "Подписка: 🔴Истекла")
+
+    base_text += texts.t("MAIN_MENU_CHANNEL_HINT", "\n\n🔔 Подпишитесь на наш канал чтобы быть в курсе новостей и акций.\n\nВыберите действие:")
 
     return base_text
 

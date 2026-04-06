@@ -503,9 +503,9 @@ def get_main_menu_keyboard(
         happ_row = get_happ_download_button_row(texts)
         if happ_row:
             keyboard.append(happ_row)
-        paired_buttons.append(
+        keyboard.append([
             InlineKeyboardButton(text=texts.MENU_SUBSCRIPTION, callback_data="menu_subscription")
-        )
+        ])
 
         # Добавляем кнопку докупки трафика для лимитированных подписок
         if (
@@ -576,9 +576,9 @@ def get_main_menu_keyboard(
     
     # Добавляем кнопку рефералов, только если программа включена
     if settings.is_referral_program_enabled():
-        paired_buttons.append(
+        keyboard.append([
             InlineKeyboardButton(text=texts.MENU_REFERRALS, callback_data="menu_referrals")
-        )
+        ])
 
     # Добавляем кнопку конкурсов
     if settings.CONTESTS_ENABLED and settings.CONTESTS_BUTTON_VISIBLE:
@@ -915,7 +915,15 @@ def get_subscription_keyboard(
     keyboard = []
     has_direct_payment_methods = False
 
-    if has_subscription:
+    if subscription_is_expired or not has_subscription:
+        # Expired or no subscription — only show "Activate" button
+        keyboard.append([
+            build_miniapp_or_callback_button(
+                text=texts.t("ACTIVATE_SUBSCRIPTION_BUTTON", "🚀 Активировать подписку"),
+                callback_data="menu_buy",
+            )
+        ])
+    elif has_subscription:
         subscription_link = get_display_subscription_link(subscription) if subscription else None
         if subscription_link:
             connect_mode = settings.CONNECT_BUTTON_MODE
@@ -992,29 +1000,6 @@ def get_subscription_keyboard(
                     callback_data="subscription_settings",
                 )
             ])
-
-        # If subscription is expired, show activate button
-        if subscription_is_expired:
-            keyboard.append([
-                build_miniapp_or_callback_button(
-                    text=texts.t("ACTIVATE_SUBSCRIPTION_BUTTON", "🚀 Активировать подписку"),
-                    callback_data="menu_buy",
-                )
-            ])
-    else:
-        # No subscription — show Extend + Activate buttons
-        keyboard.append([
-            build_miniapp_or_callback_button(
-                text=texts.MENU_EXTEND_SUBSCRIPTION,
-                callback_data="subscription_extend",
-            )
-        ])
-        keyboard.append([
-            build_miniapp_or_callback_button(
-                text=texts.t("ACTIVATE_SUBSCRIPTION_BUTTON", "🚀 Активировать подписку"),
-                callback_data="menu_buy",
-            )
-        ])
     
     keyboard.append([
         InlineKeyboardButton(text=texts.BACK, callback_data="back_to_menu")
@@ -2770,7 +2755,7 @@ def get_welcome_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
     texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=texts.t("ACTIVATE_TRIAL_BUTTON", "✨ Активировать"), callback_data="trial_activate")],
-        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
     ])
 
 def get_new_main_menu_keyboard(
@@ -2793,18 +2778,20 @@ def get_new_main_menu_keyboard(
             callback_data="trial_activate"
         )])
         keyboard.append([InlineKeyboardButton(
-            text=texts.t("MENU_CONNECT_BUTTON", "⚙️ Подключить"),
+            text=texts.t("MENU_CONNECT_BUTTON", "⚙️ Подключиться"),
             callback_data="howto"
         )])
     elif trial_active or has_active_subscription:
         keyboard.append([InlineKeyboardButton(
-            text=texts.t("MENU_CONNECT_BUTTON", "⚙️ Подключить"),
+            text=texts.t("MENU_CONNECT_BUTTON", "⚙️ Подключиться"),
             callback_data="howto"
         )])
         
     keyboard.append([
-        InlineKeyboardButton(text=texts.t("MENU_SUBSCRIPTION_BUTTON", "📦 Подписка"), callback_data="subscription"),
-        InlineKeyboardButton(text=texts.t("MENU_REFERRAL_BUTTON", "🤝 Рефералка"), callback_data="referral")
+        InlineKeyboardButton(text=texts.t("MENU_SUBSCRIPTION_BUTTON", "📦 Управление Подпиской"), callback_data="subscription")
+    ])
+    keyboard.append([
+        InlineKeyboardButton(text=texts.t("MENU_REFERRAL_BUTTON", "🤝 Пригласить друзей"), callback_data="referral")
     ])
     keyboard.append([
         InlineKeyboardButton(text=texts.t("MENU_SUPPORT_BUTTON", "🛠 Поддержка"), callback_data="support"),
@@ -2840,7 +2827,7 @@ def get_activation_keyboard(happ_link_shown: bool = False, language: str = DEFAU
         buttons.append([InlineKeyboardButton(text=texts.t("SHOW_LINK_BUTTON", "🔗 Показать ссылку"), callback_data="show_link_activated")])
         
     buttons.append([InlineKeyboardButton(text=texts.t("VIDEO_INSTRUCTION_BUTTON", "🎥 Видео инструкция"), url="https://t.me/+ua95WK9beKZkNDAy")])
-    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")])
+    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -2989,7 +2976,7 @@ def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: boo
             buttons.append([InlineKeyboardButton(text=texts.t("SHOW_LINK_BUTTON", "🔗 Показать ссылку"), callback_data="show_link_howto")])
         
     buttons.append([InlineKeyboardButton(text=texts.t("VIDEO_INSTRUCTION_BUTTON", "🎥 Видео инструкция"), url="https://t.me/+ua95WK9beKZkNDAy")])
-    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")])
+    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -3001,7 +2988,7 @@ def get_subscription_menu_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKe
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=texts.t("SUB_ADD_DAYS_BUTTON", "➕ Добавить дни"), callback_data="sub_add_days")],
         [InlineKeyboardButton(text=texts.t("SUB_ADD_DEVICES_BUTTON", "➕ Добавить устройства"), callback_data="sub_add_devices")],
-        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
     ])
 
 def get_topup_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
@@ -3010,23 +2997,11 @@ def get_topup_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup
     """
     texts = get_texts(language)
     buttons = [
-        [
-            InlineKeyboardButton(text=texts.t("TOPUP_1DAY", "1 день • 10₽"), callback_data="topup_days:1"),
-            InlineKeyboardButton(text=texts.t("TOPUP_5DAYS", "5 дней • 42₽ -16%"), callback_data="topup_days:5")
-        ],
-        [
-            InlineKeyboardButton(text=texts.t("TOPUP_15DAYS", "15 дней • 105₽ -30%"), callback_data="topup_days:15"),
-            InlineKeyboardButton(text=texts.t("TOPUP_1MONTH", "Месяц • 180₽"), callback_data="topup_days:30")
-        ],
-        [
-            InlineKeyboardButton(text=texts.t("TOPUP_3MONTHS", "3 месяца • 486₽"), callback_data="topup_days:90"),
-            InlineKeyboardButton(text=texts.t("TOPUP_6MONTHS", "6 месяцев • 900₽"), callback_data="topup_days:180")
-        ],
-        [
-            InlineKeyboardButton(text=texts.t("TOPUP_1YEAR", "Год • 1642₽"), callback_data="topup_days:365")
-        ],
-        [InlineKeyboardButton(text=texts.t("TOPUP_CUSTOM", "✍️ Свое кол-во дней"), callback_data="topup_custom")],
-        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("TOPUP_5DAYS", "5 дней – 42₽"), callback_data="topup_days:5")],
+        [InlineKeyboardButton(text=texts.t("TOPUP_1MONTH", "1 месяц – 180₽"), callback_data="topup_days:30")],
+        [InlineKeyboardButton(text=texts.t("TOPUP_3MONTHS", "3 месяца – 486₽ -10%"), callback_data="topup_days:90")],
+        [InlineKeyboardButton(text=texts.t("TOPUP_1YEAR", "1 год – 1642₽ -24%"), callback_data="topup_days:365")],
+        [InlineKeyboardButton(text=texts.t("BACK_BUTTON", "⬅️Назад"), callback_data="subscription")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -3060,7 +3035,7 @@ def get_device_selection_keyboard(current_selected: int = 1, back_callback: str 
 
     buttons.append([InlineKeyboardButton(text=texts.t("NEXT_BUTTON", "Далее ➡️"), callback_data="device_selection_confirm")])
     buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)])
-    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")])
+    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -3139,7 +3114,7 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
     
     # Add back and main menu buttons
     buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)])
-    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")])
+    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_profile_keyboard(language: str = DEFAULT_LANGUAGE, balance_kopeks: int = 0) -> InlineKeyboardMarkup:
@@ -3150,10 +3125,10 @@ def get_profile_keyboard(language: str = DEFAULT_LANGUAGE, balance_kopeks: int =
     balance_text = texts.t("MENU_BALANCE_BUTTON", "💳 Баланс: {balance}₽").format(balance=int(balance_kopeks / 100))
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=balance_text, callback_data="menu_balance")],
-        [InlineKeyboardButton(text=texts.t("MENU_PROMOCODE", "🏷 Промокод"), callback_data="profile_promo")],
-        [InlineKeyboardButton(text=texts.t("MENU_LANGUAGE", "🌐 Язык"), callback_data="profile_language")],
+        [InlineKeyboardButton(text=texts.t("MENU_PROMOCODE", "🎫 Ввести промокод"), callback_data="profile_promo")],
+        [InlineKeyboardButton(text=texts.t("MENU_LANGUAGE", "🌐 Язык/Language"), callback_data="profile_language")],
         [InlineKeyboardButton(text=texts.t("MENU_INFO", "ℹ️ Инфо"), callback_data="menu_info")],
-        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
     ])
 
 def get_referral_keyboard(referral_link: str, invite_text: str = "", language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
@@ -3168,7 +3143,7 @@ def get_referral_keyboard(referral_link: str, invite_text: str = "", language: s
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=texts.t("SHARE_REFERRAL_BUTTON", "📤 Поделиться ссылкой"), url=url)],
         [InlineKeyboardButton(text=texts.t("COPY_REFERRAL_BUTTON", "📋 Скопировать ссылку"), callback_data="copy_referral_link")],
-        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
     ])
 
 def get_balance_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
@@ -3180,7 +3155,7 @@ def get_balance_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
         [InlineKeyboardButton(text=texts.t("BALANCE_HISTORY_BUTTON", "📜 История покупок"), callback_data="purchases_history")],
         [InlineKeyboardButton(text=texts.t("BALANCE_TOPUP_BUTTON", "💰 Пополнить"), callback_data="topup")],
         [InlineKeyboardButton(text=texts.BACK, callback_data="profile")],
-        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
     ])
 
 def get_support_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
@@ -3189,8 +3164,7 @@ def get_support_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
     """
     texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=texts.t("CONTACT_SUPPORT_BUTTON", "💬 Написать в поддержку"), url="https://t.me/letovpnsupport")],
-        [InlineKeyboardButton(text=texts.t("FAQ_BUTTON", "📚 База знаний"), url="https://help.letovpn.com")],
-        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"), callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("CONTACT_SUPPORT_BUTTON", "💬 Написать в поддержку"), url="https://t.me/basetypes")],
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
     ])
 

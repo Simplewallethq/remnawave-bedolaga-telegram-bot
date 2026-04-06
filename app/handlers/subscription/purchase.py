@@ -281,114 +281,50 @@ async def show_subscription_info(
                 "\n🔴 истекает через несколько минут!",
             )
 
-    subscription_type = (
-        texts.t("SUBSCRIPTION_TYPE_TRIAL", "Триал")
-        if subscription.is_trial
-        else texts.t("SUBSCRIPTION_TYPE_PAID", "Платная")
-    )
-
-    used_traffic = f"{subscription.traffic_used_gb:.1f}"
-    if subscription.traffic_limit_gb == 0:
-        traffic_used_display = texts.t(
-            "SUBSCRIPTION_TRAFFIC_UNLIMITED",
-            "∞ (безлимит) | Использовано: {used} ГБ",
-        ).format(used=used_traffic)
+    # For expired subscriptions, show simplified message
+    if actual_status == "expired":
+        message = texts.t(
+            "SUBSCRIPTION_OVERVIEW_EXPIRED_TEMPLATE",
+            "Ваша подписка неактивна. Вы можете активировать ее по кнопке ниже.",
+        )
     else:
-        traffic_used_display = texts.t(
-            "SUBSCRIPTION_TRAFFIC_LIMITED",
-            "{used} / {limit} ГБ",
-        ).format(used=used_traffic, limit=subscription.traffic_limit_gb)
+        devices_used_str = ""
+        devices_list: List[Dict[str, Any]] = []
 
-    devices_used_str = "—"
-    devices_list = []
-    devices_count = 0
+        show_devices = settings.is_devices_selection_enabled()
 
-    show_devices = settings.is_devices_selection_enabled()
-    devices_used_str = ""
-    devices_list: List[Dict[str, Any]] = []
+        if show_devices:
+            try:
+                if db_user.remnawave_uuid:
+                    from app.services.remnawave_service import RemnaWaveService
+                    service = RemnaWaveService()
 
-    if show_devices:
-        try:
-            if db_user.remnawave_uuid:
-                from app.services.remnawave_service import RemnaWaveService
-                service = RemnaWaveService()
+                    async with service.get_api_client() as api:
+                        response = await api._make_request('GET', f'/api/hwid/devices/{db_user.remnawave_uuid}')
 
-                async with service.get_api_client() as api:
-                    response = await api._make_request('GET', f'/api/hwid/devices/{db_user.remnawave_uuid}')
+                        if response and 'response' in response:
+                            devices_info = response['response']
+                            devices_count = devices_info.get('total', 0)
+                            devices_list = devices_info.get('devices', [])
+                            devices_used_str = str(devices_count)
+                            logger.info(f"Найдено {devices_count} устройств для пользователя {db_user.telegram_id}")
+                        else:
+                            logger.warning(f"Не удалось получить информацию об устройствах для {db_user.telegram_id}")
 
-                    if response and 'response' in response:
-                        devices_info = response['response']
-                        devices_count = devices_info.get('total', 0)
-                        devices_list = devices_info.get('devices', [])
-                        devices_used_str = str(devices_count)
-                        logger.info(f"Найдено {devices_count} устройств для пользователя {db_user.telegram_id}")
-                    else:
-                        logger.warning(f"Не удалось получить информацию об устройствах для {db_user.telegram_id}")
+            except Exception as e:
+                logger.error(f"Ошибка получения устройств для отображения: {e}")
+                devices_used = await get_current_devices_count(db_user)
+                devices_used_str = str(devices_used)
 
-        except Exception as e:
-            logger.error(f"Ошибка получения устройств для отображения: {e}")
-            devices_used = await get_current_devices_count(db_user)
-            devices_used_str = str(devices_used)
+        devices_display = devices_used_str if devices_used_str else str(subscription.device_limit)
 
-    servers_names = await get_servers_display_names(subscription.connected_squads)
-    servers_display = servers_names if servers_names else ""
-
-    message_template = texts.t(
-        "SUBSCRIPTION_OVERVIEW_TEMPLATE",
-        """👤 {full_name}
-💰 Баланс: {balance}
-📱 Подписка: {status_emoji} {status_display}{warning}
-
-📱 Информация о подписке
-🎭 Тип: {subscription_type}
-📅 Действует до: {end_date}
-⏰ Осталось: {time_left}
-📈 Трафик: {traffic}
-🌍 Серверы: {servers}
-📱 Устройства: {devices_used} / {device_limit}""",
-    )
-
-    if not servers_display:
-        message_template = message_template.replace(
-            "\n🌍 Серверы: {servers}",
-            "",
+        message = texts.t(
+            "SUBSCRIPTION_OVERVIEW_TEMPLATE",
+            "Ваша подписка:\n\nОсталось дней: {time_left}\nУстройств: {devices_used} шт.",
+        ).format(
+            time_left=time_left_text,
+            devices_used=devices_display,
         )
-
-    if not show_devices:
-        message_template = message_template.replace(
-            "\n📱 Устройства: {devices_used} / {device_limit}",
-            "",
-        )
-
-    message = message_template.format(
-        full_name=db_user.full_name,
-        balance=settings.format_price(db_user.balance_kopeks),
-        status_emoji=status_emoji,
-        status_display=status_display,
-        warning=warning_text,
-        subscription_type=subscription_type,
-        end_date=format_local_datetime(subscription.end_date, "%d.%m.%Y %H:%M"),
-        time_left=time_left_text,
-        traffic=traffic_used_display,
-        servers=servers_display,
-        devices_used=devices_used_str,
-        device_limit=subscription.device_limit,
-    )
-
-    if show_devices and devices_list:
-        message += "\n\n" + texts.t(
-            "SUBSCRIPTION_CONNECTED_DEVICES_TITLE",
-            "<blockquote>📱 <b>Подключенные устройства:</b>\n",
-        )
-        for device in devices_list[:5]:
-            platform = device.get('platform', 'Unknown')
-            device_model = device.get('deviceModel', 'Unknown')
-            device_info = f"{platform} - {device_model}"
-
-            if len(device_info) > 35:
-                device_info = device_info[:32] + "..."
-            message += f"• {device_info}\n"
-        message += texts.t("SUBSCRIPTION_CONNECTED_DEVICES_FOOTER", "</blockquote>")
 
     subscription_link = get_display_subscription_link(subscription)
     hide_subscription_link = settings.should_hide_subscription_link()
@@ -1213,17 +1149,13 @@ async def handle_extend_subscription(
     )
 
     renewal_lines = [
-        "⏰ Продление подписки",
+        "Продление подписки",
         "",
         f"Осталось дней: {subscription.days_left}",
-        "",
-        "<b>Ваша текущая конфигурация:</b>",
-        f"🌍 Серверов: {len(subscription.connected_squads)}",
-        f"📊 Трафик: {texts.format_traffic(subscription.traffic_limit_gb)}",
     ]
 
     if settings.is_devices_selection_enabled():
-        renewal_lines.append(f"📱 Устройств: {subscription.device_limit}")
+        renewal_lines.append(f"Устройств: {subscription.device_limit} шт.")
 
     renewal_lines.extend([
         "",
