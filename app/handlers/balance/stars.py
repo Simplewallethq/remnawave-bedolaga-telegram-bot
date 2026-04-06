@@ -106,7 +106,7 @@ async def process_stars_payment_amount(
         )
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="⭐ Оплатить", url=invoice_link)],
+            [types.InlineKeyboardButton(text=f"⭐ Оплатить ({stars_amount} Stars)", url=invoice_link)],
             [types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")]
         ])
 
@@ -130,10 +130,9 @@ async def process_stars_payment_amount(
                 )
 
         invoice_message = await message.answer(
-            f"⭐ <b>Оплата через Telegram Stars</b>\n\n"
-            f"💰 Сумма: {texts.format_price(amount_kopeks)}\n"
-            f"⭐ К оплате: {stars_amount} звезд\n"
-            f"📊 Курс: {stars_rate}₽ за звезду\n\n"
+            f"<b>Оплата через Telegram Stars</b>\n\n"
+            f"Сумма: {texts.format_price(amount_kopeks)}\n"
+            f"К оплате: {stars_amount} Stars\n\n"
             f"Нажмите кнопку ниже для оплаты:",
             reply_markup=keyboard,
             parse_mode="HTML"

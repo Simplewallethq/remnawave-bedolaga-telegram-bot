@@ -689,7 +689,7 @@ async def activate_trial(
         else:
             trial_success_text = texts.t(
                 "SUBSCRIPTION_LINK_GENERATING_NOTICE",
-                "{purchase_text}\n\nСсылка генерируется, перейдите в раздел 'Моя подписка' через несколько секунд.",
+                "{purchase_text}\n\nПри необходимости перейдите в раздел \"Управление подпиской\" чтобы получить ссылку для подключения.",
             ).format(purchase_text=texts.TRIAL_ACTIVATED)
             trial_success_text += payment_note
             await callback.message.edit_text(
@@ -1500,7 +1500,7 @@ async def confirm_extend_subscription(
 
         success_message = (
             "✅ Подписка успешно продлена!\n\n"
-            f"⏰ Добавлено: {days} дней\n"
+            f"Добавлено: {days} дней\n"
             f"Действует до: {format_local_datetime(refreshed_end_date, '%d.%m.%Y %H:%M')}\n\n"
             f"💰 Списано: {texts.format_price(price)}"
         )
@@ -2281,7 +2281,7 @@ async def confirm_purchase(
                         f"{texts.SUBSCRIPTION_PURCHASED}\n\n"
                         + texts.t(
                     "SUBSCRIPTION_LINK_HIDDEN_NOTICE",
-                    "ℹ️ Ссылка подписки доступна по кнопкам ниже или в разделе \"Моя подписка\".",
+                    "ℹ️ Ссылка подписки доступна по кнопкам ниже или в разделе \"Управление подпиской\".",
                 )
                         + "\n\n"
                         + texts.t(
@@ -2383,7 +2383,7 @@ async def confirm_purchase(
             await callback.message.edit_text(
                 texts.t(
                     "SUBSCRIPTION_LINK_GENERATING_NOTICE",
-                    "{purchase_text}\n\nСсылка генерируется, перейдите в раздел 'Моя подписка' через несколько секунд.",
+                    "{purchase_text}\n\nПри необходимости перейдите в раздел \"Управление подпиской\" чтобы получить ссылку для подключения.",
                 ).format(purchase_text=purchase_text),
                 reply_markup=get_back_keyboard(db_user.language)
             )
@@ -3041,7 +3041,7 @@ async def handle_payment_selection(
 
             success_message = (
                 "✅ Подписка успешно продлена!\n\n"
-                f"⏰ Добавлено: {days} дней\n"
+                f"Добавлено: {days} дней\n"
                 f"Действует до: {format_local_datetime(refreshed_end_date, '%d.%m.%Y %H:%M')}\n\n"
                 f"💰 Списано: {texts.format_price(amount_kopeks)}"
             )
@@ -3093,7 +3093,7 @@ async def handle_payment_selection(
              keyboard = InlineKeyboardMarkup(inline_keyboard=[
                  [InlineKeyboardButton(text="📱 Оплатить через СБП", url=payment.confirmation_url)],
                  [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"check_payment:sbp:{payment.id}")],
-                 [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                 [InlineKeyboardButton(text="⬅️Назад", callback_data="main_menu")]
              ])
              
              await edit_or_answer_photo(
@@ -3141,17 +3141,15 @@ async def handle_payment_selection(
              url = result.get("bot_invoice_url") or result.get("mini_app_invoice_url")
              
              keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                 [InlineKeyboardButton(text="👛 Оплатить CryptoBot", url=url)],
-                 #[InlineKeyboardButton(text="✅ Проверить статус", callback_data=f"check_payment:cryptobot:{result['invoice_id']}")],
-                 [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                 [InlineKeyboardButton(text="🪙 Оплатить через Crypto Bot", url=url)],
+                 [InlineKeyboardButton(text="⬅️Назад", callback_data="main_menu")]
              ])
-             
+
              await edit_or_answer_photo(
                  callback=callback,
                  caption=(
-                     f"💎 <b>Оплата через CryptoBot</b>\n\n"
-                     f"Сумма: {settings.format_price(amount_kopeks)} (~{amount_usd} USDT)\n"
-                     f"Назначение: {description}\n\n"
+                     f"<b>Оплата через Crypto Bot</b>\n\n"
+                     f"Сумма: {settings.format_price(amount_kopeks)} (~{amount_usd:.2f} USDT)\n\n"
                      f"Нажмите кнопку ниже для оплаты криптовалютой."
                  ),
                  keyboard=keyboard,
@@ -3174,20 +3172,22 @@ async def handle_payment_selection(
              await callback.message.delete()
              
              payload = f"balance_{db_user.id}_{amount_kopeks}"
-             
+
              # Use TelegramStarsService to send invoice
              from app.external.telegram_stars import TelegramStarsService
              stars_service = TelegramStarsService(callback.bot)
-             
+
+             stars_amount = TelegramStarsService.calculate_stars_from_rubles(amount_kopeks / 100)
+
              await stars_service.send_invoice(
                  chat_id=current_chat_id,
-                 title=f"Пополнение баланса", # Stars invoice title
-                 description=description,
+                 title="Оплата подписки",
+                 description=f"Оплатите счет для продления подписки на {int(value)} дней." if prefix == "pay" else description,
                  amount_kopeks=amount_kopeks,
                  payload=payload,
                  keyboard=InlineKeyboardMarkup(inline_keyboard=[
-                     [InlineKeyboardButton(text=f"⭐️ Оплатить {settings.format_price(amount_kopeks)}", pay=True)],
-                     [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                     [InlineKeyboardButton(text=f"⭐️ Оплатить ({stars_amount} Stars)", pay=True)],
+                     [InlineKeyboardButton(text="⬅️Назад", callback_data="main_menu")]
                  ])
              )
         except Exception as e:
@@ -3219,7 +3219,7 @@ async def handle_payment_selection(
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=f"💳 Оплатить через {method_name}", url=payment.confirmation_url)],
                 [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"check_payment:yookassa:{payment.id}")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="⬅️Назад", callback_data="main_menu")]
             ])
             
             await edit_or_answer_photo(
@@ -4094,7 +4094,7 @@ async def _extend_existing_subscription(
     # Отправляем сообщение пользователю
     success_message = (
         "✅ Подписка успешно продлена!\n\n"
-        f"⏰ Добавлено: {period_days} дней\n"
+        f"Добавлено: {period_days} дней\n"
         f"Действует до: {format_local_datetime(new_end_date, '%d.%m.%Y %H:%M')}\n\n"
         f"💰 Списано: {texts.format_price(price_kopeks)}"
     )

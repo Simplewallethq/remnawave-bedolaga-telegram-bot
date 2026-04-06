@@ -1397,7 +1397,7 @@ def get_payment_methods_keyboard(amount_kopeks: int, language: str = DEFAULT_LAN
         platega_name = settings.get_platega_display_name()
         keyboard.append([
             InlineKeyboardButton(
-                text=texts.t("PAYMENT_PLATEGA", f"💳 {platega_name}"),
+                text=texts.t("PAYMENT_PLATEGA", "💳 СБП/Банковская карта"),
                 callback_data=_build_callback("platega"),
             )
         ])
@@ -1406,7 +1406,7 @@ def get_payment_methods_keyboard(amount_kopeks: int, language: str = DEFAULT_LAN
     if settings.is_cryptobot_enabled():
         keyboard.append([
             InlineKeyboardButton(
-                text=texts.t("PAYMENT_CRYPTOBOT", "🪙 Криптовалюта (CryptoBot)"),
+                text=texts.t("PAYMENT_CRYPTOBOT", "🪙 Crypto Bot"),
                 callback_data=_build_callback("cryptobot")
             )
         ])
@@ -3077,7 +3077,7 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
     # Platega
     if settings.is_platega_enabled() and settings.get_platega_active_methods():
         platega_name = settings.get_platega_display_name()
-        buttons.append([InlineKeyboardButton(text=f"💳 {platega_name}", callback_data=_build_callback("platega"))])
+        buttons.append([InlineKeyboardButton(text="💳 СБП/Банковская карта", callback_data=_build_callback("platega"))])
     
     # PayPalych (pal24)
     if settings.is_pal24_enabled():
@@ -3094,7 +3094,7 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
     
     # CryptoBot
     if settings.is_cryptobot_enabled():
-        buttons.append([InlineKeyboardButton(text="🪙 CryptoBot", callback_data=_build_callback("cryptobot"))])
+        buttons.append([InlineKeyboardButton(text="🪙 Crypto Bot", callback_data=_build_callback("cryptobot"))])
     
     # Heleket
     if settings.is_heleket_enabled():
@@ -3112,9 +3112,8 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
     if not buttons:
         buttons.append([InlineKeyboardButton(text=texts.t("PAYMENT_UNAVAILABLE", "⚠️ Способы оплаты временно недоступны"), callback_data="payment_methods_unavailable")])
     
-    # Add back and main menu buttons
+    # Add back button
     buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)])
-    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_profile_keyboard(language: str = DEFAULT_LANGUAGE, balance_kopeks: int = 0) -> InlineKeyboardMarkup:

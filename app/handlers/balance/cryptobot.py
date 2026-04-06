@@ -179,7 +179,7 @@ async def process_cryptobot_payment_amount(
             return
         
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="🪙 Оплатить", url=payment_url)],
+            [types.InlineKeyboardButton(text="🪙 Оплатить через Crypto Bot", url=payment_url)],
             [types.InlineKeyboardButton(text="📊 Проверить статус", callback_data=f"check_cryptobot_{payment_result['local_payment_id']}")],
             [types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")]
         ])
@@ -206,20 +206,9 @@ async def process_cryptobot_payment_amount(
                 )
 
         invoice_message = await message.answer(
-            f"🪙 <b>Оплата криптовалютой</b>\n\n"
-            f"💰 Сумма к зачислению: {amount_rubles:.0f} ₽\n"
-            f"💵 К оплате: {amount_usd:.2f} USD\n"
-            f"🪙 Актив: {payment_result['asset']}\n"
-            f"💱 Курс: 1 USD = {current_rate:.2f} ₽\n"
-            f"🆔 ID платежа: {payment_result['invoice_id'][:8]}...\n\n"
-            f"📱 <b>Инструкция:</b>\n"
-            f"1. Нажмите кнопку 'Оплатить'\n"
-            f"2. Выберите удобный актив\n"
-            f"3. Переведите указанную сумму\n"
-            f"4. Деньги поступят на баланс автоматически\n\n"
-            f"🔒 Оплата проходит через защищенную систему CryptoBot\n"
-            f"⚡ Поддерживаемые активы: USDT, TON, BTC, ETH\n\n"
-            f"❓ Если возникнут проблемы, обратитесь в {settings.get_support_contact_display_html()}",
+            f"<b>Оплата через Crypto Bot</b>\n\n"
+            f"Сумма: {amount_rubles:.0f} ₽ (~{amount_usd:.2f} USDT)\n\n"
+            f"Нажмите кнопку ниже для оплаты криптовалютой.",
             reply_markup=keyboard,
             parse_mode="HTML"
         )

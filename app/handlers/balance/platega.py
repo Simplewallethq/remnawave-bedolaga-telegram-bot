@@ -23,6 +23,33 @@ def _get_active_methods() -> List[int]:
     return [code for code in methods if code in {2, 10, 11, 12, 13}]
 
 
+def _is_sbp_method(method_code: int) -> bool:
+    """Determine if the Platega method is SBP-based (QR code)."""
+    title = settings.get_platega_method_display_title(method_code).lower()
+    return "сбп" in title or "sbp" in title or "qr" in title or method_code in {2, 11}
+
+
+def _get_method_button_label(method_code: int) -> str:
+    """Get display label for Platega method selection button."""
+    if _is_sbp_method(method_code):
+        return "СБП по QR коду"
+    return "Банковская карта"
+
+
+def _get_payment_title(method_code: int) -> str:
+    """Get payment screen title based on method type."""
+    if _is_sbp_method(method_code):
+        return "Оплата по СБП через QR код"
+    return "Оплата по банковской карте"
+
+
+def _get_pay_button_text(method_code: int) -> str:
+    """Get pay button text based on method type."""
+    if _is_sbp_method(method_code):
+        return "💳 Оплатить по СБП"
+    return "💳 Оплатить по банковской карте"
+
+
 async def _prompt_amount(
     message: types.Message,
     db_user: User,
@@ -144,7 +171,7 @@ async def start_platega_payment(
 
     method_buttons: list[list[types.InlineKeyboardButton]] = []
     for method_code in active_methods:
-        label = settings.get_platega_method_display_title(method_code)
+        label = _get_method_button_label(method_code)
         method_buttons.append(
             [
                 types.InlineKeyboardButton(
@@ -161,7 +188,7 @@ async def start_platega_payment(
     await callback.message.edit_text(
         texts.t(
             "PLATEGA_SELECT_PAYMENT_METHOD",
-            "Выберите способ оплаты Platega:",
+            "Выберите способ оплаты:",
         ),
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=method_buttons),
     )
@@ -266,16 +293,14 @@ async def process_platega_payment_amount(
     redirect_url = payment_result.get("redirect_url")
     local_payment_id = payment_result.get("local_payment_id")
     transaction_id = payment_result.get("transaction_id")
-    method_title = settings.get_platega_method_display_title(method_code)
+    payment_title = _get_payment_title(method_code)
+    pay_button_text = _get_pay_button_text(method_code)
 
     keyboard = types.InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 types.InlineKeyboardButton(
-                    text=texts.t(
-                        "PLATEGA_PAY_BUTTON",
-                        "💳 Оплатить через {method}",
-                    ).format(method=method_title),
+                    text=pay_button_text,
                     url=redirect_url,
                 )
             ],
@@ -292,15 +317,10 @@ async def process_platega_payment_amount(
     instructions_template = texts.t(
         "PLATEGA_PAYMENT_INSTRUCTIONS",
         (
-            "💳 <b>Оплата через Platega ({method})</b>\n\n"
-            "💰 Сумма: {amount}\n"
-            "🆔 ID транзакции: {transaction}\n\n"
-            "📱 <b>Инструкция:</b>\n"
-            "1. Нажмите кнопку «Оплатить»\n"
-            "2. Следуйте подсказкам платёжной системы\n"
-            "3. Подтвердите перевод\n"
-            "4. Средства зачислятся автоматически\n\n"
-            "❓ Если возникнут проблемы, обратитесь в {support}"
+            "<b>{title}</b>\n\n"
+            "Сумма: {amount}\n\n"
+            "Нажмите кнопку \"Оплатить\" и осуществите перевод. Средства зачислятся автоматически.\n\n"
+            "Если возникнут проблемы, обратитесь в {support}"
         ),
     )
 
@@ -324,9 +344,8 @@ async def process_platega_payment_amount(
 
     invoice_message = await message.answer(
         instructions_template.format(
-            method=method_title,
+            title=payment_title,
             amount=settings.format_price(amount_kopeks),
-            transaction=transaction_id or local_payment_id,
             support=settings.get_support_contact_display_html(),
         ),
         reply_markup=keyboard,
