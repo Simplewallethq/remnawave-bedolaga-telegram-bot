@@ -2849,11 +2849,13 @@ def get_onboarding_device_selection_keyboard(language: str = DEFAULT_LANGUAGE) -
     """
     Onboarding Screen 2: Device selection (4 buttons).
     """
+    texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🍎 iPhone", callback_data="onboarding_device_iphone")],
         [InlineKeyboardButton(text="🤖 Android", callback_data="onboarding_device_android")],
         [InlineKeyboardButton(text="💻 Windows", callback_data="onboarding_device_windows")],
         [InlineKeyboardButton(text="🍎 MacOS", callback_data="onboarding_device_macos")],
+        [InlineKeyboardButton(text=texts.BACK, callback_data="main_menu")],
     ])
 
 
@@ -2910,6 +2912,12 @@ def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT
         InlineKeyboardButton(
             text=texts.t("ONBOARDING_CONNECT_BUTTON", "🚀 Подключиться"),
             callback_data="onboarding_connect",
+        ),
+    ])
+    buttons.append([
+        InlineKeyboardButton(
+            text=texts.t("ONBOARDING_MANUAL_LINK_BUTTON", "🔗 Ручное подключение"),
+            callback_data="onboarding_manual_link",
         ),
     ])
     buttons.append([

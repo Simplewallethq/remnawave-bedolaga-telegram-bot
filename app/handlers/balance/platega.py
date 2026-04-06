@@ -182,7 +182,7 @@ async def start_platega_payment(
         )
 
     method_buttons.append(
-        [types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")]
+        [types.InlineKeyboardButton(text=texts.BACK, callback_data="sub_add_days")]
     )
 
     await callback.message.edit_text(
@@ -310,7 +310,7 @@ async def process_platega_payment_amount(
                     callback_data=f"check_platega_{local_payment_id}",
                 )
             ],
-            [types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")],
+            [types.InlineKeyboardButton(text=texts.BACK, callback_data="sub_add_days")],
         ]
     )
 

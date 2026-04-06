@@ -151,7 +151,7 @@ async def _auto_activate_trial_and_show_device_selection(
     texts = get_texts(lang)
     device_selection_text = texts.t(
         "ONBOARDING_DEVICE_SELECTION_TEXT",
-        "Выбери устройство и подключайся бесплатно.\nЭто займёт меньше 30 секунд.",
+        "Выбери устройство для подключения:",
     )
 
     image_path = os.path.join("images", "device_selection_screen.png")

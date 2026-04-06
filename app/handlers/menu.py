@@ -1228,7 +1228,7 @@ async def handle_howto(
     texts = get_texts(user.language)
     device_selection_text = texts.t(
         "ONBOARDING_DEVICE_SELECTION_TEXT",
-        "Выбери устройство и подключайся бесплатно.\nЭто займёт меньше 30 секунд.",
+        "Выбери устройство для подключения:",
     )
 
     image_path = os.path.join("images", "device_selection_screen.png")
@@ -1258,7 +1258,7 @@ async def handle_onboarding_connect_free(
     texts = get_texts(user.language)
     device_selection_text = texts.t(
         "ONBOARDING_DEVICE_SELECTION_TEXT",
-        "Выбери устройство и подключайся бесплатно.\nЭто займёт меньше 30 секунд.",
+        "Выбери устройство для подключения:",
     )
 
     image_path = os.path.join("images", "device_selection_screen.png")
@@ -1297,7 +1297,7 @@ async def handle_onboarding_device_selection(
     texts = get_texts(user.language)
     connection_text = texts.t(
         "ONBOARDING_CONNECTION_TEXT",
-        "Установи приложение Happ по кнопке ниже.\n\nПосле установки нажми «Подключиться» — всё настроится автоматически.",
+        "Установи приложение Happ по кнопке ниже.\n\nПосле установки нажми \"Подключиться\" → в приложении выбери Подключить.",
     )
 
     keyboard = get_onboarding_connection_keyboard(device_type, user.language)
