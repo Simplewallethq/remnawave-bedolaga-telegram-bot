@@ -55,12 +55,6 @@ from app.services.pinned_message_service import (
 )
 from app.utils.user_utils import generate_unique_referral_code
 from app.utils.photo_message import edit_or_answer_photo
-from app.utils.promo_offer import (
-    build_promo_offer_hint,
-    build_test_access_hint,
-)
-from app.utils.timezone import format_local_datetime
-from app.database.crud.user_message import get_random_active_message
 from app.database.crud.subscription import decrement_subscription_server_counts
 from app.services.blacklist_service import blacklist_service
 
@@ -1635,97 +1629,6 @@ async def complete_registration(
     logger.info(f"✅ Регистрация завершена для пользователя: {user.telegram_id}")
 
 
-def _get_subscription_status(user, texts):
-    if not user or not hasattr(user, "subscription") or not user.subscription:
-        return texts.t("SUBSCRIPTION_NONE", "Нет активной подписки")
-
-    subscription = user.subscription
-    actual_status = getattr(subscription, "actual_status", None)
-
-    from datetime import datetime
-
-    end_date = getattr(subscription, "end_date", None)
-    end_date_display = format_local_datetime(end_date, "%d.%m.%Y") if end_date else None
-    current_time = datetime.utcnow()
-
-    if actual_status == "disabled":
-        return texts.t("SUB_STATUS_DISABLED", "⚫ Отключена")
-
-    if actual_status == "pending":
-        return texts.t("SUB_STATUS_PENDING", "⏳ Ожидает активации")
-
-    if actual_status == "expired" or (end_date and end_date <= current_time):
-        if end_date_display:
-            return texts.t(
-                "SUB_STATUS_EXPIRED",
-                "🔴 Истекла\n📅 {end_date}",
-            ).format(end_date=end_date_display)
-        return texts.t("SUBSCRIPTION_STATUS_EXPIRED", "🔴 Истекла")
-
-    if not end_date:
-        return texts.t("SUBSCRIPTION_ACTIVE", "✅ Активна")
-
-    days_left = (end_date - current_time).days
-    is_trial = actual_status == "trial" or getattr(subscription, "is_trial", False)
-
-    if actual_status not in {"active", "trial", None} and not is_trial:
-        return texts.t("SUBSCRIPTION_STATUS_UNKNOWN", "❓ Статус неизвестен")
-
-    if is_trial:
-        if days_left > 1 and end_date_display:
-            return texts.t(
-                "SUB_STATUS_TRIAL_ACTIVE",
-                "🎁 Тестовая подписка\n📅 до {end_date} ({days} дн.)",
-            ).format(end_date=end_date_display, days=days_left)
-        if days_left == 1:
-            return texts.t(
-                "SUB_STATUS_TRIAL_TOMORROW",
-                "🎁 Тестовая подписка\n⚠️ истекает завтра!",
-            )
-        return texts.t(
-            "SUB_STATUS_TRIAL_TODAY",
-            "🎁 Тестовая подписка\n⚠️ истекает сегодня!",
-        )
-
-    if days_left > 7 and end_date_display:
-        return texts.t(
-            "SUB_STATUS_ACTIVE_LONG",
-            "💎 Активна\n📅 до {end_date} ({days} дн.)",
-        ).format(end_date=end_date_display, days=days_left)
-    if days_left > 1:
-        return texts.t(
-            "SUB_STATUS_ACTIVE_FEW_DAYS",
-            "💎 Активна\n⚠️ истекает через {days} дн.",
-        ).format(days=days_left)
-    if days_left == 1:
-        return texts.t(
-            "SUB_STATUS_ACTIVE_TOMORROW",
-            "💎 Активна\n⚠️ истекает завтра!",
-        )
-    return texts.t(
-        "SUB_STATUS_ACTIVE_TODAY",
-        "💎 Активна\n⚠️ истекает сегодня!",
-    )
-
-
-def _get_subscription_status_simple(texts):
-    return texts.t("SUBSCRIPTION_NONE", "Нет активной подписки")
-
-
-def _insert_random_message(base_text: str, random_message: str, action_prompt: str) -> str:
-    if not random_message:
-        return base_text
-
-    prompt = action_prompt or ""
-    if prompt and prompt in base_text:
-        parts = base_text.split(prompt, 1)
-        if len(parts) == 2:
-            return f"{parts[0]}\n{random_message}\n\n{prompt}{parts[1]}"
-        return base_text.replace(prompt, f"\n{random_message}\n\n{prompt}", 1)
-
-    return f"{base_text}\n\n{random_message}"
-
-
 def get_referral_code_keyboard(language: str):
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -1737,74 +1640,6 @@ def get_referral_code_keyboard(language: str):
         )]
     ])
 
-async def get_main_menu_text(user, texts, db: AsyncSession):
-
-    import html
-    base_text = texts.MAIN_MENU.format(
-        user_name=html.escape(user.full_name or ""),
-        subscription_status=_get_subscription_status(user, texts)
-    )
-
-    action_prompt = texts.t("MAIN_MENU_ACTION_PROMPT", "Выберите действие:")
-
-    info_sections: list[str] = []
-
-    try:
-        promo_hint = await build_promo_offer_hint(db, user, texts)
-        if promo_hint:
-            info_sections.append(promo_hint.strip())
-    except Exception as hint_error:
-        logger.debug(
-            "Не удалось построить подсказку промо-предложения для пользователя %s: %s",
-            getattr(user, "id", None),
-            hint_error,
-        )
-
-    try:
-        test_access_hint = await build_test_access_hint(db, user, texts)
-        if test_access_hint:
-            info_sections.append(test_access_hint.strip())
-    except Exception as test_error:
-        logger.debug(
-            "Не удалось построить подсказку тестового доступа для пользователя %s: %s",
-            getattr(user, "id", None),
-            test_error,
-        )
-
-    if info_sections:
-        extra_block = "\n\n".join(section for section in info_sections if section)
-        if extra_block:
-            base_text = _insert_random_message(base_text, extra_block, action_prompt)
-
-    try:
-        random_message = await get_random_active_message(db)
-        if random_message:
-            return _insert_random_message(base_text, random_message, action_prompt)
-
-    except Exception as e:
-        logger.error(f"Ошибка получения случайного сообщения: {e}")
-
-    return base_text
-
-async def get_main_menu_text_simple(user_name, texts, db: AsyncSession):
-
-    import html
-    base_text = texts.MAIN_MENU.format(
-        user_name=html.escape(user_name or ""),
-        subscription_status=_get_subscription_status_simple(texts)
-    )
-
-    action_prompt = texts.t("MAIN_MENU_ACTION_PROMPT", "Выберите действие:")
-
-    try:
-        random_message = await get_random_active_message(db)
-        if random_message:
-            return _insert_random_message(base_text, random_message, action_prompt)
-
-    except Exception as e:
-        logger.error(f"Ошибка получения случайного сообщения: {e}")
-
-    return base_text
 
 
 async def required_sub_channel_check(
