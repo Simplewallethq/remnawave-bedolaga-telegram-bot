@@ -26,7 +26,7 @@ def _get_active_methods() -> List[int]:
 def _is_sbp_method(method_code: int) -> bool:
     """Determine if the Platega method is SBP-based (QR code)."""
     title = settings.get_platega_method_display_title(method_code).lower()
-    return "сбп" in title or "sbp" in title or "qr" in title or method_code in {2, 11}
+    return "сбп" in title or "sbp" in title or "qr" in title or method_code == 2
 
 
 def _get_method_button_label(method_code: int) -> str:

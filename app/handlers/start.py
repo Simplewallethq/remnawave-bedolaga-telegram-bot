@@ -533,11 +533,32 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             is_admin=is_admin,
             language=user.language,
         )
-        await message.answer(
-            menu_text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
+
+        image_path = os.path.join("images", "main_menu.png")
+        force_text = settings.is_text_main_menu_mode()
+
+        if not force_text and (settings.ENABLE_LOGO_MODE or os.path.exists(image_path)):
+            from aiogram.types import FSInputFile
+            from app.utils.bot_registry import get_logo_for_bot
+
+            if os.path.exists(image_path):
+                photo = FSInputFile(image_path)
+            else:
+                logo_path = get_logo_for_bot(message.bot.id if message.bot else None)
+                photo = FSInputFile(logo_path)
+
+            await message.answer_photo(
+                photo=photo,
+                caption=menu_text,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer(
+                menu_text,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
 
         if pinned_message and not pinned_message.send_before_menu:
             await _send_pinned_message(message.bot, db, user, pinned_message)

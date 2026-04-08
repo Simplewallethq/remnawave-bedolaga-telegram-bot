@@ -1158,7 +1158,7 @@ class Settings(BaseSettings):
     @staticmethod
     def get_platega_method_definitions() -> Dict[int, Dict[str, str]]:
         return {
-            2: {"name": "СБП (QR)", "title": "🏦 СБП (QR)"},
+            2: {"name": "СБП по QR коду", "title": "🏦 СБП по QR коду"},
             10: {"name": "Банковские карты (RUB)", "title": "💳 Карты (RUB)"},
             11: {"name": "Банковские карты", "title": "💳 Банковские карты"},
             12: {"name": "Международные карты", "title": "🌍 Международные карты"},
