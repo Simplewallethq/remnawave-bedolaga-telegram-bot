@@ -161,7 +161,6 @@ from .devices import (
     confirm_reset_devices,
     execute_change_devices,
     get_current_devices_count,
-    get_servers_display_names,
     handle_all_devices_reset_from_management,
     handle_app_selection,
     handle_change_devices,
@@ -2574,19 +2573,10 @@ async def handle_subscription_menu(
     
     devices_count = subscription.device_limit or 0
     
-    traffic_text = "Безлимит"
-    if subscription.traffic_limit_gb:
-        traffic_text = f"{subscription.traffic_limit_gb} ГБ"
-        
-    servers_names = await get_servers_display_names(subscription.connected_squads)
-    server_text = servers_names if servers_names else "Любой"
-    
     text = (
-        f"📦 Ваша подписка:\n"
-        f"📅 Осталось: {days_left} дней\n"
-        f"📱 Устройств: {devices_count} шт.\n"
-        f"🔄 Трафик: {traffic_text}\n"
-        f"🌍 Сервер: {server_text}"
+        f"Ваша подписка:\n\n"
+        f"Осталось дней: {days_left} дней\n"
+        f"Устройств: {devices_count} шт."
     )
     
     image_path = os.path.join("images", "subscription_page.png")
