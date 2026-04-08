@@ -1300,7 +1300,11 @@ async def handle_onboarding_device_selection(
         "Установи приложение Happ по кнопке ниже.\n\nПосле установки нажми \"Подключиться\" → в приложении выбери Подключить.",
     )
 
-    keyboard = get_onboarding_connection_keyboard(device_type, user.language)
+    subscription_link = None
+    if user.subscription:
+        subscription_link = get_display_subscription_link(user.subscription)
+
+    keyboard = get_onboarding_connection_keyboard(device_type, user.language, subscription_link=subscription_link)
 
     image_path = os.path.join("images", "connection_screen.png")
     if not os.path.exists(image_path):

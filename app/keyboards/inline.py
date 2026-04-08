@@ -2871,7 +2871,7 @@ def get_onboarding_device_selection_keyboard(language: str = DEFAULT_LANGUAGE) -
     ])
 
 
-def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
+def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT_LANGUAGE, subscription_link: Optional[str] = None) -> InlineKeyboardMarkup:
     """
     Onboarding Screen 3: Device-specific connection instructions.
     device_type: 'iphone', 'android', 'windows', or 'macos'
@@ -2920,6 +2920,8 @@ def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT
             ),
         ])
 
+    redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
+    if redirect_link:
         buttons.append([InlineKeyboardButton(
             text=texts.t("ONBOARDING_OPEN_HAPP_BUTTON", "🔗 Открыть Happ"),
             url=redirect_link,
