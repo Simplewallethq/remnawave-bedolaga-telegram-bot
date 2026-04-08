@@ -2923,7 +2923,7 @@ def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT
     redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
     if redirect_link:
         buttons.append([InlineKeyboardButton(
-            text=texts.t("ONBOARDING_OPEN_HAPP_BUTTON", "🔗 Открыть Happ"),
+            text=texts.t("ONBOARDING_OPEN_HAPP_BUTTON", "🚀 Подключиться"),
             url=redirect_link,
         )])
     buttons.append([
