@@ -1369,7 +1369,7 @@ async def handle_onboarding_connect(
     buttons = []
     if redirect_link:
         buttons.append([InlineKeyboardButton(
-            text=texts.t("ONBOARDING_OPEN_HAPP_BUTTON", "🔗 Открыть Happ"),
+            text=texts.t("ONBOARDING_OPEN_HAPP_BUTTON", "🚀 Подключиться"),
             url=redirect_link,
         )])
     buttons.append([InlineKeyboardButton(
