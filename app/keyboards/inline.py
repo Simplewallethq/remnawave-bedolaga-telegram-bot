@@ -498,7 +498,19 @@ def get_main_menu_keyboard(
             else:
                 keyboard.append([_fallback_connect_button()])
         else:
-            keyboard.append([_fallback_connect_button()])
+            if subscription_link:
+                from app.utils.subscription_utils import convert_subscription_link_to_happ_scheme
+                redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
+                happ_scheme_link = convert_subscription_link_to_happ_scheme(subscription_link)
+                connect_url = redirect_link or happ_scheme_link or subscription_link
+                keyboard.append([
+                    InlineKeyboardButton(
+                        text=texts.t("CONNECT_BUTTON", "🔗 Подключиться"),
+                        url=connect_url,
+                    )
+                ])
+            else:
+                keyboard.append([_fallback_connect_button()])
 
         happ_row = get_happ_download_button_row(texts)
         if happ_row:

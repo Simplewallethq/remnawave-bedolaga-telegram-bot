@@ -215,29 +215,47 @@ async def handle_connect_subscription(
             parse_mode="HTML"
         )
     else:
-        if hide_subscription_link:
-            device_text = texts.t(
-                "SUBSCRIPTION_CONNECT_DEVICE_MESSAGE_HIDDEN",
-                """📱 <b>Подключить подписку</b>
+        from app.utils.subscription_utils import (
+            get_happ_cryptolink_redirect_link,
+            convert_subscription_link_to_happ_scheme,
+        )
 
-ℹ️ Ссылка подписки доступна по кнопкам ниже или в разделе "Моя подписка".
+        redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
+        happ_scheme_link = convert_subscription_link_to_happ_scheme(subscription_link)
+        connect_url = redirect_link or happ_scheme_link or subscription_link
 
-💡 <b>Выберите ваше устройство</b> для получения подробной инструкции по настройке:""",
+        happ_message = texts.t(
+            "SUBSCRIPTION_HAPP_CONNECT_MESSAGE",
+            """🚀 <b>Подключить подписку</b>
+
+🔗 Нажмите кнопку ниже, чтобы открыть Happ и добавить подписку автоматически.""",
+        )
+
+        if not hide_subscription_link:
+            happ_message += "\n\n" + texts.t(
+                "SUBSCRIPTION_HAPP_MANUAL_HINT",
+                "💡 Если не получается, скопируйте ссылку вручную:",
             )
-        else:
-            device_text = texts.t(
-                "SUBSCRIPTION_CONNECT_DEVICE_MESSAGE",
-                """📱 <b>Подключить подписку</b>
+            happ_message += f"\n\n<code>{subscription_link}</code>"
 
-🔗 <b>Ссылка подписки:</b>
-<code>{subscription_url}</code>
-
-💡 <b>Выберите ваше устройство</b> для получения подробной инструкции по настройке:""",
-            ).format(subscription_url=subscription_link)
+        rows = [
+            [
+                InlineKeyboardButton(
+                    text=texts.t("CONNECT_BUTTON", "🔗 Подключиться"),
+                    url=connect_url,
+                )
+            ]
+        ]
+        happ_row = get_happ_download_button_row(texts)
+        if happ_row:
+            rows.append(happ_row)
+        rows.append([
+            InlineKeyboardButton(text=texts.BACK, callback_data="menu_subscription")
+        ])
 
         await callback.message.edit_text(
-            device_text,
-            reply_markup=get_device_selection_keyboard(db_user.language),
+            happ_message,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
             parse_mode="HTML"
         )
 
