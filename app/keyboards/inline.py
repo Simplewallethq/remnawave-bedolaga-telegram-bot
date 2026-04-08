@@ -2920,12 +2920,10 @@ def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT
             ),
         ])
 
-    buttons.append([
-        InlineKeyboardButton(
-            text=texts.t("ONBOARDING_CONNECT_BUTTON", "🚀 Подключиться"),
-            callback_data="onboarding_connect",
-        ),
-    ])
+        buttons.append([InlineKeyboardButton(
+            text=texts.t("ONBOARDING_OPEN_HAPP_BUTTON", "🔗 Открыть Happ"),
+            url=redirect_link,
+        )])
     buttons.append([
         InlineKeyboardButton(
             text=texts.t("ONBOARDING_MANUAL_LINK_BUTTON", "🔗 Ручное подключение"),
