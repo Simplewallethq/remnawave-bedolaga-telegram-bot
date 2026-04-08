@@ -1129,7 +1129,7 @@ async def get_main_menu_text(user, texts, db: AsyncSession):
     else:
         base_text += texts.t("MAIN_MENU_NO_SUBSCRIPTION", "Подписка: 🔴Истекла")
 
-    base_text += texts.t("MAIN_MENU_CHANNEL_HINT", "\n\n🔔 Подпишитесь на наш канал чтобы быть в курсе новостей и акций.\n\nВыберите действие:")
+    base_text += texts.t("MAIN_MENU_CHANNEL_HINT", "\n\n🔔 Подпишитесь на <a href=\"https://t.me/vpnleto\">наш канал</a> чтобы быть в курсе новостей и акций.\n\nВыберите действие:")
 
     return base_text
 

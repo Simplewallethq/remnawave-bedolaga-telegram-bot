@@ -1643,7 +1643,7 @@
   "MAIN_MENU_TRIAL_AVAILABLE": "Вам доступно 3 дня бесплатно 🎁",
   "MAIN_MENU_TRIAL_EXPIRED": "Подписка: 🔴Истекла",
   "MAIN_MENU_NO_SUBSCRIPTION": "Подписка: 🔴Истекла",
-  "MAIN_MENU_CHANNEL_HINT": "\n\n🔔 Подпишитесь на наш канал чтобы быть в курсе новостей и акций.\n\nВыберите действие:",
+  "MAIN_MENU_CHANNEL_HINT": "\n\n🔔 Подпишитесь на <a href=\"https://t.me/vpnleto\">наш канал</a> чтобы быть в курсе новостей и акций.\n\nВыберите действие:",
   "MAIN_MENU_RESTART_HINT": "\n\nЕсли что-то пошло не так введи /start",
   "HOWTO_TITLE": "Инструкция по подключению:\n\n",
   "HOWTO_STEP1": "<b>1.</b> Скачай приложение <a href=\"https://happ.link/\">Happ</a>.\n",
