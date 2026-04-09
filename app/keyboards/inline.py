@@ -3055,8 +3055,7 @@ def get_device_selection_keyboard(current_selected: int = 1, back_callback: str 
 
     buttons.append([InlineKeyboardButton(text=texts.t("NEXT_BUTTON", "Далее ➡️"), callback_data="device_selection_confirm")])
     buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)])
-    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, back_callback: str = "topup", language: str = DEFAULT_LANGUAGE, balance_kopeks: int = 0, price_kopeks: int = 0) -> InlineKeyboardMarkup:
