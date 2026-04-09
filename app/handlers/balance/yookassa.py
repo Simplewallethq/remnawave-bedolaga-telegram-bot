@@ -199,6 +199,7 @@ async def process_yookassa_payment_amount(
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="💳 Оплатить картой", url=confirmation_url)],
             [types.InlineKeyboardButton(text="📊 Проверить статус", callback_data=f"check_yookassa_{payment_result['local_payment_id']}")],
+            [types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
             [types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")]
         ])
         
@@ -231,7 +232,7 @@ async def process_yookassa_payment_amount(
             f"4. Деньги поступят на баланс автоматически\n\n"
             f"🔒 Оплата происходит через защищенную систему YooKassa\n"
             f"✅ Принимаем карты: Visa, MasterCard, МИР\n\n"
-            f"❓ Если возникнут проблемы, обратитесь в {settings.get_support_contact_display_html()}",
+            "Если возникнут проблемы, обратитесь в Поддержку",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
@@ -411,6 +412,7 @@ async def process_yookassa_sbp_payment_amount(
 
         # Добавляем общие кнопки
         keyboard_buttons.append([types.InlineKeyboardButton(text="📊 Проверить статус", callback_data=f"check_yookassa_{payment_result['local_payment_id']}")])
+        keyboard_buttons.append([types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")])
         keyboard_buttons.append([types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")])
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
@@ -454,7 +456,7 @@ async def process_yookassa_sbp_payment_amount(
         message_text += (
             f"🔒 Оплата происходит через защищенную систему YooKassa\n"
             f"✅ Принимаем СБП от всех банков-участников\n\n"
-            f"❓ Если возникнут проблемы, обратитесь в {settings.get_support_contact_display_html()}"
+            "Если возникнут проблемы, обратитесь в Поддержку"
         )
 
         # Отправляем сообщение с инструкциями и клавиатурой

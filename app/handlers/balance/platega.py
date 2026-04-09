@@ -310,6 +310,7 @@ async def process_platega_payment_amount(
                     callback_data=f"check_platega_{local_payment_id}",
                 )
             ],
+            [types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
             [types.InlineKeyboardButton(text=texts.BACK, callback_data="sub_add_days")],
         ]
     )
@@ -320,7 +321,7 @@ async def process_platega_payment_amount(
             "<b>{title}</b>\n\n"
             "Сумма: {amount}\n\n"
             "Нажмите кнопку \"Оплатить\" и осуществите перевод. Средства зачислятся автоматически.\n\n"
-            "Если возникнут проблемы, обратитесь в {support}"
+            "Если возникнут проблемы, обратитесь в Поддержку"
         ),
     )
 
@@ -346,7 +347,6 @@ async def process_platega_payment_amount(
         instructions_template.format(
             title=payment_title,
             amount=settings.format_price(amount_kopeks),
-            support=settings.get_support_contact_display_html(),
         ),
         reply_markup=keyboard,
         parse_mode="HTML",

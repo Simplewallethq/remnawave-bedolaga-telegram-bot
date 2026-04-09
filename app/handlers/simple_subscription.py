@@ -973,6 +973,7 @@ async def handle_simple_subscription_payment_method(
             
             # Добавляем общие кнопки
             keyboard_buttons.append([types.InlineKeyboardButton(text="📊 Проверить статус", callback_data=f"check_yookassa_{payment_result['local_payment_id']}")])
+            keyboard_buttons.append([types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")])
             keyboard_buttons.append([types.InlineKeyboardButton(text=texts.BACK, callback_data="subscription_purchase")])
             
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
@@ -1015,9 +1016,9 @@ async def handle_simple_subscription_payment_method(
             message_text += (
                 f"🔒 Оплата происходит через защищенную систему YooKassa\n"
                 f"✅ Принимаем карты: Visa, MasterCard, МИР\n\n"
-                f"❓ Если возникнут проблемы, обратитесь в {settings.get_support_contact_display_html()}"
+                "Если возникнут проблемы, обратитесь в Поддержку"
             )
-            
+
             # Отправляем сообщение с инструкциями и клавиатурой
             # Если есть QR-код, отправляем его как медиа-сообщение
             if qr_photo:
@@ -1124,6 +1125,7 @@ async def handle_simple_subscription_payment_method(
                             callback_data=f"check_simple_cryptobot_{crypto_result['local_payment_id']}",
                         )
                     ],
+                    [types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
                     [types.InlineKeyboardButton(text=texts.BACK, callback_data="subscription_purchase")],
                 ]
             )
@@ -1140,7 +1142,7 @@ async def handle_simple_subscription_payment_method(
                 "2. Выберите актив и следуйте подсказкам\n"
                 "3. Подтвердите перевод\n"
                 "4. Средства зачислятся автоматически\n\n"
-                f"❓ Если возникнут проблемы, обратитесь в {settings.get_support_contact_display_html()}"
+                "Если возникнут проблемы, обратитесь в Поддержку"
             )
 
             await callback.message.edit_text(
@@ -1218,6 +1220,7 @@ async def handle_simple_subscription_payment_method(
                             callback_data=f"check_simple_heleket_{local_payment_id}",
                         )
                     ],
+                    [types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
                     [types.InlineKeyboardButton(text=texts.BACK, callback_data="subscription_purchase")],
                 ]
             )
@@ -1253,7 +1256,7 @@ async def handle_simple_subscription_payment_method(
                     "3. Подтвердите перевод",
                     "4. Средства зачислятся автоматически",
                     "",
-                    f"❓ Если возникнут проблемы, обратитесь в {settings.get_support_contact_display_html()}",
+                    "Если возникнут проблемы, обратитесь в Поддержку",
                 ]
             )
 
@@ -1327,6 +1330,7 @@ async def handle_simple_subscription_payment_method(
                             callback_data=f"check_simple_mulenpay_{local_payment_id}",
                         )
                     ],
+                    [types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
                     [types.InlineKeyboardButton(text=texts.BACK, callback_data="subscription_purchase")],
                 ]
             )
@@ -1342,7 +1346,7 @@ async def handle_simple_subscription_payment_method(
                     "2. Следуйте подсказкам платежной системы\n"
                     "3. Подтвердите перевод\n"
                     "4. Средства зачислятся автоматически\n\n"
-                    "❓ Если возникнут проблемы, обратитесь в {support}"
+                    "Если возникнут проблемы, обратитесь в Поддержку"
                 ),
             )
 
@@ -1352,7 +1356,6 @@ async def handle_simple_subscription_payment_method(
                     mulenpay_name_html=settings.get_mulenpay_display_name_html(),
                     amount=settings.format_price(price_kopeks),
                     payment_id=payment_id_display,
-                    support=settings.get_support_contact_display_html(),
                 ),
                 reply_markup=keyboard,
                 parse_mode="HTML",
@@ -1504,7 +1507,7 @@ async def handle_simple_subscription_payment_method(
                     "💰 Сумма: {amount}\n"
                     "🆔 ID счета: {bill_id}\n\n"
                     "📱 <b>Инструкция:</b>\n{steps}\n\n"
-                    "❓ Если возникнут проблемы, обратитесь в {support}"
+                    "Если возникнут проблемы, обратитесь в Поддержку"
                 ),
             )
 
@@ -1515,6 +1518,7 @@ async def handle_simple_subscription_payment_method(
                         callback_data=f"check_simple_pal24_{local_payment_id}",
                     )
                 ],
+                [types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
                 [types.InlineKeyboardButton(text=texts.BACK, callback_data="subscription_purchase")],
             ]
 
@@ -1524,7 +1528,6 @@ async def handle_simple_subscription_payment_method(
                 amount=settings.format_price(price_kopeks),
                 bill_id=bill_id,
                 steps="\n".join(steps),
-                support=settings.get_support_contact_display_html(),
             )
 
             await callback.message.edit_text(
@@ -1596,6 +1599,7 @@ async def handle_simple_subscription_payment_method(
                             callback_data=f"check_simple_wata_{local_payment_id}",
                         )
                     ],
+                    [types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
                     [types.InlineKeyboardButton(text=texts.BACK, callback_data="subscription_purchase")],
                 ]
             )
@@ -1611,7 +1615,7 @@ async def handle_simple_subscription_payment_method(
                     "2. Следуйте подсказкам платежной системы\n"
                     "3. Подтвердите перевод\n"
                     "4. Средства зачислятся автоматически\n\n"
-                    "❓ Если возникнут проблемы, обратитесь в {support}"
+                    "Если возникнут проблемы, обратитесь в Поддержку"
                 ),
             )
 
@@ -1619,7 +1623,6 @@ async def handle_simple_subscription_payment_method(
                 message_template.format(
                     amount=settings.format_price(price_kopeks),
                     payment_id=payment_link_id,
-                    support=settings.get_support_contact_display_html(),
                 ),
                 reply_markup=keyboard,
                 parse_mode="HTML",

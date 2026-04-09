@@ -140,6 +140,7 @@ async def process_wata_payment_amount(
                     callback_data=f"check_wata_{local_payment_id}",
                 )
             ],
+            [types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
             [types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")],
         ]
     )
@@ -155,14 +156,13 @@ async def process_wata_payment_amount(
             "2. Следуйте подсказкам платежной системы\n"
             "3. Подтвердите перевод\n"
             "4. Средства зачислятся автоматически\n\n"
-            "❓ Если возникнут проблемы, обратитесь в {support}"
+            "Если возникнут проблемы, обратитесь в Поддержку"
         ),
     )
 
     message_text = message_template.format(
         amount=settings.format_price(amount_kopeks),
         payment_id=payment_link_id,
-        support=settings.get_support_contact_display_html(),
     )
 
     state_data = await state.get_data()

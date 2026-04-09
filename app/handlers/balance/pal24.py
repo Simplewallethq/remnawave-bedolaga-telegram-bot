@@ -183,7 +183,7 @@ async def _send_pal24_payment_message(
                 "💰 Сумма: {amount}\n"
                 "🆔 ID счета: {bill_id}\n\n"
                 "📱 <b>Инструкция:</b>\n{steps}\n\n"
-                "❓ Если возникнут проблемы, обратитесь в {support}"
+                "Если возникнут проблемы, обратитесь в Поддержку"
             ),
         )
 
@@ -194,6 +194,7 @@ async def _send_pal24_payment_message(
                     callback_data=f"check_pal24_{local_payment_id}",
                 )
             ],
+            [types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
             [types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")],
         ]
 
@@ -203,7 +204,6 @@ async def _send_pal24_payment_message(
             amount=settings.format_price(amount_kopeks),
             bill_id=bill_id,
             steps="\n".join(steps),
-            support=settings.get_support_contact_display_html(),
         )
 
         invoice_message = await message.answer(

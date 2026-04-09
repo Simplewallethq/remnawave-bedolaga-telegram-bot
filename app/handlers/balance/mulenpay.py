@@ -158,6 +158,7 @@ async def process_mulenpay_payment_amount(
                         callback_data=f"check_mulenpay_{local_payment_id}",
                     )
                 ],
+                [types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
                 [types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")],
             ]
         )
@@ -175,14 +176,13 @@ async def process_mulenpay_payment_amount(
                 "2. Следуйте подсказкам платежной системы\n"
                 "3. Подтвердите перевод\n"
                 "4. Средства зачислятся автоматически\n\n"
-                "❓ Если возникнут проблемы, обратитесь в {support}"
+                "Если возникнут проблемы, обратитесь в Поддержку"
             ),
         )
 
         message_text = message_template.format(
             amount=settings.format_price(amount_kopeks),
             payment_id=payment_id_display,
-            support=settings.get_support_contact_display_html(),
             mulenpay_name=mulenpay_name,
             mulenpay_name_html=mulenpay_name_html,
         )
