@@ -3182,7 +3182,7 @@ def get_support_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
     """
     texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=texts.t("CONTACT_SUPPORT_BUTTON", "💬 Написать в поддержку"), url="https://t.me/basetypes")],
+        [InlineKeyboardButton(text=texts.t("CONTACT_SUPPORT_BUTTON", "💬 Написать в поддержку"), url="https://t.me/letovpnsupport")],
         [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
     ])
 

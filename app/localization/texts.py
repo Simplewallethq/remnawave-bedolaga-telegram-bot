@@ -28,7 +28,7 @@ _DYNAMIC_LANGUAGE_CONFIGS = {
         "support_info": (
             "Поддержка\n\n"
             "Возникли вопросы или проблемы? Свяжитесь с нашей службой поддержки:\n\n"
-            "Telegram: @basetypes\n\n"
+            "Telegram: @letovpnsupport\n\n"
             "Мы отвечаем в течение 24 часов в рабочие дни."
         ),
     },
