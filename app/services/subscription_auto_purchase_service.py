@@ -408,7 +408,7 @@ async def _auto_extend_subscription(
                     [
                         InlineKeyboardButton(
                             text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 My subscription"),
-                            callback_data="menu_subscription",
+                            callback_data="subscription",
                         )
                     ],
                     [
@@ -576,7 +576,7 @@ async def _auto_add_devices(
                 inline_keyboard=[
                     [InlineKeyboardButton(
                         text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 My subscription"),
-                        callback_data="menu_subscription",
+                        callback_data="subscription",
                     )],
                     [InlineKeyboardButton(
                         text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "🏠 Main menu"),
@@ -772,7 +772,7 @@ async def auto_purchase_saved_cart_after_topup(
                     [
                         InlineKeyboardButton(
                             text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 My subscription"),
-                            callback_data="menu_subscription",
+                            callback_data="subscription",
                         )
                     ],
                     [
