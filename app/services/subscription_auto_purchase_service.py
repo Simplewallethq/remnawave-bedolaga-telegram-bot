@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from aiogram import Bot
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -28,6 +28,7 @@ from app.services.subscription_purchase_service import (
 )
 from app.services.subscription_service import SubscriptionService
 from app.services.user_cart_service import user_cart_service
+from app.utils.bot_registry import get_logo_for_bot
 from app.utils.pricing_utils import format_period_description
 from app.utils.timezone import format_local_datetime
 
@@ -419,12 +420,22 @@ async def _auto_extend_subscription(
                 ]
             )
 
-            await bot.send_message(
-                chat_id=user.telegram_id,
-                text=full_message,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
+            logo_path = get_logo_for_bot(bot.id if bot else None)
+            if settings.ENABLE_LOGO_MODE and logo_path.exists():
+                await bot.send_photo(
+                    chat_id=user.telegram_id,
+                    photo=FSInputFile(logo_path),
+                    caption=full_message,
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                )
+            else:
+                await bot.send_message(
+                    chat_id=user.telegram_id,
+                    text=full_message,
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                )
         except Exception as error:  # pragma: no cover - defensive logging
             logger.error(
                 "⚠️ Автопокупка: не удалось уведомить пользователя %s о продлении: %s",
@@ -573,12 +584,22 @@ async def _auto_add_devices(
                     )],
                 ]
             )
-            await bot.send_message(
-                chat_id=user.telegram_id,
-                text=success_text,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
+            logo_path = get_logo_for_bot(bot.id if bot else None)
+            if settings.ENABLE_LOGO_MODE and logo_path.exists():
+                await bot.send_photo(
+                    chat_id=user.telegram_id,
+                    photo=FSInputFile(logo_path),
+                    caption=success_text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                )
+            else:
+                await bot.send_message(
+                    chat_id=user.telegram_id,
+                    text=success_text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                )
         except Exception as error:
             logger.error(
                 "⚠️ Автопокупка устройств: ошибка уведомления пользователя %s: %s",
@@ -763,12 +784,22 @@ async def auto_purchase_saved_cart_after_topup(
                 ]
             )
 
-            await bot.send_message(
-                chat_id=user.telegram_id,
-                text=full_message,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
+            logo_path = get_logo_for_bot(bot.id if bot else None)
+            if settings.ENABLE_LOGO_MODE and logo_path.exists():
+                await bot.send_photo(
+                    chat_id=user.telegram_id,
+                    photo=FSInputFile(logo_path),
+                    caption=full_message,
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                )
+            else:
+                await bot.send_message(
+                    chat_id=user.telegram_id,
+                    text=full_message,
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                )
         except Exception as error:  # pragma: no cover - defensive logging
             logger.error(
                 "⚠️ Автопокупка: не удалось уведомить пользователя %s: %s",
