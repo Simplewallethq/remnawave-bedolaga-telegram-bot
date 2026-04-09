@@ -1,6 +1,7 @@
 import logging
 from aiogram import types
 from aiogram.fsm.context import FSMContext
+from aiogram.types import FSInputFile
 
 from app.config import settings
 from app.database.models import User
@@ -10,6 +11,7 @@ from app.services.blacklist_service import blacklist_service
 from app.services.payment_service import PaymentService
 from app.states import BalanceStates
 from app.utils.decorators import error_handler
+from app.utils.photo_message import edit_or_answer_photo
 from app.external.telegram_stars import TelegramStarsService
 
 logger = logging.getLogger(__name__)
@@ -47,9 +49,11 @@ async def start_stars_payment(
             # Вставляем кнопки быстрого выбора перед кнопкой "Назад"
             keyboard.inline_keyboard = quick_amount_buttons + keyboard.inline_keyboard
 
-    await callback.message.edit_text(
+    await edit_or_answer_photo(
+        callback,
         message_text,
-        reply_markup=keyboard
+        keyboard,
+        parse_mode="HTML",
     )
 
     await state.update_data(
@@ -129,14 +133,28 @@ async def process_stars_payment_amount(
                     delete_error,
                 )
 
-        invoice_message = await message.answer(
+        invoice_caption = (
             f"<b>Оплата через Telegram Stars</b>\n\n"
             f"Сумма: {texts.format_price(amount_kopeks)}\n"
             f"К оплате: {stars_amount} Stars\n\n"
-            f"Нажмите кнопку ниже для оплаты:",
-            reply_markup=keyboard,
-            parse_mode="HTML"
+            f"Нажмите кнопку ниже для оплаты:"
         )
+
+        if settings.ENABLE_LOGO_MODE:
+            from app.utils.bot_registry import get_logo_for_bot
+            logo_path = get_logo_for_bot(message.bot.id if message.bot else None)
+            invoice_message = await message.answer_photo(
+                photo=FSInputFile(logo_path),
+                caption=invoice_caption,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        else:
+            invoice_message = await message.answer(
+                invoice_caption,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
 
         await state.update_data(
             stars_invoice_message_id=invoice_message.message_id,
