@@ -1297,7 +1297,7 @@ async def handle_onboarding_device_selection(
     texts = get_texts(user.language)
     connection_text = texts.t(
         "ONBOARDING_CONNECTION_TEXT",
-        "Установи приложение Happ по кнопке ниже.\n\nПосле установки нажми \"Подключиться\" → в приложении выбери Подключить.",
+        "Установи приложение Happ по кнопке ниже.\n\nПосле установки нажми кнопку \"Подключиться\"  ниже → все настроится автоматически.",
     )
 
     subscription_link = None
