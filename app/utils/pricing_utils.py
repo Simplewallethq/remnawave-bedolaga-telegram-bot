@@ -308,15 +308,13 @@ def format_period_description(days: int, language: str = "ru") -> str:
         elif days == 360:
             return "12 месяцев"
         else:
-            month_word = "месяц" if months == 1 else ("месяца" if 2 <= months <= 4 else "месяцев")
-            return f"{days} дней ({months} {month_word})"
+            return f"{days} дней"
     else:
         if days == 1:
             return "1 day"
         if days == 14:
             return "14 days"
-        month_word = "month" if months == 1 else "months"
-        return f"{days} days ({months} {month_word})"
+        return f"{days} days"
 
 
 def validate_pricing_calculation(
