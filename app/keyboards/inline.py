@@ -2863,10 +2863,9 @@ def get_onboarding_device_selection_keyboard(language: str = DEFAULT_LANGUAGE) -
     """
     texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🍎 iPhone", callback_data="onboarding_device_iphone")],
+        [InlineKeyboardButton(text="🍎 iPhone/MacOS", callback_data="onboarding_device_iphone")],
         [InlineKeyboardButton(text="🤖 Android", callback_data="onboarding_device_android")],
         [InlineKeyboardButton(text="💻 Windows", callback_data="onboarding_device_windows")],
-        [InlineKeyboardButton(text="🍎 MacOS", callback_data="onboarding_device_macos")],
         [InlineKeyboardButton(text=texts.BACK, callback_data="main_menu")],
     ])
 

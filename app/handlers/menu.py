@@ -1389,7 +1389,7 @@ async def handle_onboarding_connect(
 
     post_connect_text = texts.t(
         "ONBOARDING_POST_CONNECT_TEXT",
-        "Нажми 🔗 Открыть Happ → в приложении выбери Подключить (займет 5–10 сек).\n\n"
+        "Нажми 🚀 Подключиться → в приложении выбери Подключить (займет 5–10 сек).\n\n"
         "Вернись сюда:\n\n"
         "Если всё ок — нажми Я подключился. "
         "Если не получилось — выбери Ручное подключение или Поддержка.",
@@ -1431,8 +1431,6 @@ async def handle_onboarding_manual_link(
     manual_text = (
         texts.t(
             "ONBOARDING_MANUAL_LINK_TEXT",
-            "🔐 Открой Happ и нажми «Подключить».\n"
-            "Это займёт 5–10 секунд.\n\n"
             "Для ручного подключения скопируй ключ и добавь его в Happ\n\n",
         )
         + f"<blockquote expandable><code>{link}</code></blockquote>"
@@ -1444,12 +1442,12 @@ async def handle_onboarding_manual_link(
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text=texts.t("ONBOARDING_CONNECTED_BUTTON", "✅ Я подключился"),
-            callback_data="main_menu",
-        )],
-        [InlineKeyboardButton(
             text=texts.t("ONBOARDING_SUPPORT_BUTTON", "💬 Поддержка"),
             url=support_url,
+        )],
+        [InlineKeyboardButton(
+            text=texts.t("BACK", "⬅️ Назад"),
+            callback_data="onboarding_connect_free",
         )],
     ])
 
