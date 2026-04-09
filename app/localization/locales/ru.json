@@ -1436,7 +1436,7 @@
   "SUBSCRIPTION_NOT_FOUND": "❌ Подписка не найдена",
   "SUBSCRIPTION_NO_ACTIVE_LINK": "⚠ У вас нет активной подписки или ссылка еще генерируется",
   "SUBSCRIPTION_NO_SERVERS": "Нет серверов",
-  "SUBSCRIPTION_OVERVIEW_TEMPLATE": "Ваша подписка:\n\nОсталось дней: {time_left}\nУстройств: {devices_used} шт.",
+  "SUBSCRIPTION_OVERVIEW_TEMPLATE": "Ваша подписка:\n\nОсталось дней: {time_left}\nУстройств: {devices_used} шт.\n💳 Автоплатёж: {autopay_status}",
   "SUBSCRIPTION_OVERVIEW_EXPIRED_TEMPLATE": "Ваша подписка неактивна. Вы можете активировать ее по кнопке ниже.",
   "SUBSCRIPTION_PROMO_DISCOUNT_HINT": "⚡ Активирована доп. скидка {percent}%. \n\nСуммируется с другими скидками!",
   "SUBSCRIPTION_PROMO_DISCOUNT_NOTE": "⚡ Доп. скидка {percent}%: -{amount}",

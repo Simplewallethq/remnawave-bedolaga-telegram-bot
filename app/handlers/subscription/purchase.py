@@ -317,12 +317,19 @@ async def show_subscription_info(
 
         devices_display = devices_used_str if devices_used_str else str(subscription.device_limit)
 
+        autopay_status = (
+            texts.t("AUTOPAY_STATUS_ENABLED", "включён")
+            if subscription.autopay_enabled
+            else texts.t("AUTOPAY_STATUS_DISABLED", "выключен")
+        )
+
         message = texts.t(
             "SUBSCRIPTION_OVERVIEW_TEMPLATE",
-            "Ваша подписка:\n\nОсталось дней: {time_left}\nУстройств: {devices_used} шт.",
+            "Ваша подписка:\n\nОсталось дней: {time_left}\nУстройств: {devices_used} шт.\n💳 Автоплатёж: {autopay_status}",
         ).format(
             time_left=time_left_text,
             devices_used=devices_display,
+            autopay_status=autopay_status,
         )
 
     subscription_link = get_display_subscription_link(subscription)
