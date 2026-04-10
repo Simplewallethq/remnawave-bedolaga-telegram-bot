@@ -2590,10 +2590,14 @@ async def handle_subscription_menu(
     if not os.path.exists(image_path):
          image_path = None
 
+    subscription_link = get_display_subscription_link(subscription)
+    redirect_link = get_happ_cryptolink_redirect_link(subscription_link) if subscription_link else None
+    share_link = redirect_link or subscription_link
+
     await edit_or_answer_photo(
         callback=callback,
         caption=text,
-        keyboard=get_subscription_menu_keyboard(),
+        keyboard=get_subscription_menu_keyboard(share_link=share_link),
         parse_mode="HTML",
         photo_path=image_path
     )

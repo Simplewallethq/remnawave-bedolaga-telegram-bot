@@ -2999,16 +2999,20 @@ def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: boo
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_subscription_menu_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
+def get_subscription_menu_keyboard(language: str = DEFAULT_LANGUAGE, share_link: Optional[str] = None) -> InlineKeyboardMarkup:
     """
     Экран 5: Меню подписки
     """
     texts = get_texts(language)
-    return InlineKeyboardMarkup(inline_keyboard=[
+    buttons = [
         [InlineKeyboardButton(text=texts.t("SUB_ADD_DAYS_BUTTON", "➕ Добавить дни"), callback_data="sub_add_days")],
         [InlineKeyboardButton(text=texts.t("SUB_ADD_DEVICES_BUTTON", "➕ Добавить устройства"), callback_data="sub_add_devices")],
-        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
-    ])
+    ]
+    if share_link:
+        share_url = f"tg://msg_url?url={share_link}"
+        buttons.append([InlineKeyboardButton(text=texts.t("SUB_SHARE_ACCESS_BUTTON", "🔗 Поделиться доступом"), url=share_url)])
+    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_topup_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """
