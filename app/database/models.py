@@ -776,6 +776,7 @@ class Subscription(Base):
     user = relationship("User", back_populates="subscription")
     discount_offers = relationship("DiscountOffer", back_populates="subscription")
     temporary_accesses = relationship("SubscriptionTemporaryAccess", back_populates="subscription")
+    device_links = relationship("DeviceLink", back_populates="subscription", cascade="all, delete-orphan")
     
     @property
     def is_active(self) -> bool:
@@ -907,6 +908,17 @@ class Subscription(Base):
         if self.traffic_limit_gb == 0:  
             return
         self.traffic_limit_gb += gb
+
+
+class DeviceLink(Base):
+    __tablename__ = "device_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscription_id = Column(Integer, ForeignKey("subscriptions.id"), nullable=False, index=True)
+    device_id = Column(String(255), nullable=False, unique=True, index=True)
+    linked_at = Column(DateTime, default=func.now())
+
+    subscription = relationship("Subscription", back_populates="device_links")
 
 
 class Transaction(Base):
