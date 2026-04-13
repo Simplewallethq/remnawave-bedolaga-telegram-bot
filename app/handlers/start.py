@@ -57,9 +57,44 @@ from app.utils.user_utils import generate_unique_referral_code
 from app.utils.photo_message import edit_or_answer_photo
 from app.database.crud.subscription import decrement_subscription_server_counts
 from app.services.blacklist_service import blacklist_service
+from app.database.crud.device_link import get_device_link, count_device_links, create_device_link
 
 
 logger = logging.getLogger(__name__)
+
+
+async def _link_device_to_subscription(
+    db: AsyncSession,
+    subscription,
+    device_id: str,
+    target,
+) -> None:
+    """Link device_id to subscription with limit check. Per D-03/D-05/D-06."""
+    try:
+        existing = await get_device_link(db, device_id)
+        if existing and existing.subscription_id == subscription.id:
+            await target.answer("Device already linked to your subscription.")
+            return
+        if existing:
+            # Device linked to different subscription -- silently re-link per Claude's Discretion
+            existing.subscription_id = subscription.id
+            await db.commit()
+            await target.answer("Device re-linked to your subscription.")
+            return
+
+        count = await count_device_links(db, subscription.id)
+        limit = subscription.device_limit or 1
+        if count >= limit:
+            await target.answer(
+                f"Device limit reached ({count}/{limit}). Remove a device or upgrade your plan."
+            )
+            return
+
+        await create_device_link(db, subscription.id, device_id)
+        await target.answer("Device linked to your subscription.")
+    except Exception as e:
+        logger.error("Error linking device %s to subscription %s: %s", device_id, subscription.id, e)
+        # Per RESEARCH anti-pattern: don't block registration on device linking failure
 
 
 def _calculate_subscription_flags(subscription):
@@ -416,8 +451,13 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             )
             await state.update_data(campaign_id=campaign.id)
         else:
-            referral_code = start_parameter
-            logger.info(f"🔎 Найден реферальный код: {referral_code}")
+            if start_parameter.startswith("d_"):
+                raw_device_id = start_parameter[2:]
+                await state.update_data(device_id=raw_device_id)
+                logger.info("Device ID saved to FSM state: %s", raw_device_id)
+            else:
+                referral_code = start_parameter
+                logger.info(f"🔎 Найден реферальный код: {referral_code}")
 
     if referral_code:
         await state.update_data(referral_code=referral_code)
@@ -556,6 +596,13 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
 
         if pinned_message and not pinned_message.send_before_menu:
             await _send_pinned_message(message.bot, db, user, pinned_message)
+
+        # Device linking for existing users per D-05
+        data = await state.get_data() or {}
+        device_id_from_state = data.get("device_id")
+        if device_id_from_state and user.subscription and user.subscription.is_active:
+            await _link_device_to_subscription(db, user.subscription, device_id_from_state, message)
+
         await state.clear()
         return
 
@@ -1325,6 +1372,10 @@ async def complete_registration_from_callback(
             refresh_subscription_error,
         )
 
+    # Read device_id BEFORE state.clear() per Pitfall 2
+    _fsm_data = await state.get_data() or {}
+    _device_id = _fsm_data.get("device_id")
+
     await state.clear()
 
     if campaign_message:
@@ -1341,6 +1392,12 @@ async def complete_registration_from_callback(
     except Exception as e:
         logger.error(f"Ошибка авто-активации триала при регистрации (callback): {e}")
         trial_success = False
+
+    # Link device after trial creation per D-07
+    if _device_id and user.subscription:
+        await db.refresh(user, ["subscription"])
+        if user.subscription:
+            await _link_device_to_subscription(db, user.subscription, _device_id, callback.message or callback)
 
     if not trial_success:
         # Fallback: show welcome screen if trial failed
@@ -1581,6 +1638,10 @@ async def complete_registration(
             refresh_subscription_error,
         )
 
+    # Read device_id BEFORE state.clear() per Pitfall 2
+    _fsm_data = await state.get_data() or {}
+    _device_id = _fsm_data.get("device_id")
+
     await state.clear()
 
     if campaign_message:
@@ -1597,6 +1658,12 @@ async def complete_registration(
     except Exception as e:
         logger.error(f"Ошибка авто-активации триала при регистрации: {e}")
         trial_success = False
+
+    # Link device after trial creation per D-07
+    if _device_id and user.subscription:
+        await db.refresh(user, ["subscription"])
+        if user.subscription:
+            await _link_device_to_subscription(db, user.subscription, _device_id, message)
 
     if not trial_success:
         # Fallback: show welcome screen if trial failed
