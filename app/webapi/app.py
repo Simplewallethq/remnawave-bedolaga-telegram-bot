@@ -12,6 +12,7 @@ from .routes import (
     backups,
     campaigns,
     config,
+    devices,
     health,
     main_menu_buttons,
     media,
@@ -153,6 +154,10 @@ OPENAPI_TAGS = [
             "настройка показа при /start."
         ),
     },
+    {
+        "name": "devices",
+        "description": "Device-to-subscription linking for Android app integration.",
+    },
 ]
 
 
@@ -242,5 +247,6 @@ def create_web_api_app() -> FastAPI:
         prefix="/notifications/subscriptions",
         tags=["notifications"],
     )
+    app.include_router(devices.router, prefix="/api/devices", tags=["devices"])
 
     return app
