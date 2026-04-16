@@ -90,7 +90,7 @@ async def _create_cloudpayments_payment_and_respond(
             [
                 InlineKeyboardButton(
                     text=texts.t("BACK_BUTTON", "◀️ Назад"),
-                    callback_data="menu_balance",
+                    callback_data="balance_topup",
                 )
             ],
         ]
@@ -323,7 +323,7 @@ async def process_cloudpayments_amount(
             [
                 InlineKeyboardButton(
                     text=texts.t("BACK_BUTTON", "◀️ Назад"),
-                    callback_data="menu_balance",
+                    callback_data="balance_topup",
                 )
             ],
         ]
@@ -445,7 +445,7 @@ async def handle_cloudpayments_quick_amount(
             [
                 InlineKeyboardButton(
                     text=texts.t("BACK_BUTTON", "◀️ Назад"),
-                    callback_data="menu_balance",
+                    callback_data="balance_topup",
                 )
             ],
         ]

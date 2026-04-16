@@ -1442,14 +1442,6 @@ def get_payment_methods_keyboard(amount_kopeks: int, language: str = DEFAULT_LAN
         ])
         has_direct_payment_methods = True
 
-    if settings.is_support_topup_enabled():
-        keyboard.append([
-            InlineKeyboardButton(
-                text=texts.t("PAYMENT_VIA_SUPPORT", "🛠️ Через поддержку"),
-                callback_data="topup_support"
-            )
-        ])
-
     if not keyboard:
         keyboard.append([
             InlineKeyboardButton(
@@ -1457,16 +1449,10 @@ def get_payment_methods_keyboard(amount_kopeks: int, language: str = DEFAULT_LAN
                 callback_data="payment_methods_unavailable"
             )
         ])
-    elif not has_direct_payment_methods and settings.is_support_topup_enabled():
-        keyboard.insert(0, [
-            InlineKeyboardButton(
-                text=texts.t("PAYMENTS_TEMPORARILY_UNAVAILABLE", "⚠️ Способы оплаты временно недоступны"),
-                callback_data="payment_methods_unavailable"
-            )
-        ])
 
+    back_callback = "balance_topup_reset" if amount_kopeks > 0 else "back_to_menu"
     keyboard.append([
-        InlineKeyboardButton(text=texts.BACK, callback_data="back_to_menu")
+        InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -1671,10 +1657,7 @@ def get_autopay_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
             InlineKeyboardButton(text=texts.t("DISABLE_BUTTON", "❌ Выключить"), callback_data="autopay_disable")
         ],
         [
-            InlineKeyboardButton(text=texts.t("AUTOPAY_SET_DAYS_BUTTON", "⚙️ Настроить дни"), callback_data="autopay_set_days")
-        ],
-        [
-            InlineKeyboardButton(text=texts.BACK, callback_data="menu_subscription")
+            InlineKeyboardButton(text=texts.BACK, callback_data="subscription")
         ]
     ])
 
@@ -3031,7 +3014,7 @@ def get_subscription_menu_keyboard(
         [InlineKeyboardButton(text=autopay_button_text, callback_data="subscription_autopay")],
         [
             InlineKeyboardButton(
-                text=texts.t("SUB_ADD_DAYS_SHORT_BUTTON", "➕ Дни"),
+                text=texts.t("SUB_ADD_DAYS_SHORT_BUTTON", "➕ Продлить"),
                 callback_data="sub_add_days",
             ),
             InlineKeyboardButton(

@@ -237,30 +237,63 @@ async def show_payment_methods(
 ):
     texts = get_texts(db_user.language)
 
+    # If there's a stored amount from a previous entry, go straight to payment methods
+    data = await state.get_data()
+    stored_amount = data.get("topup_amount_kopeks")
+    if stored_amount and stored_amount > 0:
+        prompt = texts.t(
+            "BALANCE_TOPUP_CHOOSE_METHOD_PROMPT",
+            "💳 Выберите способ оплаты на сумму {amount}:",
+        ).format(amount=texts.format_price(stored_amount))
+
+        keyboard = get_payment_methods_keyboard(stored_amount, db_user.language)
+
+        try:
+            await callback.message.edit_text(
+                prompt,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+        except TelegramBadRequest:
+            try:
+                await callback.message.delete()
+            except TelegramBadRequest:
+                pass
+            await callback.message.answer(
+                prompt,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+        await callback.answer()
+        return
+
     prompt_text = texts.t(
         "BALANCE_TOPUP_ENTER_AMOUNT_PROMPT",
         "💳 <b>Пополнение баланса</b>\n\nВведите сумму в рублях для пополнения баланса:",
     )
 
-    keyboard = get_back_keyboard(db_user.language)
+    back_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text=texts.BACK, callback_data="subscription")]
+    ])
 
     try:
-        if callback.message and callback.message.text:
-            await callback.message.edit_text(
+        if callback.message and callback.message.photo:
+            await callback.message.delete()
+            await callback.message.answer(
                 prompt_text,
-                reply_markup=keyboard,
+                reply_markup=back_keyboard,
                 parse_mode="HTML",
             )
-        elif callback.message and callback.message.caption:
-            await callback.message.edit_caption(
+        elif callback.message and callback.message.text:
+            await callback.message.edit_text(
                 prompt_text,
-                reply_markup=keyboard,
+                reply_markup=back_keyboard,
                 parse_mode="HTML",
             )
         else:
             await callback.message.answer(
                 prompt_text,
-                reply_markup=keyboard,
+                reply_markup=back_keyboard,
                 parse_mode="HTML",
             )
     except TelegramBadRequest:
@@ -270,13 +303,24 @@ async def show_payment_methods(
             pass
         await callback.message.answer(
             prompt_text,
-            reply_markup=keyboard,
+            reply_markup=back_keyboard,
             parse_mode="HTML",
         )
 
     await state.set_state(BalanceStates.waiting_for_amount)
     await state.update_data(payment_method="select_after")
     await callback.answer()
+
+
+@error_handler
+async def handle_balance_topup_reset(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+    state: FSMContext
+):
+    await state.clear()
+    await show_payment_methods(callback, db_user, db, state)
 
 
 async def _render_payment_methods_with_amount(
@@ -498,6 +542,7 @@ async def process_topup_amount(
         
         if payment_method == "select_after":
             await state.clear()
+            await state.update_data(topup_amount_kopeks=amount_kopeks)
             await _render_payment_methods_with_amount(message, db_user, amount_kopeks)
             return
 
@@ -836,6 +881,11 @@ def register_balance_handlers(dp: Dispatcher):
     dp.callback_query.register(
         show_payment_methods,
         F.data == "balance_topup"
+    )
+
+    dp.callback_query.register(
+        handle_balance_topup_reset,
+        F.data == "balance_topup_reset"
     )
     
     from .stars import start_stars_payment

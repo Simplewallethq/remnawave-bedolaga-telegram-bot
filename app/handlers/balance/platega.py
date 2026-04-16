@@ -296,7 +296,7 @@ async def process_platega_payment_amount(
     payment_title = _get_payment_title(method_code)
     pay_button_text = _get_pay_button_text(method_code)
 
-    back_callback = data.get("platega_back_callback", "sub_add_days")
+    back_callback = data.get("platega_back_callback", "balance_topup")
 
     keyboard = types.InlineKeyboardMarkup(
         inline_keyboard=[
