@@ -2577,15 +2577,28 @@ async def handle_subscription_menu(
     days_left = 0
     if subscription.end_date and subscription.end_date > current_time:
         days_left = (subscription.end_date - current_time).days
-    
+
     devices_count = subscription.device_limit or 0
-    
-    text = (
-        f"Ваша подписка:\n\n"
-        f"Осталось дней: {days_left} дней\n"
-        f"Устройств: {devices_count} шт."
+
+    is_active = (
+        subscription.status == "active"
+        and subscription.end_date
+        and subscription.end_date > current_time
     )
-    
+    if is_active:
+        header = texts.t("SUBSCRIPTION_MENU_HEADER_ACTIVE", "Подписка активна")
+    else:
+        header = texts.t("SUBSCRIPTION_MENU_HEADER_INACTIVE", "Подписка неактивна")
+
+    text = texts.t(
+        "SUBSCRIPTION_MENU_BODY_TEMPLATE",
+        "<b>{header}</b>\n\nОсталось: {days_left} дней\nУстройства: {devices_count}",
+    ).format(
+        header=header,
+        days_left=days_left,
+        devices_count=devices_count,
+    )
+
     image_path = os.path.join("images", "subscription_page.png")
     if not os.path.exists(image_path):
          image_path = None
@@ -2597,7 +2610,12 @@ async def handle_subscription_menu(
     await edit_or_answer_photo(
         callback=callback,
         caption=text,
-        keyboard=get_subscription_menu_keyboard(share_link=share_link),
+        keyboard=get_subscription_menu_keyboard(
+            language=db_user.language,
+            share_link=share_link,
+            balance_kopeks=db_user.balance_kopeks,
+            autopay_enabled=bool(subscription.autopay_enabled),
+        ),
         parse_mode="HTML",
         photo_path=image_path
     )

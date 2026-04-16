@@ -2999,14 +2999,46 @@ def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: boo
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_subscription_menu_keyboard(language: str = DEFAULT_LANGUAGE, share_link: Optional[str] = None) -> InlineKeyboardMarkup:
+def get_subscription_menu_keyboard(
+    language: str = DEFAULT_LANGUAGE,
+    share_link: Optional[str] = None,
+    balance_kopeks: int = 0,
+    autopay_enabled: bool = False,
+) -> InlineKeyboardMarkup:
     """
     Экран 5: Меню подписки
     """
     texts = get_texts(language)
+
+    balance_button_text = texts.t(
+        "SUBSCRIPTION_MENU_BALANCE_BUTTON",
+        "💰 Баланс: {balance}  →",
+    ).format(balance=texts.format_price(balance_kopeks))
+
+    if autopay_enabled:
+        autopay_button_text = texts.t(
+            "SUBSCRIPTION_MENU_AUTOPAY_ON_BUTTON",
+            "🔄 Автопродление: включено",
+        )
+    else:
+        autopay_button_text = texts.t(
+            "SUBSCRIPTION_MENU_AUTOPAY_OFF_BUTTON",
+            "🔄 Автопродление: выключено",
+        )
+
     buttons = [
-        [InlineKeyboardButton(text=texts.t("SUB_ADD_DAYS_BUTTON", "➕ Добавить дни"), callback_data="sub_add_days")],
-        [InlineKeyboardButton(text=texts.t("SUB_ADD_DEVICES_BUTTON", "➕ Добавить устройства"), callback_data="sub_add_devices")],
+        [InlineKeyboardButton(text=balance_button_text, callback_data="balance_topup")],
+        [InlineKeyboardButton(text=autopay_button_text, callback_data="subscription_autopay")],
+        [
+            InlineKeyboardButton(
+                text=texts.t("SUB_ADD_DAYS_SHORT_BUTTON", "➕ Дни"),
+                callback_data="sub_add_days",
+            ),
+            InlineKeyboardButton(
+                text=texts.t("SUB_ADD_DEVICES_SHORT_BUTTON", "➕ Устройства"),
+                callback_data="sub_add_devices",
+            ),
+        ],
     ]
     if share_link:
         share_url = f"tg://msg_url?url={share_link}"
