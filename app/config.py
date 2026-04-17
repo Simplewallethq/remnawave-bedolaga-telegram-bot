@@ -391,6 +391,8 @@ class Settings(BaseSettings):
     ENABLE_LOGO_MODE: bool = True
     LOGO_FILE: str = "vpn_logo.png"
     MIRROR_BOTS: str = "[]"
+    MIRROR_BOTS_FILE: str = "mirror_bots.yaml"
+    BOT_IMAGES_DIR: str = "bot_images"
     SKIP_RULES_ACCEPT: bool = False
     SKIP_REFERRAL_CODE: bool = False
 
@@ -1719,26 +1721,69 @@ class Settings(BaseSettings):
     def is_support_contact_enabled(self) -> bool:
         return self.get_support_system_mode() in {"contact", "both"}
 
-    def get_mirror_bots(self) -> list[dict]:
-        import json, logging
-        raw = (self.MIRROR_BOTS or "").strip()
-        if not raw or raw == "[]":
-            return []
+    def resolve_bot_logo(self, logo: str) -> str:
+        logo = (logo or "").strip()
+        if not logo:
+            return self.LOGO_FILE
+        path = Path(logo)
+        if path.is_absolute() or len(path.parts) > 1:
+            return str(path)
+        candidate = Path(self.BOT_IMAGES_DIR) / path
+        if candidate.exists():
+            return str(candidate)
+        if path.exists():
+            return str(path)
+        return str(candidate)
+
+    def _load_mirror_bots_from_file(self) -> list[dict] | None:
+        log = logging.getLogger(__name__)
+        path = Path((self.MIRROR_BOTS_FILE or "").strip() or "mirror_bots.yaml")
+        if not path.exists():
+            return None
         try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            logging.getLogger(__name__).warning("MIRROR_BOTS invalid JSON, ignoring: %s", exc)
+            import yaml
+            with path.open("r", encoding="utf-8") as fh:
+                data = yaml.safe_load(fh) or {}
+        except Exception as exc:
+            log.warning("MIRROR_BOTS_FILE %s parse failed, falling back to env: %s", path, exc)
+            return None
+        if isinstance(data, dict):
+            items = data.get("bots") or data.get("mirrors") or []
+        elif isinstance(data, list):
+            items = data
+        else:
             return []
-        if not isinstance(parsed, list):
+        if not isinstance(items, list):
             return []
+        return items
+
+    def get_mirror_bots(self) -> list[dict]:
+        import json
+        log = logging.getLogger(__name__)
+
+        items = self._load_mirror_bots_from_file()
+        if items is None:
+            raw = (self.MIRROR_BOTS or "").strip()
+            if not raw or raw == "[]":
+                return []
+            try:
+                items = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                log.warning("MIRROR_BOTS invalid JSON, ignoring: %s", exc)
+                return []
+            if not isinstance(items, list):
+                return []
+
         result = []
-        for item in parsed:
+        seen_tokens = set()
+        for item in items:
             if not isinstance(item, dict):
                 continue
             token = (item.get("token") or "").strip()
-            if not token:
+            if not token or token in seen_tokens:
                 continue
-            logo = (item.get("logo") or self.LOGO_FILE).strip()
+            seen_tokens.add(token)
+            logo = self.resolve_bot_logo(item.get("logo") or self.LOGO_FILE)
             result.append({"token": token, "logo": logo})
         return result
 
