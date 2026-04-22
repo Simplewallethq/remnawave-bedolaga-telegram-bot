@@ -1502,8 +1502,8 @@ async def handle_referral(callback: types.CallbackQuery, db_user: User, db: Asyn
     amount = stats.get("total_earned_kopeks", 0) / 100
     
     bot = await callback.bot.get_me()
-    referral_link = f"https://t.me/{bot.username}?start=ref_{db_user.telegram_id}"
-    
+    referral_link = f"https://t.me/{bot.username}?start={db_user.referral_code}"
+
     text = (
         texts.t("REFERRAL_TITLE", "🤝 Реферальная программа\n\n")
         + texts.t("REFERRAL_INVITED", "👥 Приглашено друзей: {count}").format(count=count) + "\n"
@@ -1531,7 +1531,7 @@ async def handle_referral(callback: types.CallbackQuery, db_user: User, db: Asyn
 async def handle_copy_referral_link(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
     texts = get_texts(db_user.language)
     bot = await callback.bot.get_me()
-    referral_link = f"https://t.me/{bot.username}?start=ref_{db_user.telegram_id}"
+    referral_link = f"https://t.me/{bot.username}?start={db_user.referral_code}"
     copy_text = texts.t("REFERRAL_COPY_LABEL", "Ваша ссылка:\n<code>{link}</code>").format(link=referral_link)
     await callback.message.answer(copy_text, parse_mode="HTML")
     await callback.answer()

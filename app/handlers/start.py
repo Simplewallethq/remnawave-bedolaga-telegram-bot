@@ -15,6 +15,7 @@ from app.database.crud.user import (
     get_user_by_telegram_id,
     create_user,
     get_user_by_referral_code,
+    resolve_referrer_by_link_payload,
 )
 from app.database.crud.campaign import (
     get_campaign_by_start_parameter,
@@ -299,7 +300,7 @@ async def handle_potential_referral_code(
         return False
 
     # Сначала проверяем реферальный код
-    referrer = await get_user_by_referral_code(db, potential_code)
+    referrer = await resolve_referrer_by_link_payload(db, potential_code)
     if referrer:
         data['referral_code'] = potential_code
         data['referrer_id'] = referrer.id
@@ -394,7 +395,7 @@ async def _continue_registration_after_language(
 
     # Process referral code if present in state data (from /start payload)
     if data.get('referral_code'):
-        referrer = await get_user_by_referral_code(db, data['referral_code'])
+        referrer = await resolve_referrer_by_link_payload(db, data['referral_code'])
         if referrer:
             data['referrer_id'] = referrer.id
             await state.set_data(data)
@@ -853,7 +854,7 @@ async def _continue_registration_after_rules(
     if data.get('referral_code'):
         logger.info(f"🎫 Найден реферальный код из deep link: {data['referral_code']}")
 
-        referrer = await get_user_by_referral_code(db, data['referral_code'])
+        referrer = await resolve_referrer_by_link_payload(db, data['referral_code'])
         if referrer:
             data['referrer_id'] = referrer.id
             await state.set_data(data)
@@ -1012,7 +1013,7 @@ async def process_privacy_policy_accept(
             if data.get('referral_code'):
                 logger.info(f"🎫 Найден реферальный код из deep link: {data['referral_code']}")
 
-                referrer = await get_user_by_referral_code(db, data['referral_code'])
+                referrer = await resolve_referrer_by_link_payload(db, data['referral_code'])
                 if referrer:
                     data['referrer_id'] = referrer.id
                     await state.set_data(data)
@@ -1104,7 +1105,7 @@ async def process_referral_code_input(
     code = message.text.strip()
 
     # Сначала проверяем, является ли это реферальным кодом
-    referrer = await get_user_by_referral_code(db, code)
+    referrer = await resolve_referrer_by_link_payload(db, code)
     if referrer:
         data['referrer_id'] = referrer.id
         await state.set_data(data)
@@ -1287,7 +1288,7 @@ async def complete_registration_from_callback(
 
     referrer_id = data.get('referrer_id')
     if not referrer_id and data.get('referral_code'):
-        referrer = await get_user_by_referral_code(db, data['referral_code'])
+        referrer = await resolve_referrer_by_link_payload(db, data['referral_code'])
         if referrer:
             referrer_id = referrer.id
 
@@ -1530,7 +1531,7 @@ async def complete_registration(
 
     referrer_id = data.get('referrer_id')
     if not referrer_id and data.get('referral_code'):
-        referrer = await get_user_by_referral_code(db, data['referral_code'])
+        referrer = await resolve_referrer_by_link_payload(db, data['referral_code'])
         if referrer:
             referrer_id = referrer.id
 

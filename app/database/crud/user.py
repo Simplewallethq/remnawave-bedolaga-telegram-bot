@@ -119,6 +119,28 @@ async def get_user_by_referral_code(db: AsyncSession, referral_code: str) -> Opt
     return user
 
 
+async def resolve_referrer_by_link_payload(
+    db: AsyncSession, payload: str
+) -> Optional[User]:
+    referrer = await get_user_by_referral_code(db, payload)
+    if referrer:
+        return referrer
+
+    if payload.startswith("ref_"):
+        raw_id = payload[4:]
+        if raw_id.isdigit():
+            legacy_referrer = await get_user_by_telegram_id(db, int(raw_id))
+            if legacy_referrer:
+                logger.info(
+                    "🔁 Старая реф-ссылка: %s → user telegram_id=%s",
+                    payload,
+                    raw_id,
+                )
+                return legacy_referrer
+
+    return None
+
+
 async def get_user_by_remnawave_uuid(db: AsyncSession, remnawave_uuid: str) -> Optional[User]:
     result = await db.execute(
         select(User)
