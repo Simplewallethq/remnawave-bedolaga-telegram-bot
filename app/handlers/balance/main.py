@@ -493,14 +493,6 @@ async def process_topup_amount(
 
     try:
         if not message.text:
-            if message.successful_payment:
-                logger.info(
-                    "Получено сообщение об успешном платеже без текста, "
-                    "обработчик суммы пополнения завершает работу"
-                )
-                await state.clear()
-                return
-
             await message.answer(
                 texts.INVALID_AMOUNT,
                 reply_markup=get_back_keyboard(db_user.language)
@@ -964,7 +956,8 @@ def register_balance_handlers(dp: Dispatcher):
     
     dp.message.register(
         process_topup_amount,
-        BalanceStates.waiting_for_amount
+        BalanceStates.waiting_for_amount,
+        F.successful_payment.is_(None),
     )
 
     from .cryptobot import start_cryptobot_payment
