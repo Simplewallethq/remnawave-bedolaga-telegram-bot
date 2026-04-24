@@ -22,6 +22,7 @@ class SubscriptionResponse(BaseModel):
     subscription_url: Optional[str] = None
     subscription_crypto_link: Optional[str] = None
     connected_squads: List[str] = Field(default_factory=list)
+    connected_devices: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

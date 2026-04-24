@@ -12,6 +12,7 @@ from app.database.crud.device_link import (
     get_device_link,
     get_subscription_by_device_id,
 )
+
 from app.database.models import Subscription
 
 from ..dependencies import get_db_session, require_api_token
@@ -42,7 +43,9 @@ async def get_device_subscription(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Device not found",
         )
-    return _serialize_subscription(subscription)
+    response = _serialize_subscription(subscription)
+    response.connected_devices = await count_device_links(db, subscription.id)
+    return response
 
 
 @router.post(
