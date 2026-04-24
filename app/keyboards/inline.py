@@ -12,6 +12,8 @@ from app.utils.miniapp_buttons import build_miniapp_or_callback_button
 from app.utils.pricing_utils import (
     format_period_description,
     apply_percentage_discount,
+    calculate_prorated_price,
+    get_remaining_months,
 )
 from app.utils.price_display import PriceInfo, format_price_button
 from app.utils.subscription_utils import (
@@ -3018,7 +3020,7 @@ def get_subscription_menu_keyboard(
                 callback_data="sub_add_days",
             ),
             InlineKeyboardButton(
-                text=texts.t("SUB_ADD_DEVICES_SHORT_BUTTON", "➕ Устройства"),
+                text=texts.t("SUB_ADD_DEVICES_SHORT_BUTTON", "📱 Устройства"),
                 callback_data="sub_add_devices",
             ),
         ],
@@ -3043,31 +3045,62 @@ def get_topup_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_device_selection_keyboard(current_selected: int = 1, back_callback: str = "subscription", language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
+def get_sub_devices_menu_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
+    texts = get_texts(language)
+    buttons = [
+        [InlineKeyboardButton(
+            text=texts.t("SUB_CHANGE_DEVICES_COUNT_BUTTON", "🔢 Изменить количество"),
+            callback_data="sub_change_devices_count",
+        )],
+        [InlineKeyboardButton(
+            text=texts.t("SUB_RESET_DEVICES_BUTTON", "🔄 Сбросить устройства"),
+            callback_data="sub_reset_devices",
+        )],
+        [InlineKeyboardButton(text=texts.BACK, callback_data="subscription")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_device_selection_keyboard(
+    current_selected: int = 1,
+    back_callback: str = "subscription",
+    language: str = DEFAULT_LANGUAGE,
+    current_device_limit: Optional[int] = None,
+    subscription_end_date: Optional[datetime] = None,
+    discount_percent: int = 0,
+) -> InlineKeyboardMarkup:
     """
     Экран 7: Выбор устройств
     """
     texts = get_texts(language)
+    baseline = current_device_limit if current_device_limit is not None else current_selected
+    current_chargeable = max(0, baseline - settings.DEFAULT_DEVICE_LIMIT)
+
     buttons = []
     row = []
     for i in range(1, 11):
-        extra_price = 0
-        if i > 1:
-            extra_price = (70 * (i - 1)) / 3
-            
         if i == current_selected:
             text = f"✅ {i} (вкл.)"
         else:
-             price_text = f" (+{extra_price:.2f}₽)" if extra_price > 0 else ""
-             price_text = price_text.replace(".00", "")
-             text = f"⚪ {i}{price_text}"
-        
+            price_suffix = ""
+            if i > baseline and subscription_end_date is not None:
+                new_chargeable = max(0, i - settings.DEFAULT_DEVICE_LIMIT)
+                chargeable = new_chargeable - current_chargeable
+                if chargeable > 0:
+                    per_month = chargeable * settings.PRICE_PER_DEVICE
+                    discounted_per_month, _ = apply_percentage_discount(per_month, discount_percent)
+                    price, months = calculate_prorated_price(discounted_per_month, subscription_end_date)
+                    if price > 0:
+                        months_text = f" за {months} мес" if months > 1 else ""
+                        price_suffix = f" (+{texts.format_price(price)}{months_text})"
+            text = f"⚪ {i}{price_suffix}"
+
         row.append(InlineKeyboardButton(text=text, callback_data=f"select_device:{i}"))
-        
+
         if len(row) == 2:
             buttons.append(row)
             row = []
-    
+
     if row:
         buttons.append(row)
 

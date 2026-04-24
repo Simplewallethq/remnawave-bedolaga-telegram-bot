@@ -53,6 +53,7 @@ from app.keyboards.inline import (
     get_topup_keyboard,
     get_device_selection_keyboard,
     get_simple_payment_methods_keyboard,
+    get_sub_devices_menu_keyboard,
 )
 from app.services.user_cart_service import user_cart_service
 from app.localization.texts import get_texts
@@ -2645,23 +2646,67 @@ async def handle_sub_add_devices(
     db_user: User,
     db: AsyncSession
 ):
-    text = "Выберите количество устройств"
-    
-    subscription = db_user.subscription
-    current_devices = subscription.device_limit if subscription else 1
-    
+    texts = get_texts(db_user.language)
+    text = texts.t(
+        "SUB_DEVICES_MENU_TITLE",
+        "📱 <b>Устройства</b>\n\nВыберите действие:",
+    )
+
     image_path = os.path.join("images", "device_selection.png")
     if not os.path.exists(image_path):
-         image_path = None
+        image_path = None
 
     await edit_or_answer_photo(
         callback=callback,
         caption=text,
-        keyboard=get_device_selection_keyboard(current_selected=current_devices, back_callback="subscription"),
+        keyboard=get_sub_devices_menu_keyboard(db_user.language),
         parse_mode="HTML",
-        photo_path=image_path
+        photo_path=image_path,
     )
     await callback.answer()
+
+
+async def handle_sub_change_devices_count(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    subscription = db_user.subscription
+    current_devices = subscription.device_limit if subscription else 1
+    end_date = subscription.end_date if subscription else None
+    period_hint = get_remaining_months(end_date) * 30 if end_date else None
+    discount_percent = _get_addon_discount_percent_for_user(db_user, "devices", period_hint)
+
+    text = "Выберите количество устройств"
+
+    image_path = os.path.join("images", "device_selection.png")
+    if not os.path.exists(image_path):
+        image_path = None
+
+    await edit_or_answer_photo(
+        callback=callback,
+        caption=text,
+        keyboard=get_device_selection_keyboard(
+            current_selected=current_devices,
+            back_callback="sub_add_devices",
+            language=db_user.language,
+            current_device_limit=current_devices,
+            subscription_end_date=end_date,
+            discount_percent=discount_percent,
+        ),
+        parse_mode="HTML",
+        photo_path=image_path,
+    )
+    await callback.answer()
+
+
+async def handle_sub_reset_devices(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    from app.handlers.subscription.devices import handle_device_management
+    await handle_device_management(callback, db_user, db)
 
 
 async def handle_topup_days(
@@ -2717,11 +2762,21 @@ async def handle_device_selection_click(
         selected_devices = 1
 
     await state.update_data(selected_devices=selected_devices)
-    
+
+    subscription = db_user.subscription
+    end_date = subscription.end_date if subscription else None
+    current_limit = subscription.device_limit if subscription else 1
+    period_hint = get_remaining_months(end_date) * 30 if end_date else None
+    discount_percent = _get_addon_discount_percent_for_user(db_user, "devices", period_hint)
+
     await callback.message.edit_reply_markup(
         reply_markup=get_device_selection_keyboard(
             current_selected=selected_devices,
-            back_callback="subscription"
+            back_callback="sub_add_devices",
+            language=db_user.language,
+            current_device_limit=current_limit,
+            subscription_end_date=end_date,
+            discount_percent=discount_percent,
         )
     )
     await callback.answer()
@@ -3383,6 +3438,16 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         handle_sub_add_devices,
         F.data == "sub_add_devices"
+    )
+
+    dp.callback_query.register(
+        handle_sub_change_devices_count,
+        F.data == "sub_change_devices_count"
+    )
+
+    dp.callback_query.register(
+        handle_sub_reset_devices,
+        F.data == "sub_reset_devices"
     )
 
     dp.callback_query.register(
