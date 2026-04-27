@@ -1407,7 +1407,11 @@ def get_payment_methods_keyboard(amount_kopeks: int, language: str = DEFAULT_LAN
         ])
         has_direct_payment_methods = True
 
-    if settings.is_platega_enabled() and settings.get_platega_active_methods():
+    if (
+        settings.is_platega_enabled()
+        and settings.get_platega_active_methods()
+        and not settings.is_platega_universal_enabled()
+    ):
         platega_name = settings.get_platega_display_name()
         keyboard.append([
             InlineKeyboardButton(
@@ -3157,7 +3161,11 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
         buttons.append([InlineKeyboardButton(text="💳 Карта (YooKassa)", callback_data=_build_callback("yookassa"))])
     
     # Platega
-    if settings.is_platega_enabled() and settings.get_platega_active_methods():
+    if (
+        settings.is_platega_enabled()
+        and settings.get_platega_active_methods()
+        and not settings.is_platega_universal_enabled()
+    ):
         platega_name = settings.get_platega_display_name()
         buttons.append([InlineKeyboardButton(text="💳 СБП/Банковская карта", callback_data=_build_callback("platega"))])
 
