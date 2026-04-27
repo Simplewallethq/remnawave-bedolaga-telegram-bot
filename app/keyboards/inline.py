@@ -1426,18 +1426,18 @@ def get_payment_methods_keyboard(amount_kopeks: int, language: str = DEFAULT_LAN
             InlineKeyboardButton(
                 text=texts.t(
                     "PAYMENT_PLATEGA_UNIVERSAL",
-                    "💳 Карта/СБП (универсально)",
+                    "💳 СБП/Банковские карты",
                 ),
                 callback_data=_build_callback("platega_universal"),
             )
         ])
-        has_direct_payment_methods = True
-
-    if settings.is_cryptobot_enabled():
         keyboard.append([
             InlineKeyboardButton(
-                text=texts.t("PAYMENT_CRYPTOBOT", "🪙 Crypto Bot"),
-                callback_data=_build_callback("cryptobot")
+                text=texts.t(
+                    "PAYMENT_PLATEGA_CRYPTO",
+                    "🪙 Криптовалюта",
+                ),
+                callback_data=_build_callback("platega_universal"),
             )
         ])
         has_direct_payment_methods = True
@@ -3171,7 +3171,11 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
 
     if settings.is_platega_universal_enabled():
         buttons.append([InlineKeyboardButton(
-            text=texts.t("PAYMENT_PLATEGA_UNIVERSAL", "💳 Карта/СБП (универсально)"),
+            text=texts.t("PAYMENT_PLATEGA_UNIVERSAL", "💳 СБП/Банковские карты"),
+            callback_data=_build_callback("platega_universal"),
+        )])
+        buttons.append([InlineKeyboardButton(
+            text=texts.t("PAYMENT_PLATEGA_CRYPTO", "🪙 Криптовалюта"),
             callback_data=_build_callback("platega_universal"),
         )])
 
@@ -3187,10 +3191,6 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
     if settings.is_mulenpay_enabled():
         mulenpay_name = settings.get_mulenpay_display_name()
         buttons.append([InlineKeyboardButton(text=f"💳 {mulenpay_name}", callback_data=_build_callback("mulenpay"))])
-    
-    # CryptoBot
-    if settings.is_cryptobot_enabled():
-        buttons.append([InlineKeyboardButton(text="🪙 Crypto Bot", callback_data=_build_callback("cryptobot"))])
     
     # Heleket
     if settings.is_heleket_enabled():
