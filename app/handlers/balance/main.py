@@ -564,6 +564,14 @@ async def process_topup_amount(
                 await process_platega_payment_amount(
                     message, db_user, db, amount_kopeks, state
                 )
+        elif payment_method == "platega_universal":
+            from app.database.database import AsyncSessionLocal
+            from .platega import process_platega_universal_payment_amount
+
+            async with AsyncSessionLocal() as db:
+                await process_platega_universal_payment_amount(
+                    message, db_user, db, amount_kopeks, state
+                )
         elif payment_method == "wata":
             from app.database.database import AsyncSessionLocal
             from .wata import process_wata_payment_amount
@@ -592,7 +600,7 @@ async def process_topup_amount(
                 await process_cloudpayments_amount(message, db_user, db, state)
         else:
             await message.answer("Неизвестный способ оплаты")
-        
+
     except ValueError:
         await message.answer(
             texts.INVALID_AMOUNT,
@@ -686,6 +694,14 @@ async def handle_quick_amount_selection(
 
             async with AsyncSessionLocal() as db:
                 await process_platega_payment_amount(
+                    callback.message, db_user, db, amount_kopeks, state
+                )
+        elif payment_method == "platega_universal":
+            from app.database.database import AsyncSessionLocal
+            from .platega import process_platega_universal_payment_amount
+
+            async with AsyncSessionLocal() as db:
+                await process_platega_universal_payment_amount(
                     callback.message, db_user, db, amount_kopeks, state
                 )
         elif payment_method == "wata":
@@ -798,6 +814,11 @@ async def handle_topup_amount_callback(
             else:
                 await state.update_data(platega_pending_amount=amount_kopeks)
                 await start_platega_payment(callback, db_user, state)
+        elif method == "platega_universal":
+            from .platega import start_platega_universal_payment
+
+            await state.update_data(platega_pending_amount=amount_kopeks)
+            await start_platega_universal_payment(callback, db_user, state)
         elif method == "pal24":
             from app.database.database import AsyncSessionLocal
             from .pal24 import process_pal24_payment_amount
@@ -921,7 +942,11 @@ def register_balance_handlers(dp: Dispatcher):
         F.data.startswith("pal24_method_"),
     )
 
-    from .platega import start_platega_payment, handle_platega_method_selection
+    from .platega import (
+        start_platega_payment,
+        handle_platega_method_selection,
+        start_platega_universal_payment,
+    )
     dp.callback_query.register(
         start_platega_payment,
         F.data == "topup_platega"
@@ -929,6 +954,10 @@ def register_balance_handlers(dp: Dispatcher):
     dp.callback_query.register(
         handle_platega_method_selection,
         F.data.startswith("platega_method_"),
+    )
+    dp.callback_query.register(
+        start_platega_universal_payment,
+        F.data == "topup_platega_universal",
     )
 
     from .yookassa import check_yookassa_payment_status

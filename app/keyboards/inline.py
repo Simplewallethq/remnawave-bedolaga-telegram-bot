@@ -1417,6 +1417,18 @@ def get_payment_methods_keyboard(amount_kopeks: int, language: str = DEFAULT_LAN
         ])
         has_direct_payment_methods = True
 
+    if settings.is_platega_universal_enabled():
+        keyboard.append([
+            InlineKeyboardButton(
+                text=texts.t(
+                    "PAYMENT_PLATEGA_UNIVERSAL",
+                    "💳 Карта/СБП (универсально)",
+                ),
+                callback_data=_build_callback("platega_universal"),
+            )
+        ])
+        has_direct_payment_methods = True
+
     if settings.is_cryptobot_enabled():
         keyboard.append([
             InlineKeyboardButton(
@@ -3148,7 +3160,13 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
     if settings.is_platega_enabled() and settings.get_platega_active_methods():
         platega_name = settings.get_platega_display_name()
         buttons.append([InlineKeyboardButton(text="💳 СБП/Банковская карта", callback_data=_build_callback("platega"))])
-    
+
+    if settings.is_platega_universal_enabled():
+        buttons.append([InlineKeyboardButton(
+            text=texts.t("PAYMENT_PLATEGA_UNIVERSAL", "💳 Карта/СБП (универсально)"),
+            callback_data=_build_callback("platega_universal"),
+        )])
+
     # PayPalych (pal24)
     if settings.is_pal24_enabled():
         buttons.append([InlineKeyboardButton(text="🏦 СБП (PayPalych)", callback_data=_build_callback("pal24"))])

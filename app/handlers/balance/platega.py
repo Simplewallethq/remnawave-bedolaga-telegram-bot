@@ -380,6 +380,261 @@ async def process_platega_payment_amount(
     await state.clear()
 
 
+async def _prompt_universal_amount(
+    message: types.Message,
+    db_user: User,
+    state: FSMContext,
+) -> None:
+    texts = get_texts(db_user.language)
+    platega_name = settings.get_platega_display_name()
+
+    await state.update_data(payment_method="platega_universal", platega_method=None)
+
+    data = await state.get_data()
+    pending_amount = int(data.get("platega_pending_amount") or 0)
+
+    if pending_amount > 0:
+        await state.update_data(platega_pending_amount=None)
+
+        from app.database.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            await process_platega_universal_payment_amount(
+                message,
+                db_user,
+                db,
+                pending_amount,
+                state,
+            )
+        return
+
+    min_amount_label = settings.format_price(settings.PLATEGA_MIN_AMOUNT_KOPEKS)
+    max_amount_kopeks = settings.PLATEGA_MAX_AMOUNT_KOPEKS
+    max_amount_label = (
+        settings.format_price(max_amount_kopeks)
+        if max_amount_kopeks and max_amount_kopeks > 0
+        else ""
+    )
+
+    default_prompt_body = (
+        "Введите сумму для пополнения от {min_amount} до {max_amount}.\n"
+        if max_amount_kopeks and max_amount_kopeks > 0
+        else "Введите сумму для пополнения от {min_amount}.\n"
+    )
+
+    prompt_template = texts.t(
+        "PLATEGA_UNIVERSAL_TOPUP_PROMPT",
+        (
+            "💳 <b>Оплата через {platega_name}</b>\n\n"
+            f"{default_prompt_body}"
+            "Способ оплаты выбирается на странице {platega_name}."
+        ),
+    )
+
+    keyboard = get_back_keyboard(db_user.language)
+
+    if settings.YOOKASSA_QUICK_AMOUNT_SELECTION_ENABLED and not settings.DISABLE_TOPUP_BUTTONS:
+        from .main import get_quick_amount_buttons
+
+        quick_amount_buttons = get_quick_amount_buttons(db_user.language, db_user)
+        if quick_amount_buttons:
+            keyboard.inline_keyboard = quick_amount_buttons + keyboard.inline_keyboard
+
+    await message.edit_text(
+        prompt_template.format(
+            platega_name=platega_name,
+            min_amount=min_amount_label,
+            max_amount=max_amount_label,
+        ),
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+    await state.set_state(BalanceStates.waiting_for_amount)
+    await state.update_data(
+        platega_prompt_message_id=message.message_id,
+        platega_prompt_chat_id=message.chat.id,
+    )
+
+
+@error_handler
+async def start_platega_universal_payment(
+    callback: types.CallbackQuery,
+    db_user: User,
+    state: FSMContext,
+):
+    texts = get_texts(db_user.language)
+
+    if not settings.is_platega_universal_enabled():
+        await callback.answer(
+            texts.t(
+                "PLATEGA_UNIVERSAL_TEMPORARILY_UNAVAILABLE",
+                "❌ Универсальная оплата через Platega временно недоступна",
+            ),
+            show_alert=True,
+        )
+        return
+
+    await _prompt_universal_amount(callback.message, db_user, state)
+    await callback.answer()
+
+
+@error_handler
+async def process_platega_universal_payment_amount(
+    message: types.Message,
+    db_user: User,
+    db: AsyncSession,
+    amount_kopeks: int,
+    state: FSMContext,
+):
+    texts = get_texts(db_user.language)
+
+    if not settings.is_platega_universal_enabled():
+        await message.answer(
+            texts.t(
+                "PLATEGA_UNIVERSAL_TEMPORARILY_UNAVAILABLE",
+                "❌ Универсальная оплата через Platega временно недоступна",
+            )
+        )
+        return
+
+    if amount_kopeks < settings.PLATEGA_MIN_AMOUNT_KOPEKS:
+        await message.answer(
+            texts.t(
+                "PLATEGA_AMOUNT_TOO_LOW",
+                "Минимальная сумма для оплаты через Platega: {amount}",
+            ).format(amount=settings.format_price(settings.PLATEGA_MIN_AMOUNT_KOPEKS))
+        )
+        return
+
+    if amount_kopeks > settings.PLATEGA_MAX_AMOUNT_KOPEKS:
+        await message.answer(
+            texts.t(
+                "PLATEGA_AMOUNT_TOO_HIGH",
+                "Максимальная сумма для оплаты через Platega: {amount}",
+            ).format(amount=settings.format_price(settings.PLATEGA_MAX_AMOUNT_KOPEKS))
+        )
+        return
+
+    try:
+        payment_service = PaymentService(message.bot)
+        payment_result = await payment_service.create_platega_universal_payment(
+            db=db,
+            user_id=db_user.id,
+            amount_kopeks=amount_kopeks,
+            description=settings.get_balance_payment_description(amount_kopeks),
+            language=db_user.language,
+        )
+    except Exception as error:
+        logger.exception("Ошибка создания универсального платежа Platega: %s", error)
+        payment_result = None
+
+    if not payment_result or not payment_result.get("redirect_url"):
+        await message.answer(
+            texts.t(
+                "PLATEGA_PAYMENT_ERROR",
+                "❌ Ошибка создания платежа Platega. Попробуйте позже или обратитесь в поддержку.",
+            )
+        )
+        await state.clear()
+        return
+
+    redirect_url = payment_result.get("redirect_url")
+    local_payment_id = payment_result.get("local_payment_id")
+    payment_title = texts.t(
+        "PLATEGA_UNIVERSAL_PAYMENT_TITLE",
+        "Оплата через Platega",
+    )
+    pay_button_text = texts.t(
+        "PLATEGA_UNIVERSAL_PAY_BUTTON",
+        "💳 Оплатить",
+    )
+
+    data = await state.get_data()
+    back_callback = data.get("platega_back_callback", "balance_topup")
+
+    keyboard = types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(
+                    text=pay_button_text,
+                    url=redirect_url,
+                )
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text=texts.t("CHECK_STATUS_BUTTON", "📊 Проверить статус"),
+                    callback_data=f"check_platega_{local_payment_id}",
+                )
+            ],
+            [types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
+            [types.InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)],
+        ]
+    )
+
+    instructions_template = texts.t(
+        "PLATEGA_PAYMENT_INSTRUCTIONS",
+        (
+            "<b>{title}</b>\n\n"
+            "Сумма: {amount}\n\n"
+            "Нажмите кнопку \"Оплатить\" и осуществите перевод. Средства зачислятся автоматически.\n\n"
+            "Если возникнут проблемы, обратитесь в Поддержку"
+        ),
+    )
+
+    state_data = await state.get_data()
+    prompt_message_id = state_data.get("platega_prompt_message_id")
+    prompt_chat_id = state_data.get("platega_prompt_chat_id", message.chat.id)
+
+    try:
+        await message.delete()
+    except Exception as delete_error:  # pragma: no cover - зависит от прав бота
+        logger.warning("Не удалось удалить сообщение с суммой Platega: %s", delete_error)
+
+    if prompt_message_id:
+        try:
+            await message.bot.delete_message(prompt_chat_id, prompt_message_id)
+        except Exception as delete_error:  # pragma: no cover - диагностический лог
+            logger.warning(
+                "Не удалось удалить сообщение с запросом суммы Platega: %s",
+                delete_error,
+            )
+
+    invoice_message = await message.answer(
+        instructions_template.format(
+            title=payment_title,
+            amount=settings.format_price(amount_kopeks),
+        ),
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+    try:
+        from app.services import payment_service as payment_module
+
+        payment = await payment_module.get_platega_payment_by_id(db, local_payment_id)
+        if payment:
+            payment_metadata = dict(getattr(payment, "metadata_json", {}) or {})
+            payment_metadata["invoice_message"] = {
+                "chat_id": invoice_message.chat.id,
+                "message_id": invoice_message.message_id,
+            }
+            await payment_module.update_platega_payment(
+                db,
+                payment=payment,
+                metadata=payment_metadata,
+            )
+    except Exception as error:  # pragma: no cover - диагностический лог
+        logger.warning("Не удалось сохранить данные сообщения Platega: %s", error)
+
+    await state.update_data(
+        platega_invoice_message_id=invoice_message.message_id,
+        platega_invoice_chat_id=invoice_message.chat.id,
+    )
+
+    await state.clear()
+
+
 @error_handler
 async def check_platega_payment_status(
     callback: types.CallbackQuery,

@@ -65,6 +65,39 @@ class PlategaService:
 
         return await self._request("POST", "/transaction/process", json_data=body)
 
+    async def create_payment_universal(
+        self,
+        *,
+        amount: float,
+        currency: str,
+        description: Optional[str] = None,
+        return_url: Optional[str] = None,
+        failed_url: Optional[str] = None,
+        payload: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Создаёт платёжную ссылку без указания метода (метод выбирается на стороне Platega)."""
+
+        body: Dict[str, Any] = {
+            "paymentDetails": {
+                "amount": round(amount, 2),
+                "currency": currency,
+            },
+        }
+
+        if description:
+            sanitized_description = self._sanitize_description(
+                description, self._description_max_length
+            )
+            body["description"] = sanitized_description
+        if return_url:
+            body["return"] = return_url
+        if failed_url:
+            body["failedUrl"] = failed_url
+        if payload:
+            body["payload"] = payload
+
+        return await self._request("POST", "/v2/transaction/process", json_data=body)
+
     async def get_transaction(self, transaction_id: str) -> Optional[Dict[str, Any]]:
         endpoint = f"/transaction/{transaction_id}"
         return await self._request("GET", endpoint)

@@ -334,6 +334,7 @@ class Settings(BaseSettings):
     PLATEGA_WEBHOOK_PATH: str = "/platega-webhook"
     PLATEGA_WEBHOOK_HOST: str = "0.0.0.0"
     PLATEGA_WEBHOOK_PORT: int = 8086
+    PLATEGA_UNIVERSAL_ENABLED: bool = False
 
     WATA_ENABLED: bool = False
     WATA_BASE_URL: str = "https://api.wata.pro/api/h2h"
@@ -1111,6 +1112,9 @@ class Settings(BaseSettings):
             and self.PLATEGA_SECRET is not None
         )
 
+    def is_platega_universal_enabled(self) -> bool:
+        return self.is_platega_enabled() and bool(self.PLATEGA_UNIVERSAL_ENABLED)
+
     def get_platega_display_name(self) -> str:
         name = (self.PLATEGA_DISPLAY_NAME or "").strip()
         if not name:
@@ -1168,6 +1172,8 @@ class Settings(BaseSettings):
         }
 
     def get_platega_method_display_name(self, method_code: int) -> str:
+        if not method_code:
+            return ""
         definitions = self.get_platega_method_definitions()
         info = definitions.get(method_code)
         if info and info.get("name"):
@@ -1175,6 +1181,8 @@ class Settings(BaseSettings):
         return f"Метод {method_code}"
 
     def get_platega_method_display_title(self, method_code: int) -> str:
+        if not method_code:
+            return self.get_platega_display_name()
         definitions = self.get_platega_method_definitions()
         info = definitions.get(method_code)
         if not info:

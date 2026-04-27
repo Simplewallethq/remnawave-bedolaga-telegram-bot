@@ -131,6 +131,108 @@ class PlategaPaymentMixin:
             "payload": payload_token,
         }
 
+    async def create_platega_universal_payment(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        amount_kopeks: int,
+        description: str,
+        language: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Создаёт платёж Platega без выбора метода — пользователь выбирает на странице Platega."""
+
+        service: Optional[PlategaService] = getattr(self, "platega_service", None)
+        if not service or not service.is_configured:
+            logger.error("Platega сервис не инициализирован")
+            return None
+
+        if amount_kopeks < settings.PLATEGA_MIN_AMOUNT_KOPEKS:
+            logger.warning(
+                "Сумма Platega меньше минимальной: %s < %s",
+                amount_kopeks,
+                settings.PLATEGA_MIN_AMOUNT_KOPEKS,
+            )
+            return None
+
+        if amount_kopeks > settings.PLATEGA_MAX_AMOUNT_KOPEKS:
+            logger.warning(
+                "Сумма Platega больше максимальной: %s > %s",
+                amount_kopeks,
+                settings.PLATEGA_MAX_AMOUNT_KOPEKS,
+            )
+            return None
+
+        correlation_id = uuid.uuid4().hex
+        payload_token = f"platega:{correlation_id}"
+
+        amount_value = amount_kopeks / 100
+
+        try:
+            response = await service.create_payment_universal(
+                amount=amount_value,
+                currency=settings.PLATEGA_CURRENCY,
+                description=description,
+                return_url=settings.get_platega_return_url(),
+                failed_url=settings.get_platega_failed_url(),
+                payload=payload_token,
+            )
+        except Exception as error:  # pragma: no cover - network errors
+            logger.exception("Ошибка Platega при создании универсального платежа: %s", error)
+            return None
+
+        if not response:
+            logger.error("Platega вернул пустой ответ при создании универсального платежа")
+            return None
+
+        transaction_id = response.get("transactionId") or response.get("id")
+        redirect_url = response.get("url") or response.get("redirect")
+        status = str(response.get("status") or "PENDING").upper()
+        expires_at = PlategaService.parse_expires_at(response.get("expiresIn"))
+
+        metadata = {
+            "raw_response": response,
+            "language": language,
+            "selected_method": "universal",
+        }
+
+        payment_module = import_module("app.services.payment_service")
+
+        payment = await payment_module.create_platega_payment(
+            db,
+            user_id=user_id,
+            amount_kopeks=amount_kopeks,
+            currency=settings.PLATEGA_CURRENCY,
+            description=description,
+            status=status,
+            payment_method_code=0,
+            correlation_id=correlation_id,
+            platega_transaction_id=transaction_id,
+            redirect_url=redirect_url,
+            return_url=settings.get_platega_return_url(),
+            failed_url=settings.get_platega_failed_url(),
+            payload=payload_token,
+            metadata=metadata,
+            expires_at=expires_at,
+        )
+
+        logger.info(
+            "Создан универсальный Platega платеж %s для пользователя %s (сумма %s₽)",
+            transaction_id or payment.id,
+            user_id,
+            amount_value,
+        )
+
+        return {
+            "local_payment_id": payment.id,
+            "transaction_id": transaction_id,
+            "redirect_url": redirect_url,
+            "status": status,
+            "expires_at": expires_at,
+            "correlation_id": correlation_id,
+            "payload": payload_token,
+        }
+
     async def process_platega_webhook(
         self,
         db: AsyncSession,

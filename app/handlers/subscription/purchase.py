@@ -3325,7 +3325,20 @@ async def handle_payment_selection(
         except Exception as e:
             logger.error(f"Error creating Platega payment: {e}")
             await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
-    
+
+    elif method == "platega_universal":
+        if not settings.is_platega_universal_enabled():
+            await callback.answer("❌ Platega временно недоступна", show_alert=True)
+            return
+
+        try:
+            await state.update_data(platega_pending_amount=amount_kopeks, platega_back_callback=callback.data)
+            from app.handlers.balance.platega import start_platega_universal_payment
+            await start_platega_universal_payment(callback, db_user, state)
+        except Exception as e:
+            logger.error(f"Error creating Platega universal payment: {e}")
+            await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+
     elif method == "pal24":
         if not settings.is_pal24_enabled():
             await callback.answer("❌ PayPalych временно недоступен", show_alert=True)
