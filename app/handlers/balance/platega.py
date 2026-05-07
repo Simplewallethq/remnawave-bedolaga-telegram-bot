@@ -579,9 +579,9 @@ async def process_platega_universal_payment_amount(
         "PLATEGA_UNIVERSAL_PAYMENT_INSTRUCTIONS",
         (
             "<b>Оплата подписки — {amount}</b>\n"
-            "    Карта / СБП / Крипто\n\n"
+            "Карта / СБП / Крипто\n\n"
             "🔒 Защищённый платеж\n"
-            "    Обычно занимает до 10 секунд"
+            "Обычно занимает до 10 секунд"
         ),
     )
 

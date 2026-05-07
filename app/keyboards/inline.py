@@ -2915,6 +2915,12 @@ def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT
                     url=leto_android_url,
                 ),
             ])
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("ONBOARDING_DOWNLOAD_HAPP_ANDROID", "🤖 Скачать Happ"),
+                url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru",
+            ),
+        ])
     elif device_type == "windows":
         buttons.append([
             InlineKeyboardButton(
@@ -3238,10 +3244,13 @@ def get_referral_keyboard(referral_link: str, invite_text: str = "", language: s
     Экран 10: Реферальная программа
     """
     texts = get_texts(language)
-    url = f"tg://msg_url?url={quote(referral_link, safe='')}"
+    # invite_text already embeds the referral link, so pass only `text` to avoid
+    # Telegram prepending the URL on top of the shared message.
     if invite_text:
-        url += f"&text={quote(invite_text, safe='')}"
-        
+        url = f"tg://msg_url?url=&text={quote(invite_text, safe='')}"
+    else:
+        url = f"tg://msg_url?url={quote(referral_link, safe='')}"
+
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=texts.t("SHARE_REFERRAL_BUTTON", "📤 Поделиться ссылкой"), url=url)],
         [InlineKeyboardButton(text=texts.t("COPY_REFERRAL_BUTTON", "📋 Скопировать ссылку"), callback_data="copy_referral_link")],
