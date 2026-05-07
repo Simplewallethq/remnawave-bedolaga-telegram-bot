@@ -29,6 +29,16 @@ logger = logging.getLogger(__name__)
 TRANSACTIONS_PER_PAGE = 10
 
 
+async def clear_state_preserve_topup_amount(state: FSMContext) -> None:
+    """Clear FSM state but keep topup_amount_kopeks so the invoice's
+    "back" button can return to the payment-method selection screen."""
+    data = await state.get_data()
+    topup_amount = data.get("topup_amount_kopeks")
+    await state.clear()
+    if topup_amount:
+        await state.update_data(topup_amount_kopeks=topup_amount)
+
+
 def get_quick_amount_buttons(language: str, user: User) -> list:
     """
     Generate quick amount buttons with user-specific pricing and discounts.

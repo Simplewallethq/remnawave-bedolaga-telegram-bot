@@ -1214,6 +1214,33 @@ async def handle_activate_button(
 
 
 
+def _build_onboarding_device_selection_view(user) -> tuple[str, str | None]:
+    """Build (caption, share_link) for the device-selection screen."""
+    texts = get_texts(user.language)
+    base_text = texts.t(
+        "ONBOARDING_DEVICE_SELECTION_TEXT",
+        "Выбери устройство для подключения:",
+    )
+
+    subscription_link = None
+    if user.subscription:
+        subscription_link = get_display_subscription_link(user.subscription)
+
+    if subscription_link:
+        manual_intro = texts.t(
+            "ONBOARDING_MANUAL_LINK_TEXT",
+            "Для ручного подключения скопируй ключ и добавь его в Happ\n\n",
+        ).rstrip()
+        caption = (
+            f"{base_text}\n\n{manual_intro}\n"
+            f"<blockquote expandable><code>{subscription_link}</code></blockquote>"
+        )
+    else:
+        caption = base_text
+
+    return caption, subscription_link
+
+
 async def handle_howto(
     callback: types.CallbackQuery,
     state: FSMContext,
@@ -1225,11 +1252,7 @@ async def handle_howto(
     if not user:
         return
 
-    texts = get_texts(user.language)
-    device_selection_text = texts.t(
-        "ONBOARDING_DEVICE_SELECTION_TEXT",
-        "Выбери устройство для подключения:",
-    )
+    caption, share_link = _build_onboarding_device_selection_view(user)
 
     image_path = os.path.join("images", "device_selection_screen.png")
     if not os.path.exists(image_path):
@@ -1237,8 +1260,8 @@ async def handle_howto(
 
     await edit_or_answer_photo(
         callback,
-        device_selection_text,
-        get_onboarding_device_selection_keyboard(user.language),
+        caption,
+        get_onboarding_device_selection_keyboard(user.language, share_link=share_link),
         parse_mode="HTML",
         photo_path=image_path,
     )
@@ -1255,11 +1278,7 @@ async def handle_onboarding_connect_free(
     if not user:
         return
 
-    texts = get_texts(user.language)
-    device_selection_text = texts.t(
-        "ONBOARDING_DEVICE_SELECTION_TEXT",
-        "Выбери устройство для подключения:",
-    )
+    caption, share_link = _build_onboarding_device_selection_view(user)
 
     image_path = os.path.join("images", "device_selection_screen.png")
     if not os.path.exists(image_path):
@@ -1267,8 +1286,8 @@ async def handle_onboarding_connect_free(
 
     await edit_or_answer_photo(
         callback,
-        device_selection_text,
-        get_onboarding_device_selection_keyboard(user.language),
+        caption,
+        get_onboarding_device_selection_keyboard(user.language, share_link=share_link),
         parse_mode="HTML",
         photo_path=image_path,
     )
@@ -1295,10 +1314,16 @@ async def handle_onboarding_device_selection(
     await state.update_data(onboarding_device_type=device_type, onboarding_link_sent=False)
 
     texts = get_texts(user.language)
-    connection_text = texts.t(
-        "ONBOARDING_CONNECTION_TEXT",
-        "Установи приложение Happ по кнопке ниже.\n\nПосле установки нажми кнопку \"Подключиться\"  ниже → все настроится автоматически.",
-    )
+    if device_type == "android":
+        connection_text = texts.t(
+            "ONBOARDING_CONNECTION_TEXT_ANDROID",
+            "Установи приложение Leto по кнопке ниже.\n\nПосле авторизуйся в приложении через Telegram → все настроится в один клик.",
+        )
+    else:
+        connection_text = texts.t(
+            "ONBOARDING_CONNECTION_TEXT",
+            "Установи приложение Happ по кнопке ниже.\n\nПосле установки нажми кнопку \"Подключиться\"  ниже → все настроится автоматически.",
+        )
 
     subscription_link = None
     if user.subscription:

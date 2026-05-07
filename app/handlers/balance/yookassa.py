@@ -263,7 +263,8 @@ async def process_yookassa_payment_amount(
             yookassa_invoice_chat_id=invoice_message.chat.id,
         )
 
-        await state.clear()
+        from .main import clear_state_preserve_topup_amount
+        await clear_state_preserve_topup_amount(state)
         logger.info(f"Создан платеж YooKassa для пользователя {db_user.telegram_id}: "
                    f"{amount_kopeks//100}₽, ID: {payment_result['yookassa_payment_id']}")
         
@@ -503,7 +504,8 @@ async def process_yookassa_sbp_payment_amount(
             yookassa_invoice_chat_id=invoice_message.chat.id,
         )
 
-        await state.clear()
+        from .main import clear_state_preserve_topup_amount
+        await clear_state_preserve_topup_amount(state)
         logger.info(f"Создан платеж YooKassa СБП для пользователя {db_user.telegram_id}: "
                    f"{amount_kopeks//100}₽, ID: {payment_result['yookassa_payment_id']}")
         

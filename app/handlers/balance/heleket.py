@@ -233,7 +233,8 @@ async def process_heleket_payment_amount(
         heleket_invoice_chat_id=invoice_message.chat.id,
     )
 
-    await state.clear()
+    from .main import clear_state_preserve_topup_amount
+    await clear_state_preserve_topup_amount(state)
 
 
 @error_handler

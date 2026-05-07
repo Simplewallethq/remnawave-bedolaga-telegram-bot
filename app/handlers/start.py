@@ -179,16 +179,32 @@ async def _auto_activate_trial_and_show_device_selection(
     # Show device selection directly (Screen 2)
     lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
     texts = get_texts(lang)
-    device_selection_text = texts.t(
+    base_text = texts.t(
         "ONBOARDING_DEVICE_SELECTION_TEXT",
         "Выбери устройство для подключения:",
     )
+
+    subscription_link = None
+    if getattr(user, "subscription", None):
+        subscription_link = get_display_subscription_link(user.subscription)
+
+    if subscription_link:
+        manual_intro = texts.t(
+            "ONBOARDING_MANUAL_LINK_TEXT",
+            "Для ручного подключения скопируй ключ и добавь его в Happ\n\n",
+        ).rstrip()
+        device_selection_text = (
+            f"{base_text}\n\n{manual_intro}\n"
+            f"<blockquote expandable><code>{subscription_link}</code></blockquote>"
+        )
+    else:
+        device_selection_text = base_text
 
     image_path = os.path.join("images", "device_selection_screen.png")
     if not os.path.exists(image_path):
         image_path = None
 
-    keyboard = get_onboarding_device_selection_keyboard(lang)
+    keyboard = get_onboarding_device_selection_keyboard(lang, share_link=subscription_link)
 
     if is_callback:
         await edit_or_answer_photo(
@@ -196,6 +212,7 @@ async def _auto_activate_trial_and_show_device_selection(
             caption=device_selection_text,
             keyboard=keyboard,
             photo_path=image_path,
+            parse_mode="HTML",
         )
     else:
         if image_path:
@@ -203,11 +220,13 @@ async def _auto_activate_trial_and_show_device_selection(
                 photo=types.FSInputFile(image_path),
                 caption=device_selection_text,
                 reply_markup=keyboard,
+                parse_mode="HTML",
             )
         else:
             await message_or_callback.answer(
                 device_selection_text,
                 reply_markup=keyboard,
+                parse_mode="HTML",
             )
 
     return True

@@ -1,4 +1,5 @@
 from typing import List, Optional
+from urllib.parse import quote
 from aiogram import types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timezone
@@ -1426,16 +1427,7 @@ def get_payment_methods_keyboard(amount_kopeks: int, language: str = DEFAULT_LAN
             InlineKeyboardButton(
                 text=texts.t(
                     "PAYMENT_PLATEGA_UNIVERSAL",
-                    "💳 СБП/Банковские карты",
-                ),
-                callback_data=_build_callback("platega_universal"),
-            )
-        ])
-        keyboard.append([
-            InlineKeyboardButton(
-                text=texts.t(
-                    "PAYMENT_PLATEGA_CRYPTO",
-                    "🪙 Криптовалюта",
+                    "💳 Карта / СБП / Крипто",
                 ),
                 callback_data=_build_callback("platega_universal"),
             )
@@ -1787,6 +1779,7 @@ def get_change_devices_keyboard(
     language: str = DEFAULT_LANGUAGE,
     subscription_end_date: datetime = None,
     discount_percent: int = 0,
+    back_callback: str = "subscription_settings",
 ) -> InlineKeyboardMarkup:
     from app.utils.pricing_utils import get_remaining_months
     from app.config import settings
@@ -1871,10 +1864,10 @@ def get_change_devices_keyboard(
     buttons.append([
         InlineKeyboardButton(
             text=texts.BACK,
-            callback_data="subscription_settings"
+            callback_data=back_callback
         )
     ])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_confirm_change_devices_keyboard(new_devices_count: int, price: int, language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
@@ -2858,17 +2851,38 @@ def get_onboarding_welcome_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineK
     ])
 
 
-def get_onboarding_device_selection_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
+def get_onboarding_device_selection_keyboard(
+    language: str = DEFAULT_LANGUAGE,
+    share_link: Optional[str] = None,
+) -> InlineKeyboardMarkup:
     """
-    Onboarding Screen 2: Device selection (4 buttons).
+    Onboarding Screen 2: Device selection (4 buttons) with optional share-access button on top.
     """
     texts = get_texts(language)
-    return InlineKeyboardMarkup(inline_keyboard=[
+    buttons: List[List[InlineKeyboardButton]] = []
+    if share_link:
+        share_invite_text = texts.t(
+            "SUB_SHARE_ACCESS_INVITE_TEXT",
+            "Привет, держи доступ к моей подписке в Leto VPN. "
+            "Установи их приложение (через бота @letovpnbot) и потом кликай на ссылку.",
+        )
+        share_url = (
+            f"tg://msg_url?url={quote(share_link, safe='')}"
+            f"&text={quote(share_invite_text, safe='')}"
+        )
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("SUB_SHARE_ACCESS_BUTTON", "🔗 Поделиться доступом"),
+                url=share_url,
+            )
+        ])
+    buttons.extend([
         [InlineKeyboardButton(text="🍎 iPhone/MacOS", callback_data="onboarding_device_iphone")],
         [InlineKeyboardButton(text="🤖 Android", callback_data="onboarding_device_android")],
         [InlineKeyboardButton(text="💻 Windows", callback_data="onboarding_device_windows")],
         [InlineKeyboardButton(text=texts.BACK, callback_data="main_menu")],
     ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT_LANGUAGE, subscription_link: Optional[str] = None) -> InlineKeyboardMarkup:
@@ -2893,12 +2907,14 @@ def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT
             ),
         ])
     elif device_type == "android":
-        buttons.append([
-            InlineKeyboardButton(
-                text=texts.t("ONBOARDING_DOWNLOAD_HAPP_ANDROID", "🤖 Скачать Happ"),
-                url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru",
-            ),
-        ])
+        leto_android_url = (settings.LETO_APP_DOWNLOAD_LINK_ANDROID or "").strip()
+        if leto_android_url:
+            buttons.append([
+                InlineKeyboardButton(
+                    text=texts.t("ONBOARDING_DOWNLOAD_LETO_ANDROID", "☀️ Скачать Leto App"),
+                    url=leto_android_url,
+                ),
+            ])
     elif device_type == "windows":
         buttons.append([
             InlineKeyboardButton(
@@ -2920,18 +2936,19 @@ def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT
             ),
         ])
 
-    redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
-    if redirect_link:
-        buttons.append([InlineKeyboardButton(
-            text=texts.t("ONBOARDING_OPEN_HAPP_BUTTON", "🚀 Подключиться"),
-            url=redirect_link,
-        )])
-    buttons.append([
-        InlineKeyboardButton(
-            text=texts.t("ONBOARDING_MANUAL_LINK_BUTTON", "🔗 Ручное подключение"),
-            callback_data="onboarding_manual_link",
-        ),
-    ])
+    if device_type != "android":
+        redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
+        if redirect_link:
+            buttons.append([InlineKeyboardButton(
+                text=texts.t("ONBOARDING_OPEN_HAPP_BUTTON", "🚀 Подключиться"),
+                url=redirect_link,
+            )])
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("ONBOARDING_MANUAL_LINK_BUTTON", "🔗 Ручное подключение"),
+                callback_data="onboarding_manual_link",
+            ),
+        ])
     buttons.append([
         InlineKeyboardButton(
             text=texts.t("BACK", "⬅️ Назад"),
@@ -3002,7 +3019,6 @@ def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: boo
 
 def get_subscription_menu_keyboard(
     language: str = DEFAULT_LANGUAGE,
-    share_link: Optional[str] = None,
     balance_kopeks: int = 0,
     autopay_enabled: bool = False,
 ) -> InlineKeyboardMarkup:
@@ -3040,11 +3056,8 @@ def get_subscription_menu_keyboard(
                 callback_data="sub_add_devices",
             ),
         ],
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")],
     ]
-    if share_link:
-        share_url = f"tg://msg_url?url={share_link}"
-        buttons.append([InlineKeyboardButton(text=texts.t("SUB_SHARE_ACCESS_BUTTON", "🔗 Поделиться доступом"), url=share_url)])
-    buttons.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_topup_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
@@ -3171,11 +3184,7 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
 
     if settings.is_platega_universal_enabled():
         buttons.append([InlineKeyboardButton(
-            text=texts.t("PAYMENT_PLATEGA_UNIVERSAL", "💳 СБП/Банковские карты"),
-            callback_data=_build_callback("platega_universal"),
-        )])
-        buttons.append([InlineKeyboardButton(
-            text=texts.t("PAYMENT_PLATEGA_CRYPTO", "🪙 Криптовалюта"),
+            text=texts.t("PAYMENT_PLATEGA_UNIVERSAL", "💳 Карта / СБП / Крипто"),
             callback_data=_build_callback("platega_universal"),
         )])
 
@@ -3217,9 +3226,7 @@ def get_profile_keyboard(language: str = DEFAULT_LANGUAGE, balance_kopeks: int =
     Экран 9: Профиль пользователя
     """
     texts = get_texts(language)
-    balance_text = texts.t("MENU_BALANCE_BUTTON", "💳 Баланс: {balance}₽").format(balance=int(balance_kopeks / 100))
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=balance_text, callback_data="menu_balance")],
         [InlineKeyboardButton(text=texts.t("MENU_PROMOCODE", "🎫 Ввести промокод"), callback_data="profile_promo")],
         [InlineKeyboardButton(text=texts.t("MENU_LANGUAGE", "🌐 Язык/Language"), callback_data="profile_language")],
         [InlineKeyboardButton(text=texts.t("MENU_INFO", "ℹ️ Инфо"), callback_data="menu_info")],
@@ -3231,9 +3238,9 @@ def get_referral_keyboard(referral_link: str, invite_text: str = "", language: s
     Экран 10: Реферальная программа
     """
     texts = get_texts(language)
-    url = f"tg://msg_url?url={referral_link}"
+    url = f"tg://msg_url?url={quote(referral_link, safe='')}"
     if invite_text:
-        url += f"&text={invite_text}"
+        url += f"&text={quote(invite_text, safe='')}"
         
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=texts.t("SHARE_REFERRAL_BUTTON", "📤 Поделиться ссылкой"), url=url)],

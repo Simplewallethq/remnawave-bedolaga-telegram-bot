@@ -236,7 +236,8 @@ async def _send_pal24_payment_message(
             pal24_invoice_chat_id=invoice_message.chat.id,
         )
 
-        await state.clear()
+        from .main import clear_state_preserve_topup_amount
+        await clear_state_preserve_topup_amount(state)
 
         logger.info(
             "Создан PayPalych счет для пользователя %s: %s₽, ID: %s, метод: %s",

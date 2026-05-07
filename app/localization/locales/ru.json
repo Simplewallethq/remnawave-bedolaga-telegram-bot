@@ -1154,8 +1154,8 @@
   "PAYMENT_CARD_WATA": "💳 Банковская карта (WATA)",
   "PAYMENT_CARD_YOOKASSA": "💳 Банковская карта (YooKassa)",
   "PAYMENT_PLATEGA": "💳 СБП/Банковская карта",
-  "PAYMENT_PLATEGA_UNIVERSAL": "💳 СБП/Банковские карты",
-  "PAYMENT_PLATEGA_CRYPTO": "🪙 Криптовалюта",
+  "PAYMENT_PLATEGA_UNIVERSAL": "💳 Карта / СБП / Крипто",
+  "PAYMENT_PLATEGA_CRYPTO": "💳 Карта / СБП / Крипто",
   "PAYMENT_CHARGE_ERROR": "⚠️ Ошибка списания средств",
   "PAYMENT_CRYPTOBOT": "🪙 Crypto Bot",
   "PAYMENT_HELEKET": "🪙 Криптовалюта (Heleket)",
@@ -1214,6 +1214,8 @@
   "PLATEGA_AMOUNT_TOO_HIGH": "Максимальная сумма для оплаты через Platega: {amount}",
   "PLATEGA_PAYMENT_ERROR": "❌ Ошибка создания платежа Platega. Попробуйте позже или обратитесь в поддержку.",
   "PLATEGA_PAYMENT_INSTRUCTIONS": "<b>{title}</b>\n\nСумма: {amount}\n\nНажмите кнопку \"Оплатить\" и осуществите перевод. Средства зачислятся автоматически.\n\nЕсли возникнут проблемы, обратитесь в Поддержку",
+  "PLATEGA_UNIVERSAL_PAYMENT_INSTRUCTIONS": "<b>Оплата подписки — {amount}</b>\n    Карта / СБП / Крипто\n\n🔒 Защищённый платеж\n    Обычно занимает до 10 секунд",
+  "PLATEGA_UNIVERSAL_PAY_BUTTON_WITH_AMOUNT": "💳 Оплатить – {amount}",
   "PLATEGA_PAY_BUTTON": "💳 Оплатить через {method}",
   "PLATEGA_PAYMENT_ALREADY_CONFIRMED": "✅ Платёж уже зачислен",
   "PLATEGA_PAYMENT_STATUS": "Текущий статус платежа: {status}",
@@ -1664,7 +1666,8 @@
   "REFERRAL_EARNED": "Заработано: {amount}₽",
   "REFERRAL_YOUR_LINK": "\nВаша реферальная ссылка:",
   "REFERRAL_REWARD": "\nПолучайте 20₽ за каждого друга, который активирует подписку!",
-  "REFERRAL_INVITE_TEXT": "🔥 Лови 3 дня бесплатного VPN!\n{link}",
+  "REFERRAL_INVITE_TEXT": "Привет, я пользуюсь Leto VPN – работает отлично!\n{link}",
+  "SUB_SHARE_ACCESS_INVITE_TEXT": "Привет, держи доступ к моей подписке в Leto VPN. Установи их приложение (через бота @letovpnbot) и потом кликай на ссылку.",
   "REFERRAL_COPY_LABEL": "Ваша ссылка:\n<code>{link}</code>",
   "BALANCE_TITLE": "💳 Ваш баланс\n\n",
   "BALANCE_CURRENT": "Текущий баланс: {amount}₽",
@@ -1725,5 +1728,7 @@
   "ONBOARDING_DOWNLOAD_HAPP_IOS_RU": "🍎 Скачать Happ (Apple ID Россия)",
   "ONBOARDING_DOWNLOAD_HAPP_IOS_WORLD": "🍎 Скачать Happ (Apple ID International)",
   "ONBOARDING_DOWNLOAD_HAPP_ANDROID": "🤖 Скачать Happ",
-  "ONBOARDING_DOWNLOAD_HAPP_WINDOWS": "💻 Скачать Happ"
+  "ONBOARDING_DOWNLOAD_HAPP_WINDOWS": "💻 Скачать Happ",
+  "ONBOARDING_CONNECTION_TEXT_ANDROID": "Установи приложение Leto по кнопке ниже.\n\nПосле авторизуйся в приложении через Telegram → все настроится в один клик.",
+  "ONBOARDING_DOWNLOAD_LETO_ANDROID": "☀️ Скачать Leto App"
 }

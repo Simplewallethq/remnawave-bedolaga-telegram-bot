@@ -129,7 +129,6 @@ from app.utils.price_display import PriceInfo, format_price_text, calculate_user
 from app.utils.subscription_utils import (
     convert_subscription_link_to_happ_scheme,
     get_display_subscription_link,
-    get_happ_cryptolink_redirect_link,
     resolve_simple_subscription_device_limit,
 )
 from app.utils.timezone import format_local_datetime
@@ -2604,16 +2603,11 @@ async def handle_subscription_menu(
     if not os.path.exists(image_path):
          image_path = None
 
-    subscription_link = get_display_subscription_link(subscription)
-    redirect_link = get_happ_cryptolink_redirect_link(subscription_link) if subscription_link else None
-    share_link = redirect_link or subscription_link
-
     await edit_or_answer_photo(
         callback=callback,
         caption=text,
         keyboard=get_subscription_menu_keyboard(
             language=db_user.language,
-            share_link=share_link,
             balance_kopeks=db_user.balance_kopeks,
             autopay_enabled=bool(subscription.autopay_enabled),
         ),
@@ -2671,13 +2665,39 @@ async def handle_sub_change_devices_count(
     db_user: User,
     db: AsyncSession
 ):
+    texts = get_texts(db_user.language)
     subscription = db_user.subscription
-    current_devices = subscription.device_limit if subscription else 1
-    end_date = subscription.end_date if subscription else None
-    period_hint = get_remaining_months(end_date) * 30 if end_date else None
-    discount_percent = _get_addon_discount_percent_for_user(db_user, "devices", period_hint)
 
-    text = "Выберите количество устройств"
+    if not settings.is_devices_selection_enabled():
+        await callback.answer(
+            texts.t("DEVICES_SELECTION_DISABLED", "⚠️ Изменение количества устройств недоступно"),
+            show_alert=True,
+        )
+        return
+
+    if not subscription or subscription.is_trial:
+        await callback.answer(
+            texts.t("PAID_FEATURE_ONLY", "⚠️ Эта функция доступна только для платных подписок"),
+            show_alert=True,
+        )
+        return
+
+    current_devices = subscription.device_limit
+    end_date = subscription.end_date
+    period_hint_days = get_remaining_months(end_date) * 30 if end_date else None
+    discount_percent = _get_addon_discount_percent_for_user(db_user, "devices", period_hint_days)
+
+    prompt_text = texts.t(
+        "CHANGE_DEVICES_PROMPT",
+        (
+            "📱 <b>Изменение количества устройств</b>\n\n"
+            "Текущий лимит: {current_devices} устройств\n"
+            "Выберите новое количество устройств:\n\n"
+            "💡 <b>Важно:</b>\n"
+            "• При увеличении - доплата пропорционально оставшемуся времени\n"
+            "• При уменьшении - возврат средств не производится"
+        ),
+    ).format(current_devices=current_devices)
 
     image_path = os.path.join("images", "device_selection.png")
     if not os.path.exists(image_path):
@@ -2685,14 +2705,13 @@ async def handle_sub_change_devices_count(
 
     await edit_or_answer_photo(
         callback=callback,
-        caption=text,
-        keyboard=get_device_selection_keyboard(
-            current_selected=current_devices,
+        caption=prompt_text,
+        keyboard=get_change_devices_keyboard(
+            current_devices,
+            db_user.language,
+            end_date,
+            discount_percent,
             back_callback="sub_add_devices",
-            language=db_user.language,
-            current_device_limit=current_devices,
-            subscription_end_date=end_date,
-            discount_percent=discount_percent,
         ),
         parse_mode="HTML",
         photo_path=image_path,
@@ -3244,7 +3263,7 @@ async def handle_payment_selection(
              # We need to send an INVOICE message. We cannot edit current message into an invoice.
              # So we will delete current message or just send new one.
              await callback.message.delete()
-             
+
              payload = f"balance_{db_user.id}_{amount_kopeks}"
 
              # Use TelegramStarsService to send invoice
@@ -3253,7 +3272,7 @@ async def handle_payment_selection(
 
              stars_amount = TelegramStarsService.calculate_stars_from_rubles(amount_kopeks / 100)
 
-             await stars_service.send_invoice(
+             invoice_result = await stars_service.send_invoice(
                  chat_id=current_chat_id,
                  title="Оплата подписки",
                  description=f"Оплатите счет для продления подписки на {int(value)} дней." if prefix == "pay" else description,
@@ -3264,6 +3283,13 @@ async def handle_payment_selection(
                      [InlineKeyboardButton(text="⬅️Назад", callback_data="main_menu")]
                  ])
              )
+
+             # Store invoice message id in state so handle_successful_payment can delete it
+             if invoice_result and invoice_result.get("message_id"):
+                 await state.update_data(
+                     stars_invoice_message_id=invoice_result["message_id"],
+                     stars_invoice_chat_id=current_chat_id,
+                 )
         except Exception as e:
              logger.error(f"Error creating Stars invoice: {e}")
              await callback.answer("❌ Ошибка создания инвойса Stars", show_alert=True)
@@ -3318,8 +3344,9 @@ async def handle_payment_selection(
             return
 
         try:
+            back_callback = f"topup_days:{value}" if prefix == "pay" else "subscription"
             # Always reset platega_method so method selection screen is shown
-            await state.update_data(platega_pending_amount=amount_kopeks, platega_method=0, platega_back_callback=callback.data)
+            await state.update_data(platega_pending_amount=amount_kopeks, platega_method=0, platega_back_callback=back_callback)
             from app.handlers.balance.platega import start_platega_payment
             await start_platega_payment(callback, db_user, state)
         except Exception as e:
@@ -3332,7 +3359,8 @@ async def handle_payment_selection(
             return
 
         try:
-            await state.update_data(platega_pending_amount=amount_kopeks, platega_back_callback=callback.data)
+            back_callback = f"topup_days:{value}" if prefix == "pay" else "subscription"
+            await state.update_data(platega_pending_amount=amount_kopeks, platega_back_callback=back_callback)
             from app.handlers.balance.platega import start_platega_universal_payment
             await start_platega_universal_payment(callback, db_user, state)
         except Exception as e:

@@ -220,7 +220,8 @@ async def process_mulenpay_payment_amount(
             mulenpay_invoice_chat_id=invoice_message.chat.id,
         )
 
-        await state.clear()
+        from .main import clear_state_preserve_topup_amount
+        await clear_state_preserve_topup_amount(state)
 
         logger.info(
             "Создан %s платеж для пользователя %s: %s₽, ID: %s",

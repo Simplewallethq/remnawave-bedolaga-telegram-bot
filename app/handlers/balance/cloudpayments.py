@@ -166,8 +166,9 @@ async def process_cloudpayments_payment_amount(
         )
         return
 
-    # Clear state
-    await state.clear()
+    # Clear state but keep topup amount for back-to-methods navigation
+    from .main import clear_state_preserve_topup_amount
+    await clear_state_preserve_topup_amount(state)
 
     await _create_cloudpayments_payment_and_respond(
         message, db_user, db, amount_kopeks, edit_message=False
@@ -276,8 +277,9 @@ async def process_cloudpayments_amount(
         )
         return
 
-    # Clear state
-    await state.clear()
+    # Clear state but keep topup amount for back-to-methods navigation
+    from .main import clear_state_preserve_topup_amount
+    await clear_state_preserve_topup_amount(state)
 
     # Create payment
     payment_service = PaymentService()

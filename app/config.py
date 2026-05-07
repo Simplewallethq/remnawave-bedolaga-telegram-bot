@@ -208,6 +208,9 @@ class Settings(BaseSettings):
     
     TELEGRAM_STARS_ENABLED: bool = True
     TELEGRAM_STARS_RATE_RUB: float = 1.3
+    TELEGRAM_STARS_INVOICE_PHOTO_URL: str = "https://raw.githubusercontent.com/Fr1ngg/remnawave-bedolaga-telegram-bot/main/vpn_logo.png"
+    TELEGRAM_STARS_INVOICE_PHOTO_WIDTH: int = 512
+    TELEGRAM_STARS_INVOICE_PHOTO_HEIGHT: int = 512
     
     TRIBUTE_ENABLED: bool = False
     TRIBUTE_API_KEY: Optional[str] = None
@@ -388,6 +391,7 @@ class Settings(BaseSettings):
     HAPP_DOWNLOAD_LINK_MACOS: Optional[str] = None
     HAPP_DOWNLOAD_LINK_WINDOWS: Optional[str] = None
     HAPP_DOWNLOAD_LINK_PC: Optional[str] = None
+    LETO_APP_DOWNLOAD_LINK_ANDROID: Optional[str] = None
     HIDE_SUBSCRIPTION_LINK: bool = False
     ENABLE_LOGO_MODE: bool = True
     LOGO_FILE: str = "vpn_logo.png"

@@ -218,8 +218,9 @@ async def process_cryptobot_payment_amount(
             cryptobot_invoice_chat_id=invoice_message.chat.id,
         )
 
-        await state.clear()
-        
+        from .main import clear_state_preserve_topup_amount
+        await clear_state_preserve_topup_amount(state)
+
         logger.info(f"Создан CryptoBot платеж для пользователя {db_user.telegram_id}: "
                    f"{amount_rubles:.0f} ₽ ({amount_usd:.2f} USD), ID: {payment_result['invoice_id']}")
         

@@ -181,8 +181,9 @@ async def start_platega_payment(
             ]
         )
 
+    back_callback = data.get("platega_back_callback", "balance_topup")
     method_buttons.append(
-        [types.InlineKeyboardButton(text=texts.BACK, callback_data="sub_add_days")]
+        [types.InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)]
     )
 
     await callback.message.edit_text(
@@ -377,7 +378,8 @@ async def process_platega_payment_amount(
         platega_invoice_chat_id=invoice_message.chat.id,
     )
 
-    await state.clear()
+    from .main import clear_state_preserve_topup_amount
+    await clear_state_preserve_topup_amount(state)
 
 
 async def _prompt_universal_amount(
@@ -541,14 +543,15 @@ async def process_platega_universal_payment_amount(
 
     redirect_url = payment_result.get("redirect_url")
     local_payment_id = payment_result.get("local_payment_id")
+    amount_label = settings.format_price(amount_kopeks)
     payment_title = texts.t(
         "PLATEGA_UNIVERSAL_PAYMENT_TITLE",
         "Оплата через Platega",
     )
     pay_button_text = texts.t(
-        "PLATEGA_UNIVERSAL_PAY_BUTTON",
-        "💳 Оплатить",
-    )
+        "PLATEGA_UNIVERSAL_PAY_BUTTON_WITH_AMOUNT",
+        "💳 Оплатить – {amount}",
+    ).format(amount=amount_label)
 
     data = await state.get_data()
     back_callback = data.get("platega_back_callback", "balance_topup")
@@ -573,12 +576,12 @@ async def process_platega_universal_payment_amount(
     )
 
     instructions_template = texts.t(
-        "PLATEGA_PAYMENT_INSTRUCTIONS",
+        "PLATEGA_UNIVERSAL_PAYMENT_INSTRUCTIONS",
         (
-            "<b>{title}</b>\n\n"
-            "Сумма: {amount}\n\n"
-            "Нажмите кнопку \"Оплатить\" и осуществите перевод. Средства зачислятся автоматически.\n\n"
-            "Если возникнут проблемы, обратитесь в Поддержку"
+            "<b>Оплата подписки — {amount}</b>\n"
+            "    Карта / СБП / Крипто\n\n"
+            "🔒 Защищённый платеж\n"
+            "    Обычно занимает до 10 секунд"
         ),
     )
 
@@ -603,7 +606,7 @@ async def process_platega_universal_payment_amount(
     invoice_message = await message.answer(
         instructions_template.format(
             title=payment_title,
-            amount=settings.format_price(amount_kopeks),
+            amount=amount_label,
         ),
         reply_markup=keyboard,
         parse_mode="HTML",
@@ -632,7 +635,8 @@ async def process_platega_universal_payment_amount(
         platega_invoice_chat_id=invoice_message.chat.id,
     )
 
-    await state.clear()
+    from .main import clear_state_preserve_topup_amount
+    await clear_state_preserve_topup_amount(state)
 
 
 @error_handler

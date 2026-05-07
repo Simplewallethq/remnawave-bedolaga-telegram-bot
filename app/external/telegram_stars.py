@@ -70,17 +70,24 @@ class TelegramStarsService:
             amount_rubles = Decimal(amount_kopeks) / Decimal(100)
             stars_amount = self.calculate_stars_from_rubles(float(amount_rubles))
             stars_rate = settings.get_stars_rate()
-            
-            message = await self.bot.send_invoice(
-                chat_id=chat_id,
-                title=title,
-                description=description,
-                payload=payload,
-                provider_token="",
-                currency="XTR",
-                prices=[LabeledPrice(label=title, amount=stars_amount)],
-                reply_markup=keyboard
-            )
+
+            photo_url = (getattr(settings, "TELEGRAM_STARS_INVOICE_PHOTO_URL", "") or "").strip() or None
+            invoice_kwargs: Dict[str, Any] = {
+                "chat_id": chat_id,
+                "title": title,
+                "description": description,
+                "payload": payload,
+                "provider_token": "",
+                "currency": "XTR",
+                "prices": [LabeledPrice(label=title, amount=stars_amount)],
+                "reply_markup": keyboard,
+            }
+            if photo_url:
+                invoice_kwargs["photo_url"] = photo_url
+                invoice_kwargs["photo_width"] = getattr(settings, "TELEGRAM_STARS_INVOICE_PHOTO_WIDTH", 512)
+                invoice_kwargs["photo_height"] = getattr(settings, "TELEGRAM_STARS_INVOICE_PHOTO_HEIGHT", 512)
+
+            message = await self.bot.send_invoice(**invoice_kwargs)
             
             logger.info(
                 f"Отправлен Stars invoice {message.message_id} на {stars_amount} звезд "
