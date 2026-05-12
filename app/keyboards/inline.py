@@ -3244,12 +3244,9 @@ def get_referral_keyboard(referral_link: str, invite_text: str = "", language: s
     Экран 10: Реферальная программа
     """
     texts = get_texts(language)
-    # invite_text already embeds the referral link, so pass only `text` to avoid
-    # Telegram prepending the URL on top of the shared message.
+    url = f"tg://msg_url?url={quote(referral_link, safe='')}"
     if invite_text:
-        url = f"tg://msg_url?url=&text={quote(invite_text, safe='')}"
-    else:
-        url = f"tg://msg_url?url={quote(referral_link, safe='')}"
+        url += f"&text={quote(invite_text, safe='')}"
 
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=texts.t("SHARE_REFERRAL_BUTTON", "📤 Поделиться ссылкой"), url=url)],

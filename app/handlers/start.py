@@ -58,7 +58,7 @@ from app.utils.user_utils import generate_unique_referral_code
 from app.utils.photo_message import edit_or_answer_photo
 from app.database.crud.subscription import decrement_subscription_server_counts
 from app.services.blacklist_service import blacklist_service
-from app.database.crud.device_link import get_device_link, count_device_links, create_device_link
+from app.database.crud.device_link import get_device_link, create_device_link
 
 
 logger = logging.getLogger(__name__)
@@ -70,25 +70,16 @@ async def _link_device_to_subscription(
     device_id: str,
     target,
 ) -> None:
-    """Link device_id to subscription with limit check. Per D-03/D-05/D-06."""
+    """Link device_id to subscription. Device limit is intentionally not enforced here."""
     try:
         existing = await get_device_link(db, device_id)
         if existing and existing.subscription_id == subscription.id:
             await target.answer("Device already linked to your subscription.")
             return
         if existing:
-            # Device linked to different subscription -- silently re-link per Claude's Discretion
             existing.subscription_id = subscription.id
             await db.commit()
             await target.answer("Device re-linked to your subscription.")
-            return
-
-        count = await count_device_links(db, subscription.id)
-        limit = subscription.device_limit or 1
-        if count >= limit:
-            await target.answer(
-                f"Device limit reached ({count}/{limit}). Remove a device or upgrade your plan."
-            )
             return
 
         await create_device_link(db, subscription.id, device_id)
@@ -556,6 +547,22 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
                     f"Ошибка отправки уведомления о рекламной кампании: {e}"
                 )
 
+        # Device-link deeplink for existing user without any subscription:
+        # auto-create trial (same as for new users) and link the device, instead of showing the menu.
+        _device_link_data = await state.get_data() or {}
+        _pending_device_id = _device_link_data.get("device_id")
+        if _pending_device_id and not user.subscription:
+            await _auto_activate_trial_and_show_device_selection(
+                message.bot, db, user, message, is_callback=False, language=user.language
+            )
+            await db.refresh(user, ["subscription"])
+            if user.subscription:
+                await _link_device_to_subscription(
+                    db, user.subscription, _pending_device_id, message
+                )
+            await state.clear()
+            return
+
         has_active_subscription, subscription_is_active = _calculate_subscription_flags(
             user.subscription
         )
@@ -617,10 +624,10 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
         if pinned_message and not pinned_message.send_before_menu:
             await _send_pinned_message(message.bot, db, user, pinned_message)
 
-        # Device linking for existing users per D-05
+        # Device linking for existing users — link regardless of subscription active state.
         data = await state.get_data() or {}
         device_id_from_state = data.get("device_id")
-        if device_id_from_state and user.subscription and user.subscription.is_active:
+        if device_id_from_state and user.subscription:
             await _link_device_to_subscription(db, user.subscription, device_id_from_state, message)
 
         await state.clear()

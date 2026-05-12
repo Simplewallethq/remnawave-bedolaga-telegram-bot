@@ -1666,7 +1666,7 @@
   "REFERRAL_EARNED": "Заработано: {amount}₽",
   "REFERRAL_YOUR_LINK": "\nВаша реферальная ссылка:",
   "REFERRAL_REWARD": "\nПолучайте 20₽ за каждого друга, который активирует подписку!",
-  "REFERRAL_INVITE_TEXT": "Привет, я пользуюсь Leto VPN – работает отлично!\n{link}",
+  "REFERRAL_INVITE_TEXT": "Привет, я пользуюсь Leto VPN – работает отлично!",
   "SUB_SHARE_ACCESS_INVITE_TEXT": "Привет, держи доступ к моей подписке в Leto VPN. Установи их приложение (через бота @letovpnbot) и потом кликай на ссылку.",
   "REFERRAL_COPY_LABEL": "Ваша ссылка:\n<code>{link}</code>",
   "BALANCE_TITLE": "💳 Ваш баланс\n\n",
