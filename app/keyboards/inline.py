@@ -3066,18 +3066,29 @@ def get_subscription_menu_keyboard(
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_topup_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
-    """
-    Экран 6: Меню пополнения баланса
+def get_topup_keyboard(
+    prices: dict,
+    language: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    """Меню продления подписки с динамическими подписями кнопок.
+
+    prices: {days: price_kopeks} — цены уже посчитаны caller-ом с учётом
+    реальных параметров подписки и скидок пользователя.
     """
     texts = get_texts(language)
-    buttons = [
-        [InlineKeyboardButton(text=texts.t("TOPUP_5DAYS", "5 дней – 42₽"), callback_data="topup_days:5")],
-        [InlineKeyboardButton(text=texts.t("TOPUP_1MONTH", "1 месяц – 180₽"), callback_data="topup_days:30")],
-        [InlineKeyboardButton(text=texts.t("TOPUP_3MONTHS", "3 месяца – 486₽ -10%"), callback_data="topup_days:90")],
-        [InlineKeyboardButton(text=texts.t("TOPUP_1YEAR", "1 год – 1642₽ -24%"), callback_data="topup_days:365")],
-        [InlineKeyboardButton(text=texts.t("BACK_BUTTON", "⬅️Назад"), callback_data="subscription")]
-    ]
+    buttons = []
+    for days, price_kopeks in prices.items():
+        period_label = format_period_description(days, language)
+        price_label = texts.format_price(price_kopeks)
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{period_label} – {price_label}",
+                callback_data=f"topup_days:{days}",
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(text=texts.t("BACK_BUTTON", "⬅️Назад"), callback_data="subscription"),
+    ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_sub_devices_menu_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:

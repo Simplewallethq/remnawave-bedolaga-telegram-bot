@@ -2621,6 +2621,22 @@ async def handle_sub_add_days(
     db_user: User,
     db: AsyncSession
 ):
+    subscription = getattr(db_user, "subscription", None)
+    periods = settings.get_available_renewal_periods()
+
+    prices: Dict[int, int] = {}
+    for days in periods:
+        try:
+            prices[days] = await calculate_topup_price_kopeks(
+                days, db, db_user, subscription
+            )
+        except Exception as e:
+            logger.error("Ошибка расчёта цены продления для %s дней: %s", days, e)
+
+    if not prices:
+        await callback.answer("⚠ Нет доступных периодов для продления", show_alert=True)
+        return
+
     text = "Выберите срок действия подписки"
     image_path = os.path.join("images", "topup_menu.png")
     if not os.path.exists(image_path):
@@ -2629,7 +2645,7 @@ async def handle_sub_add_days(
     await edit_or_answer_photo(
         callback=callback,
         caption=text,
-        keyboard=get_topup_keyboard(),
+        keyboard=get_topup_keyboard(prices, db_user.language),
         parse_mode="HTML",
         photo_path=image_path
     )
@@ -2737,11 +2753,11 @@ async def handle_topup_days(
     try:
         days = int(callback.data.split(":")[1])
     except (IndexError, ValueError):
-        days = 30 
-        
+        days = 30
+
     await state.update_data(selected_days=days)
 
-    price_kopeks = calculate_topup_price_kopeks(days)
+    price_kopeks = await calculate_topup_price_kopeks(days, db, db_user)
     price_rub = price_kopeks / 100
     balance_rub = db_user.balance_kopeks / 100
 
@@ -2870,17 +2886,63 @@ async def handle_device_selection_confirm(
     await callback.answer()
 
 
-def calculate_topup_price_kopeks(days: int) -> int:
-    mapping = {
-        1: 1000,
-        5: 4200,
-        15: 10500,
-        30: 18000,
-        90: 48600,
-        180: 90000,
-        365: 164200
-    }
-    return mapping.get(days, days * 1000)
+async def calculate_topup_price_kopeks(
+    days: int,
+    db: AsyncSession,
+    db_user: User,
+    subscription: Optional[Subscription] = None,
+) -> int:
+    """Считает честную цену продления подписки на указанный период.
+
+    Учитывает реальные параметры текущей подписки (устройства, трафик, серверы),
+    скидки промо-группы пользователя и активный промо-оффер. Если подписки нет —
+    возвращает только базовую цену периода из PERIOD_PRICES.
+    """
+    if subscription is None:
+        subscription = getattr(db_user, "subscription", None)
+
+    base_price_original = PERIOD_PRICES.get(days, 0)
+
+    if subscription is None:
+        return base_price_original
+
+    months_in_period = calculate_months_from_days(days)
+
+    period_info = calculate_user_price(db_user, base_price_original, days, "period")
+
+    subscription_service = SubscriptionService()
+    servers_price_per_month, _ = await subscription_service.get_countries_price_by_uuids(
+        subscription.connected_squads or [],
+        db,
+        promo_group_id=getattr(db_user, "promo_group_id", None),
+    )
+    servers_total_base = servers_price_per_month * months_in_period
+    servers_info = calculate_user_price(db_user, servers_total_base, days, "servers")
+
+    device_limit = subscription.device_limit
+    if device_limit is None:
+        if settings.is_devices_selection_enabled():
+            device_limit = settings.DEFAULT_DEVICE_LIMIT
+        else:
+            forced_limit = settings.get_disabled_mode_device_limit()
+            device_limit = forced_limit if forced_limit is not None else settings.DEFAULT_DEVICE_LIMIT
+    additional_devices = max(0, (device_limit or 0) - settings.DEFAULT_DEVICE_LIMIT)
+    devices_total_base = int((additional_devices * settings.PRICE_PER_DEVICE * days) / 30)
+    devices_info = calculate_user_price(db_user, devices_total_base, days, "devices")
+
+    traffic_price_per_month = settings.get_traffic_price(subscription.traffic_limit_gb)
+    traffic_total_base = traffic_price_per_month * months_in_period
+    traffic_info = calculate_user_price(db_user, traffic_total_base, days, "traffic")
+
+    total_price = (
+        period_info.final_price
+        + servers_info.final_price
+        + devices_info.final_price
+        + traffic_info.final_price
+    )
+
+    promo_component = _apply_promo_offer_discount(db_user, total_price)
+    return promo_component["discounted"]
 
 async def handle_payment_selection(
     callback: types.CallbackQuery,
@@ -2900,7 +2962,7 @@ async def handle_payment_selection(
     
     if prefix == "pay":
         days = int(value)
-        amount_kopeks = calculate_topup_price_kopeks(days)
+        amount_kopeks = await calculate_topup_price_kopeks(days, db, db_user)
         amount_rub = amount_kopeks / 100
         description = f"Подписка на {days} дней"
         is_extension = True
