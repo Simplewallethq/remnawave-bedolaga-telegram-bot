@@ -120,7 +120,9 @@ class Settings(BaseSettings):
     AVAILABLE_SUBSCRIPTION_PERIODS: str = "1,14,30,60,90,180,360"
     AVAILABLE_RENEWAL_PERIODS: str = "1,30,90,180"
     PRICE_1_DAYS: int = 5000
+    PRICE_5_DAYS: int = 0
     PRICE_14_DAYS: int = 50000
+    PRICE_15_DAYS: int = 0
     PRICE_30_DAYS: int = 99000
     PRICE_60_DAYS: int = 189000
     PRICE_90_DAYS: int = 269000
@@ -1874,7 +1876,9 @@ ENV_OVERRIDE_KEYS = set(settings.model_fields_set)
 
 _PERIOD_PRICE_FIELDS: Dict[int, str] = {
     1: "PRICE_1_DAYS",
+    5: "PRICE_5_DAYS",
     14: "PRICE_14_DAYS",
+    15: "PRICE_15_DAYS",
     30: "PRICE_30_DAYS",
     60: "PRICE_60_DAYS",
     90: "PRICE_90_DAYS",

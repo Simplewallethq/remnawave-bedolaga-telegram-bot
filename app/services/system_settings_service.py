@@ -219,7 +219,9 @@ class BotConfigurationService:
         "AVAILABLE_SUBSCRIPTION_PERIODS": "PERIODS",
         "AVAILABLE_RENEWAL_PERIODS": "PERIODS",
         "PRICE_1_DAYS": "SUBSCRIPTION_PRICES",
+        "PRICE_5_DAYS": "SUBSCRIPTION_PRICES",
         "PRICE_14_DAYS": "SUBSCRIPTION_PRICES",
+        "PRICE_15_DAYS": "SUBSCRIPTION_PRICES",
         "PRICE_30_DAYS": "SUBSCRIPTION_PRICES",
         "PRICE_60_DAYS": "SUBSCRIPTION_PRICES",
         "PRICE_90_DAYS": "SUBSCRIPTION_PRICES",
@@ -1408,7 +1410,9 @@ class BotConfigurationService:
             setattr(settings, key, value)
             if key in {
                 "PRICE_1_DAYS",
+                "PRICE_5_DAYS",
                 "PRICE_14_DAYS",
+                "PRICE_15_DAYS",
                 "PRICE_30_DAYS",
                 "PRICE_60_DAYS",
                 "PRICE_90_DAYS",
