@@ -4600,6 +4600,82 @@ async def add_user_has_connected_to_vpn_column() -> bool:
         return False
 
 
+async def create_device_binding_codes_table() -> bool:
+    table_exists = await check_table_exists('device_binding_codes')
+    if table_exists:
+        logger.info("Таблица device_binding_codes уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE device_binding_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    subscription_id INTEGER NOT NULL,
+                    code VARCHAR(16) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    expires_at DATETIME NOT NULL,
+                    used_at DATETIME NULL,
+                    used_device_id VARCHAR(255) NULL,
+                    CONSTRAINT uq_device_binding_codes_code UNIQUE (code),
+                    FOREIGN KEY(subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX ix_device_binding_codes_subscription_id ON device_binding_codes(subscription_id);
+                CREATE INDEX ix_device_binding_codes_code ON device_binding_codes(code);
+                CREATE INDEX ix_device_binding_codes_expires_at ON device_binding_codes(expires_at);
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS device_binding_codes (
+                    id SERIAL PRIMARY KEY,
+                    subscription_id INTEGER NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+                    code VARCHAR(16) NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    expires_at TIMESTAMP NOT NULL,
+                    used_at TIMESTAMP NULL,
+                    used_device_id VARCHAR(255) NULL,
+                    CONSTRAINT uq_device_binding_codes_code UNIQUE (code)
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_device_binding_codes_subscription_id ON device_binding_codes(subscription_id);
+                CREATE INDEX IF NOT EXISTS ix_device_binding_codes_code ON device_binding_codes(code);
+                CREATE INDEX IF NOT EXISTS ix_device_binding_codes_expires_at ON device_binding_codes(expires_at);
+                """
+            elif db_type == 'mysql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS device_binding_codes (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    subscription_id INT NOT NULL,
+                    code VARCHAR(16) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    expires_at DATETIME NOT NULL,
+                    used_at DATETIME NULL,
+                    used_device_id VARCHAR(255) NULL,
+                    CONSTRAINT uq_device_binding_codes_code UNIQUE (code),
+                    FOREIGN KEY(subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX ix_device_binding_codes_subscription_id ON device_binding_codes(subscription_id);
+                CREATE INDEX ix_device_binding_codes_code ON device_binding_codes(code);
+                CREATE INDEX ix_device_binding_codes_expires_at ON device_binding_codes(expires_at);
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            await conn.execute(text(create_sql))
+
+        logger.info("✅ Таблица device_binding_codes успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы device_binding_codes: {e}")
+        return False
+
+
 async def run_universal_migration():
     logger.info("=== НАЧАЛО УНИВЕРСАЛЬНОЙ МИГРАЦИИ ===")
     
@@ -5055,6 +5131,13 @@ async def run_universal_migration():
             logger.info("✅ Колонка has_connected_to_vpn в users готова")
         else:
             logger.warning("⚠️ Проблемы с добавлением has_connected_to_vpn в users")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ DEVICE_BINDING_CODES ===")
+        device_binding_codes_ready = await create_device_binding_codes_table()
+        if device_binding_codes_ready:
+            logger.info("✅ Таблица device_binding_codes готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей device_binding_codes")
 
         async with engine.begin() as conn:
             total_subs = await conn.execute(text("SELECT COUNT(*) FROM subscriptions"))

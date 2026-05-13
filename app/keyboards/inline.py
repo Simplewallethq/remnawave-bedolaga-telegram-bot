@@ -3062,6 +3062,12 @@ def get_subscription_menu_keyboard(
                 callback_data="sub_add_devices",
             ),
         ],
+        [
+            InlineKeyboardButton(
+                text=texts.t("BIND_DEVICE_BUTTON", "🔗 Привязать устройство"),
+                callback_data="bind_device",
+            )
+        ],
         [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)

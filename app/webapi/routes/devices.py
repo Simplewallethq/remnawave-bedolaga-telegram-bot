@@ -6,6 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Security, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.crud.device_binding_code import (
+    CONSUME_EXPIRED,
+    CONSUME_NOT_FOUND,
+    CONSUME_OK,
+    CONSUME_USED,
+    consume_binding_code,
+)
 from app.database.crud.device_link import (
     count_device_links,
     create_device_link,
@@ -16,7 +23,7 @@ from app.database.crud.device_link import (
 from app.database.models import Subscription
 
 from ..dependencies import get_db_session, require_api_token
-from ..schemas.devices import DeviceLinkRequest, DeviceLinkResponse
+from ..schemas.devices import BindByCodeRequest, DeviceLinkRequest, DeviceLinkResponse
 from ..schemas.subscriptions import SubscriptionResponse
 from .subscriptions import _serialize_subscription
 
@@ -109,3 +116,79 @@ async def link_device(
         subscription_id=subscription.id,
         linked_at=link.linked_at,
     )
+
+
+@router.post(
+    "/bind-by-code",
+    response_model=SubscriptionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Bind device to a subscription using a one-time binding code",
+    responses={
+        404: {"description": "Code not found, expired, or already used"},
+        409: {"description": "Device already linked to a different subscription"},
+        422: {"description": "Device limit exceeded"},
+    },
+)
+async def bind_device_by_code(
+    payload: BindByCodeRequest,
+    _=Security(require_api_token),
+    db: AsyncSession = Depends(get_db_session),
+) -> SubscriptionResponse:
+    """Validate a binding code and bind the supplied device_id to the code's subscription.
+
+    Flow:
+    1. Atomically consume the code (404 if missing/expired/used).
+    2. If the device is already linked to the same subscription — idempotent success.
+    3. If linked to a different subscription — 409.
+    4. If subscription is at its device_limit — 422.
+    5. Otherwise create the DeviceLink and return the subscription payload.
+    """
+    existing_link = await get_device_link(db, payload.device_id)
+
+    subscription, consume_status = await consume_binding_code(
+        db, payload.code, payload.device_id
+    )
+
+    if consume_status == CONSUME_NOT_FOUND:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code not found")
+    if consume_status == CONSUME_EXPIRED:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code expired")
+    if consume_status == CONSUME_USED:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code already used")
+    if consume_status != CONSUME_OK or subscription is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code not found")
+
+    # Re-fetch the subscription with the device_links relationship hydrated.
+    sub_result = await db.execute(
+        select(Subscription).where(Subscription.id == subscription.id)
+    )
+    subscription = sub_result.scalar_one_or_none()
+    if subscription is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subscription not found",
+        )
+
+    if existing_link is not None:
+        if existing_link.subscription_id == subscription.id:
+            response = _serialize_subscription(subscription)
+            response.connected_devices = await count_device_links(db, subscription.id)
+            return response
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Device already linked to a different subscription",
+        )
+
+    count = await count_device_links(db, subscription.id)
+    limit = subscription.device_limit or 1
+    if count >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Device limit exceeded ({count}/{limit})",
+        )
+
+    await create_device_link(db, subscription.id, payload.device_id)
+
+    response = _serialize_subscription(subscription)
+    response.connected_devices = await count_device_links(db, subscription.id)
+    return response

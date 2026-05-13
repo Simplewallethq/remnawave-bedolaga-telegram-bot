@@ -100,17 +100,20 @@ def _calculate_subscription_flags(subscription):
     return has_active_subscription, subscription_is_active
 
 
-async def _auto_activate_trial_and_show_device_selection(
+async def activate_trial_for_user(
     bot,
     db: AsyncSession,
     user,
-    message_or_callback,
-    is_callback: bool = False,
-    language: str | None = None,
-):
-    """
-    Auto-activate trial subscription during registration and show device selection.
-    Used by both complete_registration (message) and complete_registration_from_callback (callback).
+    *,
+    description: str = "Активация триала при регистрации",
+) -> bool:
+    """Activate a trial subscription for a user without any UI side effects.
+
+    Creates the trial subscription, applies trial charge if configured, creates
+    the corresponding RemnaWave panel user, refreshes the local user, and emits
+    an admin notification. Returns True on success, False if the trial creation
+    itself failed. Auxiliary steps (charge/remnawave/notification) are best-effort
+    and never abort the activation.
     """
     logger.info(f"🎁 AUTO-TRIAL: Автоматическая активация триала для {user.telegram_id}")
 
@@ -131,7 +134,7 @@ async def _auto_activate_trial_and_show_device_selection(
             charged_amount = await charge_trial_activation_if_required(
                 db,
                 user,
-                description="Активация триала при регистрации",
+                description=description,
             )
         except Exception as charge_err:
             logger.warning("Ошибка списания за триал (продолжаем): %s", charge_err)
@@ -139,13 +142,12 @@ async def _auto_activate_trial_and_show_device_selection(
 
         subscription_service = SubscriptionService()
         try:
-            remnawave_user = await subscription_service.create_remnawave_user(
+            await subscription_service.create_remnawave_user(
                 db,
                 subscription,
             )
         except Exception as rw_err:
             logger.error("Ошибка создания RemnaWave пользователя (продолжаем): %s", rw_err)
-            remnawave_user = None
 
         await db.refresh(user, ['subscription'])
 
@@ -161,9 +163,27 @@ async def _auto_activate_trial_and_show_device_selection(
             logger.error(f"Ошибка отправки уведомления о триале: {notify_err}")
 
         logger.info(f"✅ Триал автоматически активирован для {user.telegram_id}")
+        return True
 
     except Exception as e:
         logger.error(f"❌ Ошибка авто-активации триала для {user.telegram_id}: {e}")
+        return False
+
+
+async def _auto_activate_trial_and_show_device_selection(
+    bot,
+    db: AsyncSession,
+    user,
+    message_or_callback,
+    is_callback: bool = False,
+    language: str | None = None,
+):
+    """
+    Auto-activate trial subscription during registration and show device selection.
+    Used by both complete_registration (message) and complete_registration_from_callback (callback).
+    """
+    ok = await activate_trial_for_user(bot, db, user)
+    if not ok:
         # Fallback: show main menu if trial activation fails
         return False
 

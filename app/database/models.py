@@ -777,6 +777,7 @@ class Subscription(Base):
     discount_offers = relationship("DiscountOffer", back_populates="subscription")
     temporary_accesses = relationship("SubscriptionTemporaryAccess", back_populates="subscription")
     device_links = relationship("DeviceLink", back_populates="subscription", cascade="all, delete-orphan")
+    binding_codes = relationship("DeviceBindingCode", back_populates="subscription", cascade="all, delete-orphan")
     
     @property
     def is_active(self) -> bool:
@@ -919,6 +920,22 @@ class DeviceLink(Base):
     linked_at = Column(DateTime, default=func.now())
 
     subscription = relationship("Subscription", back_populates="device_links")
+
+
+class DeviceBindingCode(Base):
+    __tablename__ = "device_binding_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscription_id = Column(
+        Integer, ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    code = Column(String(16), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    used_at = Column(DateTime, nullable=True)
+    used_device_id = Column(String(255), nullable=True)
+
+    subscription = relationship("Subscription", back_populates="binding_codes")
 
 
 class Transaction(Base):

@@ -2616,6 +2616,78 @@ async def handle_subscription_menu(
     )
     await callback.answer()
 
+
+async def handle_bind_device(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    from app.database.crud.device_binding_code import get_or_create_binding_code
+    from app.handlers.start import activate_trial_for_user
+
+    texts = get_texts(db_user.language)
+    subscription = db_user.subscription
+
+    # Mirror /start?d_<device_id>: no subscription → auto-activate trial.
+    # Any existing subscription (active/trial/expired) is sufficient — the bot
+    # is the source of truth for what binding actually does.
+    if not subscription:
+        ok = await activate_trial_for_user(
+            callback.bot, db, db_user, description="Активация триала при привязке устройства"
+        )
+        if not ok:
+            await callback.answer(
+                texts.t("BIND_DEVICE_ERROR", "Не удалось создать код. Попробуйте позже."),
+                show_alert=True,
+            )
+            return
+        subscription = db_user.subscription
+
+    if not subscription:
+        await callback.answer(
+            texts.t("BIND_DEVICE_ERROR", "Не удалось создать код. Попробуйте позже."),
+            show_alert=True,
+        )
+        return
+
+    try:
+        record = await get_or_create_binding_code(db, subscription.id)
+    except Exception as e:
+        logger.error("Failed to generate binding code: %s", e)
+        await callback.answer(
+            texts.t("BIND_DEVICE_ERROR", "Не удалось создать код. Попробуйте позже."),
+            show_alert=True,
+        )
+        return
+
+    ttl_hours = max(1, int((record.expires_at - datetime.utcnow()).total_seconds() // 3600))
+    text = texts.t(
+        "BIND_DEVICE_MESSAGE",
+        (
+            "🔗 <b>Код для привязки устройства</b>\n\n"
+            "Откройте приложение и введите этот код:\n\n"
+            "<code>{code}</code>\n\n"
+            "Код действует {ttl_hours} ч. Никому его не передавайте."
+        ),
+    ).format(code=record.code, ttl_hours=ttl_hours)
+
+    back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=texts.t("BACK_BUTTON", "⬅️Назад"),
+            callback_data="subscription",
+        )]
+    ])
+
+    try:
+        await callback.message.edit_caption(caption=text, reply_markup=back_keyboard, parse_mode="HTML")
+    except TelegramBadRequest:
+        try:
+            await callback.message.edit_text(text=text, reply_markup=back_keyboard, parse_mode="HTML")
+        except TelegramBadRequest:
+            await callback.message.answer(text=text, reply_markup=back_keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
 async def handle_sub_add_days(
     callback: types.CallbackQuery,
     db_user: User,
@@ -3531,6 +3603,11 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         handle_subscription_menu,
         F.data == "subscription"
+    )
+
+    dp.callback_query.register(
+        handle_bind_device,
+        F.data == "bind_device"
     )
 
     dp.callback_query.register(
