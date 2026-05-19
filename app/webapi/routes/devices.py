@@ -18,6 +18,7 @@ from app.database.crud.device_link import (
     create_device_link,
     get_device_link,
     get_subscription_by_device_id,
+    rebind_device_link,
 )
 
 from app.database.models import Subscription
@@ -62,8 +63,7 @@ async def get_device_subscription(
     summary="Link device to subscription",
     responses={
         404: {"description": "Subscription not found"},
-        409: {"description": "Device already linked to a different subscription"},
-        422: {"description": "Device limit exceeded"},
+        422: {"description": "Device limit exceeded on the target subscription"},
     },
 )
 async def link_device(
@@ -72,7 +72,13 @@ async def link_device(
     _=Security(require_api_token),
     db: AsyncSession = Depends(get_db_session),
 ) -> DeviceLinkResponse:
-    """BOT-06: Bind device_id to a subscription. Enforces device limit per D-03."""
+    """BOT-06: Bind device_id to a subscription. Enforces device limit per D-03.
+
+    If the device is already linked to a different subscription it is moved
+    (re-bound) to the new one — there is no 409. The target subscription's
+    device_limit is still enforced against the link count *excluding* the
+    incoming device (since the link is moved in place, not duplicated).
+    """
     # Fetch subscription
     result = await db.execute(
         select(Subscription).where(Subscription.id == payload.subscription_id)
@@ -84,23 +90,18 @@ async def link_device(
             detail="Subscription not found",
         )
 
-    # Check if device already linked
     existing = await get_device_link(db, device_id)
-    if existing:
-        if existing.subscription_id == subscription.id:
-            # Idempotent: already linked to same subscription
-            return DeviceLinkResponse(
-                device_id=device_id,
-                subscription_id=subscription.id,
-                linked_at=existing.linked_at,
-            )
-        # Linked to different subscription
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Device already linked to a different subscription",
+    if existing and existing.subscription_id == subscription.id:
+        # Idempotent: already linked to the same subscription.
+        return DeviceLinkResponse(
+            device_id=device_id,
+            subscription_id=subscription.id,
+            linked_at=existing.linked_at,
         )
 
-    # Check device limit per D-03
+    # Enforce device limit on the TARGET subscription. The incoming device is
+    # never on the target yet (otherwise we'd have returned above), so the raw
+    # count is the right comparison even for rebinds.
     count = await count_device_links(db, subscription.id)
     limit = subscription.device_limit or 1
     if count >= limit:
@@ -109,8 +110,15 @@ async def link_device(
             detail=f"Device limit exceeded ({count}/{limit})",
         )
 
-    # Create link
-    link = await create_device_link(db, subscription.id, device_id)
+    if existing is not None:
+        logger.info(
+            "Rebinding device %s from subscription %s to %s",
+            device_id, existing.subscription_id, subscription.id,
+        )
+        link = await rebind_device_link(db, existing, subscription.id)
+    else:
+        link = await create_device_link(db, subscription.id, device_id)
+
     return DeviceLinkResponse(
         device_id=device_id,
         subscription_id=subscription.id,
@@ -125,8 +133,7 @@ async def link_device(
     summary="Bind device to a subscription using a one-time binding code",
     responses={
         404: {"description": "Code not found, expired, or already used"},
-        409: {"description": "Device already linked to a different subscription"},
-        422: {"description": "Device limit exceeded"},
+        422: {"description": "Device limit exceeded on the target subscription"},
     },
 )
 async def bind_device_by_code(
@@ -138,10 +145,14 @@ async def bind_device_by_code(
 
     Flow:
     1. Atomically consume the code (404 if missing/expired/used).
-    2. If the device is already linked to the same subscription — idempotent success.
-    3. If linked to a different subscription — 409.
-    4. If subscription is at its device_limit — 422.
+    2. If the device is already linked to the SAME subscription — idempotent success.
+    3. If the device is linked to a DIFFERENT subscription — move it (rebind).
+    4. If the target subscription is at its device_limit — 422.
     5. Otherwise create the DeviceLink and return the subscription payload.
+
+    A valid binding code is treated as the user's explicit consent to attach
+    this device to the code's subscription, so a pre-existing link to another
+    subscription is silently replaced rather than rejected with 409.
     """
     existing_link = await get_device_link(db, payload.device_id)
 
@@ -169,16 +180,14 @@ async def bind_device_by_code(
             detail="Subscription not found",
         )
 
-    if existing_link is not None:
-        if existing_link.subscription_id == subscription.id:
-            response = _serialize_subscription(subscription)
-            response.connected_devices = await count_device_links(db, subscription.id)
-            return response
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Device already linked to a different subscription",
-        )
+    if existing_link is not None and existing_link.subscription_id == subscription.id:
+        response = _serialize_subscription(subscription)
+        response.connected_devices = await count_device_links(db, subscription.id)
+        return response
 
+    # Enforce device limit on the TARGET subscription. The incoming device is
+    # not on the target yet (handled above), so the raw count is correct for
+    # both fresh binds and rebinds.
     count = await count_device_links(db, subscription.id)
     limit = subscription.device_limit or 1
     if count >= limit:
@@ -187,7 +196,14 @@ async def bind_device_by_code(
             detail=f"Device limit exceeded ({count}/{limit})",
         )
 
-    await create_device_link(db, subscription.id, payload.device_id)
+    if existing_link is not None:
+        logger.info(
+            "Rebinding device %s from subscription %s to %s via binding code",
+            payload.device_id, existing_link.subscription_id, subscription.id,
+        )
+        await rebind_device_link(db, existing_link, subscription.id)
+    else:
+        await create_device_link(db, subscription.id, payload.device_id)
 
     response = _serialize_subscription(subscription)
     response.connected_devices = await count_device_links(db, subscription.id)

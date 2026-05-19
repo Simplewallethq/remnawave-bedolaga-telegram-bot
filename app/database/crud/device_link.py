@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
+
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +33,22 @@ async def create_device_link(db: AsyncSession, subscription_id: int, device_id: 
     """Create a new device link. Caller must check uniqueness/limits first."""
     link = DeviceLink(subscription_id=subscription_id, device_id=device_id)
     db.add(link)
+    await db.commit()
+    await db.refresh(link)
+    return link
+
+
+async def rebind_device_link(
+    db: AsyncSession, link: DeviceLink, new_subscription_id: int
+) -> DeviceLink:
+    """Move an existing device link to a different subscription via in-place UPDATE.
+
+    Avoids delete+insert so the device_id unique index is never momentarily empty
+    or duplicated. Caller must enforce the new subscription's device_limit before
+    invoking.
+    """
+    link.subscription_id = new_subscription_id
+    link.linked_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(link)
     return link
