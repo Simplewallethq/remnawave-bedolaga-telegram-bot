@@ -751,7 +751,8 @@ class Subscription(Base):
     
     status = Column(String(20), default=SubscriptionStatus.TRIAL.value)
     is_trial = Column(Boolean, default=True)
-    
+    is_partner = Column(Boolean, default=False, nullable=False, server_default="false")
+
     start_date = Column(DateTime, default=func.now())
     end_date = Column(DateTime, nullable=False)
     
@@ -1953,3 +1954,26 @@ class ButtonClickLog(Base):
 
     def __repr__(self) -> str:
         return f"<ButtonClickLog id={self.id} button='{self.button_id}' user={self.user_id} at={self.clicked_at}>"
+
+
+class PartnerLinkRedemption(Base):
+    __tablename__ = "partner_link_redemptions"
+
+    id = Column(Integer, primary_key=True)
+    jti = Column(String(32), unique=True, nullable=False, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    subscription_id = Column(
+        Integer,
+        ForeignKey("subscriptions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    sub_until = Column(DateTime, nullable=False)
+    redeemed_at = Column(DateTime, default=func.now(), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<PartnerLinkRedemption jti={self.jti} user_id={self.user_id} sub_until={self.sub_until}>"

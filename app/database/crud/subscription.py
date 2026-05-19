@@ -186,6 +186,55 @@ async def create_paid_subscription(
     return subscription
 
 
+async def create_partner_subscription(
+    db: AsyncSession,
+    user_id: int,
+    end_date: datetime,
+    *,
+    device_limit: Optional[int] = None,
+    connected_squads: Optional[List[str]] = None,
+    commit: bool = True,
+) -> Subscription:
+    """Создаёт partner-подписку: безлимит трафика, явный end_date, флаг is_partner=True.
+
+    Активируется при редемпции VIP-ссылки от партнёра (через kazApi). Не имеет
+    triale-флага и автоплатежа. Sync в Remnawave — обязанность вызывающего кода.
+    """
+
+    if device_limit is None:
+        device_limit = settings.DEFAULT_DEVICE_LIMIT
+
+    subscription = Subscription(
+        user_id=user_id,
+        status=SubscriptionStatus.ACTIVE.value,
+        is_trial=False,
+        is_partner=True,
+        start_date=datetime.utcnow(),
+        end_date=end_date,
+        traffic_limit_gb=0,
+        device_limit=device_limit,
+        connected_squads=connected_squads or [],
+        autopay_enabled=False,
+        autopay_days_before=settings.DEFAULT_AUTOPAY_DAYS_BEFORE,
+    )
+
+    db.add(subscription)
+    if commit:
+        await db.commit()
+        await db.refresh(subscription)
+    else:
+        await db.flush()
+
+    logger.info(
+        "🤝 Создана partner-подписка для пользователя %s, ID=%s, end_date=%s",
+        user_id,
+        subscription.id,
+        end_date,
+    )
+
+    return subscription
+
+
 async def replace_subscription(
     db: AsyncSession,
     subscription: Subscription,
@@ -195,9 +244,11 @@ async def replace_subscription(
     device_limit: int,
     connected_squads: List[str],
     is_trial: bool,
+    is_partner: bool = False,
     autopay_enabled: Optional[bool] = None,
     autopay_days_before: Optional[int] = None,
     update_server_counters: bool = False,
+    commit: bool = True,
 ) -> Subscription:
     """Перезаписывает параметры существующей подписки пользователя."""
 
@@ -218,6 +269,7 @@ async def replace_subscription(
 
     subscription.status = SubscriptionStatus.ACTIVE.value
     subscription.is_trial = is_trial
+    subscription.is_partner = is_partner
     subscription.start_date = current_time
     subscription.end_date = current_time + timedelta(days=duration_days)
     subscription.traffic_limit_gb = traffic_limit_gb
@@ -231,8 +283,11 @@ async def replace_subscription(
     subscription.autopay_days_before = new_autopay_days_before
     subscription.updated_at = current_time
 
-    await db.commit()
-    await db.refresh(subscription)
+    if commit:
+        await db.commit()
+        await db.refresh(subscription)
+    else:
+        await db.flush()
 
     if update_server_counters:
         try:

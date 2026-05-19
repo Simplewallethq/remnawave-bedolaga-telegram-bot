@@ -4676,6 +4676,148 @@ async def create_device_binding_codes_table() -> bool:
         return False
 
 
+async def add_subscription_is_partner_column() -> bool:
+    """Adds Subscription.is_partner boolean + CHECK constraint enforcing
+    that is_trial and is_partner are mutually exclusive.
+
+    Idempotent: re-running on a DB where the column/constraint already exist is a no-op.
+    """
+    column_exists = await check_column_exists('subscriptions', 'is_partner')
+
+    try:
+        if not column_exists:
+            async with engine.begin() as conn:
+                db_type = await get_database_type()
+
+                if db_type == 'sqlite':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN is_partner BOOLEAN NOT NULL DEFAULT 0"
+                    ))
+                elif db_type == 'postgresql':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN is_partner BOOLEAN NOT NULL DEFAULT FALSE"
+                    ))
+                elif db_type == 'mysql':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN is_partner BOOLEAN NOT NULL DEFAULT FALSE"
+                    ))
+                else:
+                    logger.error(f"Неподдерживаемый тип БД для добавления is_partner: {db_type}")
+                    return False
+
+            logger.info("✅ Добавлена колонка is_partner в таблицу subscriptions")
+        else:
+            logger.info("ℹ️ Колонка subscriptions.is_partner уже существует")
+
+        constraint_name = 'subscriptions_type_mutex'
+        constraint_exists = await check_constraint_exists('subscriptions', constraint_name)
+        if not constraint_exists:
+            try:
+                async with engine.begin() as conn:
+                    db_type = await get_database_type()
+                    if db_type == 'postgresql':
+                        await conn.execute(text(
+                            f"ALTER TABLE subscriptions ADD CONSTRAINT {constraint_name} "
+                            f"CHECK (NOT (is_trial AND is_partner))"
+                        ))
+                    elif db_type == 'mysql':
+                        await conn.execute(text(
+                            f"ALTER TABLE subscriptions ADD CONSTRAINT {constraint_name} "
+                            f"CHECK (NOT (is_trial AND is_partner))"
+                        ))
+                    # SQLite не поддерживает ADD CONSTRAINT после создания таблицы — пропускаем.
+                if db_type in ('postgresql', 'mysql'):
+                    logger.info("✅ Добавлен CHECK-constraint subscriptions_type_mutex")
+            except Exception as e:
+                logger.warning(f"Не удалось добавить CHECK-constraint subscriptions_type_mutex: {e}")
+        else:
+            logger.info("ℹ️ CHECK-constraint subscriptions_type_mutex уже существует")
+
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления колонки is_partner: {e}")
+        return False
+
+
+async def create_partner_link_redemptions_table() -> bool:
+    """Creates the partner_link_redemptions table tracking one-time-use VIP-link
+    redemptions (UNIQUE(jti) enforces replay protection).
+    """
+    table_exists = await check_table_exists('partner_link_redemptions')
+    if table_exists:
+        logger.info("ℹ️ Таблица partner_link_redemptions уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE partner_link_redemptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    jti VARCHAR(32) NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    subscription_id INTEGER NULL,
+                    sub_until DATETIME NOT NULL,
+                    redeemed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_partner_link_redemptions_jti UNIQUE (jti),
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY(subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL
+                );
+
+                CREATE INDEX ix_partner_link_redemptions_user_id ON partner_link_redemptions(user_id);
+                CREATE INDEX ix_partner_link_redemptions_redeemed_at ON partner_link_redemptions(redeemed_at);
+                CREATE INDEX ix_partner_link_redemptions_jti ON partner_link_redemptions(jti);
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS partner_link_redemptions (
+                    id SERIAL PRIMARY KEY,
+                    jti VARCHAR(32) NOT NULL,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    subscription_id INTEGER NULL REFERENCES subscriptions(id) ON DELETE SET NULL,
+                    sub_until TIMESTAMP NOT NULL,
+                    redeemed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_partner_link_redemptions_jti UNIQUE (jti)
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_partner_link_redemptions_user_id ON partner_link_redemptions(user_id);
+                CREATE INDEX IF NOT EXISTS ix_partner_link_redemptions_redeemed_at ON partner_link_redemptions(redeemed_at);
+                CREATE INDEX IF NOT EXISTS ix_partner_link_redemptions_jti ON partner_link_redemptions(jti);
+                """
+            elif db_type == 'mysql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS partner_link_redemptions (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    jti VARCHAR(32) NOT NULL,
+                    user_id INT NOT NULL,
+                    subscription_id INT NULL,
+                    sub_until DATETIME NOT NULL,
+                    redeemed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_partner_link_redemptions_jti UNIQUE (jti),
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY(subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL
+                );
+
+                CREATE INDEX ix_partner_link_redemptions_user_id ON partner_link_redemptions(user_id);
+                CREATE INDEX ix_partner_link_redemptions_redeemed_at ON partner_link_redemptions(redeemed_at);
+                CREATE INDEX ix_partner_link_redemptions_jti ON partner_link_redemptions(jti);
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица partner_link_redemptions успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы partner_link_redemptions: {e}")
+        return False
+
+
 async def run_universal_migration():
     logger.info("=== НАЧАЛО УНИВЕРСАЛЬНОЙ МИГРАЦИИ ===")
     
@@ -5138,6 +5280,20 @@ async def run_universal_migration():
             logger.info("✅ Таблица device_binding_codes готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей device_binding_codes")
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ is_partner В SUBSCRIPTIONS ===")
+        is_partner_ready = await add_subscription_is_partner_column()
+        if is_partner_ready:
+            logger.info("✅ Колонка subscriptions.is_partner готова")
+        else:
+            logger.warning("⚠️ Проблемы с добавлением колонки is_partner")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ PARTNER_LINK_REDEMPTIONS ===")
+        partner_redemptions_ready = await create_partner_link_redemptions_table()
+        if partner_redemptions_ready:
+            logger.info("✅ Таблица partner_link_redemptions готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей partner_link_redemptions")
 
         async with engine.begin() as conn:
             total_subs = await conn.execute(text("SELECT COUNT(*) FROM subscriptions"))

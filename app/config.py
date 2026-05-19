@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     REMNAWAVE_API_KEY: Optional[str] = None
     REMNAWAVE_SECRET_KEY: Optional[str] = None
 
+    PARTNER_LINK_SECRET: str = ""
+    PARTNER_LINK_SECRET_PREVIOUS: str = ""
+
     REMNAWAVE_USERNAME: Optional[str] = None
     REMNAWAVE_PASSWORD: Optional[str] = None
     REMNAWAVE_CADDY_TOKEN: Optional[str] = None
@@ -1731,6 +1734,21 @@ class Settings(BaseSettings):
     
     def is_support_contact_enabled(self) -> bool:
         return self.get_support_system_mode() in {"contact", "both"}
+
+    def get_partner_link_secrets(self) -> list[bytes]:
+        """Return the active HMAC secrets in priority order (current first, previous second).
+
+        Empty entries are filtered out so the bot fails closed if no secret is configured.
+        Validating against both current and previous enables zero-downtime rotation:
+        rotate by setting PARTNER_LINK_SECRET_PREVIOUS to the old value before
+        promoting the new one to PARTNER_LINK_SECRET.
+        """
+        secrets: list[bytes] = []
+        for raw in (self.PARTNER_LINK_SECRET, self.PARTNER_LINK_SECRET_PREVIOUS):
+            value = (raw or "").strip()
+            if value:
+                secrets.append(value.encode("utf-8"))
+        return secrets
 
     def resolve_bot_logo(self, logo: str) -> str:
         logo = (logo or "").strip()

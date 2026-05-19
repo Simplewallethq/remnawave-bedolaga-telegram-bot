@@ -34,7 +34,16 @@ from app.keyboards.inline import (
     get_onboarding_device_selection_keyboard,
     get_onboarding_welcome_keyboard,
 )
-from app.database.crud.subscription import create_trial_subscription
+from app.database.crud.subscription import (
+    create_trial_subscription,
+    create_partner_subscription,
+    replace_subscription,
+)
+from app.database.crud.partner_link import (
+    try_insert_redemption,
+    attach_subscription_id,
+)
+from app.services.partner_link_service import decode_and_verify_partner_token
 from app.services.trial_activation_service import (
     charge_trial_activation_if_required,
     preview_trial_activation_charge,
@@ -168,6 +177,218 @@ async def activate_trial_for_user(
     except Exception as e:
         logger.error(f"❌ Ошибка авто-активации триала для {user.telegram_id}: {e}")
         return False
+
+
+async def activate_partner_subscription_for_user(
+    bot,
+    db: AsyncSession,
+    user,
+    *,
+    sub_until: datetime,
+    jti: str,
+) -> tuple[bool, str]:
+    """Apply a partner VIP subscription to a user (new or existing).
+
+    Returns (success, reason). ``reason`` codes:
+      - ``"activated"``       — partner sub created or replaced existing trial/expired.
+      - ``"extended"``        — extended an existing partner sub.
+      - ``"already_redeemed"``— jti was already consumed; nothing changed.
+      - ``"has_paid"``        — user has an active non-trial paid sub; jti consumed
+                                but partner sub NOT applied to avoid clobbering paid.
+      - ``"failed"``          — unexpected error during creation/sync.
+
+    One-time-use is enforced atomically via UNIQUE(jti) on partner_link_redemptions.
+    """
+    logger.info("🤝 PARTNER: применяем VIP-подписку для %s, jti=%s", user.telegram_id, jti)
+
+    inserted = await try_insert_redemption(
+        db,
+        jti=jti,
+        user_id=user.id,
+        sub_until=sub_until,
+        commit=False,
+    )
+    if not inserted:
+        logger.info("Partner token jti=%s already redeemed", jti)
+        return False, "already_redeemed"
+
+    existing = getattr(user, "subscription", None)
+
+    has_paid_active = (
+        existing is not None
+        and existing.actual_status == "active"
+        and not existing.is_trial
+        and not existing.is_partner
+    )
+    if has_paid_active:
+        # Token still consumed (to prevent later reuse), but we don't overwrite a paid sub.
+        await db.commit()
+        logger.info(
+            "Partner token applied to %s SKIPPED: user has active paid subscription",
+            user.telegram_id,
+        )
+        return False, "has_paid"
+
+    try:
+        subscription_service = SubscriptionService()
+
+        if existing is not None and existing.is_partner:
+            new_end = max(existing.end_date, sub_until)
+            existing.end_date = new_end
+            existing.status = SubscriptionStatus.ACTIVE.value
+            await db.commit()
+            await db.refresh(existing)
+            try:
+                await subscription_service.update_remnawave_user(db, existing)
+            except Exception as rw_err:
+                logger.error("Remnawave sync error on partner extension: %s", rw_err)
+            logger.info(
+                "Partner sub for %s extended to %s",
+                user.telegram_id,
+                existing.end_date,
+            )
+            return True, "extended"
+
+        duration_days = max(1, (sub_until - datetime.utcnow()).days + 1)
+
+        if existing is None:
+            subscription = await create_partner_subscription(
+                db,
+                user.id,
+                end_date=sub_until,
+                commit=False,
+            )
+        else:
+            # Trial / expired / disabled — replace it.
+            await replace_subscription(
+                db,
+                existing,
+                duration_days=duration_days,
+                traffic_limit_gb=0,
+                device_limit=settings.DEFAULT_DEVICE_LIMIT,
+                connected_squads=existing.connected_squads or [],
+                is_trial=False,
+                is_partner=True,
+                commit=False,
+            )
+            existing.end_date = sub_until
+            subscription = existing
+
+        await db.commit()
+        await db.refresh(subscription)
+        await attach_subscription_id(
+            db,
+            jti=jti,
+            subscription_id=subscription.id,
+            commit=True,
+        )
+        await db.refresh(user, ["subscription"])
+
+        try:
+            await subscription_service.create_remnawave_user(db, subscription)
+        except Exception as rw_err:
+            logger.error("Remnawave sync error on partner activation: %s", rw_err)
+
+        try:
+            notification_service = AdminNotificationService(bot)
+            send_trial = getattr(notification_service, "send_trial_activation_notification", None)
+            if send_trial is not None:
+                await send_trial(db, user, subscription, charged_amount_kopeks=0)
+        except Exception as notify_err:
+            logger.error("Admin notification error on partner activation: %s", notify_err)
+
+        logger.info(
+            "✅ Partner sub активирована для %s до %s",
+            user.telegram_id,
+            sub_until,
+        )
+        return True, "activated"
+
+    except Exception as e:
+        logger.error("❌ Partner activation error for %s: %s", user.telegram_id, e)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return False, "failed"
+
+
+async def _auto_activate_partner_and_show_device_selection(
+    bot,
+    db: AsyncSession,
+    user,
+    message_or_callback,
+    *,
+    sub_until: datetime,
+    jti: str,
+    is_callback: bool = False,
+    language: str | None = None,
+) -> bool:
+    """Activate partner subscription during registration and show device selection.
+
+    Mirrors _auto_activate_trial_and_show_device_selection. If partner activation
+    falls back (e.g. user already has paid sub, or token replayed), caller is
+    responsible for the fallback UX.
+    """
+    ok, _reason = await activate_partner_subscription_for_user(
+        bot, db, user, sub_until=sub_until, jti=jti,
+    )
+    if not ok:
+        return False
+
+    lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
+    texts = get_texts(lang)
+    base_text = texts.t(
+        "ONBOARDING_DEVICE_SELECTION_TEXT",
+        "Выбери устройство для подключения:",
+    )
+
+    subscription_link = None
+    if getattr(user, "subscription", None):
+        subscription_link = get_display_subscription_link(user.subscription)
+
+    if subscription_link:
+        manual_intro = texts.t(
+            "ONBOARDING_MANUAL_LINK_TEXT",
+            "Для ручного подключения скопируй ключ и добавь его в Happ\n\n",
+        ).rstrip()
+        device_selection_text = (
+            f"{base_text}\n\n{manual_intro}\n"
+            f"<blockquote expandable><code>{subscription_link}</code></blockquote>"
+        )
+    else:
+        device_selection_text = base_text
+
+    image_path = os.path.join("images", "device_selection_screen.png")
+    if not os.path.exists(image_path):
+        image_path = None
+
+    keyboard = get_onboarding_device_selection_keyboard(lang, share_link=subscription_link)
+
+    if is_callback:
+        await edit_or_answer_photo(
+            callback=message_or_callback,
+            caption=device_selection_text,
+            keyboard=keyboard,
+            photo_path=image_path,
+            parse_mode="HTML",
+        )
+    else:
+        if image_path:
+            await message_or_callback.answer_photo(
+                photo=types.FSInputFile(image_path),
+                caption=device_selection_text,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+        else:
+            await message_or_callback.answer(
+                device_selection_text,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+
+    return True
 
 
 async def _auto_activate_trial_and_show_device_selection(
@@ -467,6 +688,21 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
     if state_needs_update:
         await state.set_data(data)
 
+    if start_parameter and start_parameter.startswith("p_"):
+        # Partner VIP-link: locally HMAC-verified before any DB/network calls.
+        # Always short-circuit downstream branches — a partner token must NEVER
+        # be misinterpreted as a referral code or campaign on HMAC failure.
+        partner_payload = decode_and_verify_partner_token(start_parameter[2:])
+        if partner_payload:
+            await state.update_data(
+                partner_token_jti=partner_payload.jti,
+                partner_sub_until=partner_payload.sub_until.isoformat(),
+            )
+            logger.info("🤝 Partner VIP token accepted: jti=%s", partner_payload.jti)
+        else:
+            logger.warning("⚠️ Invalid partner VIP token in start_param")
+        start_parameter = None
+
     if start_parameter:
         campaign = await get_campaign_by_start_parameter(
             db,
@@ -566,6 +802,53 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
                 logger.error(
                     f"Ошибка отправки уведомления о рекламной кампании: {e}"
                 )
+
+        # Partner VIP-link applied to an already-registered user. Reuses the same
+        # smart-replace logic as for newcomers; reports to the user briefly.
+        _existing_state_data = await state.get_data() or {}
+        _partner_jti = _existing_state_data.get("partner_token_jti")
+        _partner_sub_until_raw = _existing_state_data.get("partner_sub_until")
+        if _partner_jti and _partner_sub_until_raw:
+            try:
+                _partner_sub_until = datetime.fromisoformat(_partner_sub_until_raw)
+            except ValueError:
+                _partner_sub_until = None
+            if _partner_sub_until is not None:
+                ok, reason = await activate_partner_subscription_for_user(
+                    message.bot, db, user, sub_until=_partner_sub_until, jti=_partner_jti,
+                )
+                if ok:
+                    try:
+                        await message.answer(
+                            texts.t(
+                                "PARTNER_LINK_APPLIED",
+                                "🤝 Партнёрская подписка активирована.",
+                            )
+                        )
+                    except Exception as e:
+                        logger.error("Не удалось отправить partner-уведомление: %s", e)
+                elif reason == "has_paid":
+                    try:
+                        await message.answer(
+                            texts.t(
+                                "PARTNER_LINK_HAS_PAID",
+                                "ℹ️ У вас уже есть активная оплаченная подписка. "
+                                "Партнёрская ссылка отмечена использованной, но не применена.",
+                            )
+                        )
+                    except Exception as e:
+                        logger.error("Не удалось отправить partner-предупреждение: %s", e)
+                elif reason == "already_redeemed":
+                    try:
+                        await message.answer(
+                            texts.t(
+                                "PARTNER_LINK_ALREADY_REDEEMED",
+                                "ℹ️ Эта партнёрская ссылка уже была использована.",
+                            )
+                        )
+                    except Exception as e:
+                        logger.error("Не удалось отправить partner-предупреждение: %s", e)
+                await db.refresh(user, ["subscription"])
 
         # Device-link deeplink for existing user without any subscription:
         # auto-create trial (same as for new users) and link the device, instead of showing the menu.
@@ -1419,9 +1702,11 @@ async def complete_registration_from_callback(
             refresh_subscription_error,
         )
 
-    # Read device_id BEFORE state.clear() per Pitfall 2
+    # Read device_id and partner token BEFORE state.clear() per Pitfall 2
     _fsm_data = await state.get_data() or {}
     _device_id = _fsm_data.get("device_id")
+    _partner_jti = _fsm_data.get("partner_token_jti")
+    _partner_sub_until_raw = _fsm_data.get("partner_sub_until")
 
     await state.clear()
 
@@ -1431,14 +1716,39 @@ async def complete_registration_from_callback(
         except Exception as e:
             logger.error(f"Ошибка отправки сообщения о бонусе кампании: {e}")
 
-    # Auto-activate trial and show device selection
-    try:
-        trial_success = await _auto_activate_trial_and_show_device_selection(
-            callback.bot, db, user, callback, is_callback=True, language=language
-        )
-    except Exception as e:
-        logger.error(f"Ошибка авто-активации триала при регистрации (callback): {e}")
-        trial_success = False
+    # If a partner VIP token was redeemed, use it instead of the trial.
+    trial_success = False
+    if _partner_jti and _partner_sub_until_raw:
+        try:
+            _partner_sub_until = datetime.fromisoformat(_partner_sub_until_raw)
+        except ValueError:
+            _partner_sub_until = None
+        if _partner_sub_until is not None:
+            try:
+                trial_success = await _auto_activate_partner_and_show_device_selection(
+                    callback.bot,
+                    db,
+                    user,
+                    callback,
+                    sub_until=_partner_sub_until,
+                    jti=_partner_jti,
+                    is_callback=True,
+                    language=language,
+                )
+            except Exception as e:
+                logger.error(
+                    f"Ошибка авто-активации partner-подписки при регистрации (callback): {e}"
+                )
+                trial_success = False
+
+    if not trial_success:
+        try:
+            trial_success = await _auto_activate_trial_and_show_device_selection(
+                callback.bot, db, user, callback, is_callback=True, language=language
+            )
+        except Exception as e:
+            logger.error(f"Ошибка авто-активации триала при регистрации (callback): {e}")
+            trial_success = False
 
     # Link device after trial creation per D-07
     if _device_id and user.subscription:
@@ -1685,9 +1995,11 @@ async def complete_registration(
             refresh_subscription_error,
         )
 
-    # Read device_id BEFORE state.clear() per Pitfall 2
+    # Read device_id and partner token BEFORE state.clear() per Pitfall 2
     _fsm_data = await state.get_data() or {}
     _device_id = _fsm_data.get("device_id")
+    _partner_jti = _fsm_data.get("partner_token_jti")
+    _partner_sub_until_raw = _fsm_data.get("partner_sub_until")
 
     await state.clear()
 
@@ -1697,14 +2009,39 @@ async def complete_registration(
         except Exception as e:
             logger.error(f"Ошибка отправки сообщения о бонусе кампании: {e}")
 
-    # Auto-activate trial and show device selection
-    try:
-        trial_success = await _auto_activate_trial_and_show_device_selection(
-            message.bot, db, user, message, is_callback=False, language=language
-        )
-    except Exception as e:
-        logger.error(f"Ошибка авто-активации триала при регистрации: {e}")
-        trial_success = False
+    # If a partner VIP token was redeemed, use it instead of the trial.
+    trial_success = False
+    if _partner_jti and _partner_sub_until_raw:
+        try:
+            _partner_sub_until = datetime.fromisoformat(_partner_sub_until_raw)
+        except ValueError:
+            _partner_sub_until = None
+        if _partner_sub_until is not None:
+            try:
+                trial_success = await _auto_activate_partner_and_show_device_selection(
+                    message.bot,
+                    db,
+                    user,
+                    message,
+                    sub_until=_partner_sub_until,
+                    jti=_partner_jti,
+                    is_callback=False,
+                    language=language,
+                )
+            except Exception as e:
+                logger.error(f"Ошибка авто-активации partner-подписки при регистрации: {e}")
+                trial_success = False
+        # If partner activation didn't succeed (replay, etc.), fall back to trial below.
+
+    if not trial_success:
+        # Default path or partner fallback: trial.
+        try:
+            trial_success = await _auto_activate_trial_and_show_device_selection(
+                message.bot, db, user, message, is_callback=False, language=language
+            )
+        except Exception as e:
+            logger.error(f"Ошибка авто-активации триала при регистрации: {e}")
+            trial_success = False
 
     # Link device after trial creation per D-07
     if _device_id and user.subscription:
@@ -1778,7 +2115,21 @@ async def required_sub_channel_check(
                 pending_start_payload,
             )
 
-            if "campaign_id" not in state_data and "referral_code" not in state_data:
+            if pending_start_payload.startswith("p_"):
+                # Partner VIP-link survives the channel-subscribe interstitial.
+                partner_payload = decode_and_verify_partner_token(pending_start_payload[2:])
+                if partner_payload:
+                    state_data["partner_token_jti"] = partner_payload.jti
+                    state_data["partner_sub_until"] = partner_payload.sub_until.isoformat()
+                    logger.info(
+                        "🤝 CHANNEL CHECK: Partner token восстановлен из payload (jti=%s)",
+                        partner_payload.jti,
+                    )
+                else:
+                    logger.warning(
+                        "⚠️ CHANNEL CHECK: invalid partner token in pending_start_payload",
+                    )
+            elif "campaign_id" not in state_data and "referral_code" not in state_data:
                 campaign = await get_campaign_by_start_parameter(
                     db,
                     pending_start_payload,
