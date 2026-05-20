@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,7 +48,7 @@ async def rebind_device_link(
     invoking.
     """
     link.subscription_id = new_subscription_id
-    link.linked_at = datetime.now(timezone.utc)
+    link.linked_at = datetime.utcnow()
     await db.commit()
     await db.refresh(link)
     return link
