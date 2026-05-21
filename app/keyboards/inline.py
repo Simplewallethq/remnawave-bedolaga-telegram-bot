@@ -3027,7 +3027,6 @@ def get_subscription_menu_keyboard(
     language: str = DEFAULT_LANGUAGE,
     balance_kopeks: int = 0,
     autopay_enabled: bool = False,
-    is_admin: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     Экран 5: Меню подписки
@@ -3065,13 +3064,12 @@ def get_subscription_menu_keyboard(
         ],
     ]
 
-    if is_admin:
-        buttons.append([
-            InlineKeyboardButton(
-                text=texts.t("BIND_DEVICE_BUTTON", "🔗 Привязать устройство"),
-                callback_data="bind_device",
-            )
-        ])
+    buttons.append([
+        InlineKeyboardButton(
+            text=texts.t("BIND_DEVICE_BUTTON", "🔗 Привязать устройство"),
+            callback_data="bind_device",
+        )
+    ])
 
     buttons.append(
         [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
