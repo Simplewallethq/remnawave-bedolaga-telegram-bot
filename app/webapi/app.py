@@ -20,6 +20,7 @@ from .routes import (
     miniapp,
     partners,
     pinned_messages,
+    plans,
     polls,
     promocodes,
     promo_groups,
@@ -158,6 +159,10 @@ OPENAPI_TAGS = [
         "name": "devices",
         "description": "Device-to-subscription linking for Android app integration.",
     },
+    {
+        "name": "plans",
+        "description": "Subscription plan catalog (App/Solo/Plus/Pro) for the purchase frontend.",
+    },
 ]
 
 
@@ -248,5 +253,6 @@ def create_web_api_app() -> FastAPI:
         tags=["notifications"],
     )
     app.include_router(devices.router, prefix="/api/devices", tags=["devices"])
+    app.include_router(plans.router, prefix="/api/plans", tags=["plans"])
 
     return app
