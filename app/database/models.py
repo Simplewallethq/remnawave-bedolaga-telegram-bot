@@ -768,17 +768,25 @@ class Subscription(Base):
     
     autopay_enabled = Column(Boolean, default=False)
     autopay_days_before = Column(Integer, default=3)
-    
+
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-    
+
     remnawave_short_uuid = Column(String(255), nullable=True)
+
+    plan_id = Column(Integer, ForeignKey("subscription_plans.id", ondelete="SET NULL"), nullable=True, index=True)
+    plan_period_days = Column(Integer, nullable=True)
 
     user = relationship("User", back_populates="subscription")
     discount_offers = relationship("DiscountOffer", back_populates="subscription")
     temporary_accesses = relationship("SubscriptionTemporaryAccess", back_populates="subscription")
     device_links = relationship("DeviceLink", back_populates="subscription", cascade="all, delete-orphan")
     binding_codes = relationship("DeviceBindingCode", back_populates="subscription", cascade="all, delete-orphan")
+    plan = relationship("SubscriptionPlan", lazy="joined", foreign_keys=[plan_id])
+
+    @property
+    def is_legacy(self) -> bool:
+        return self.plan_id is None
     
     @property
     def is_active(self) -> bool:
@@ -937,6 +945,52 @@ class DeviceBindingCode(Base):
     used_device_id = Column(String(255), nullable=True)
 
     subscription = relationship("Subscription", back_populates="binding_codes")
+
+
+class SubscriptionPlan(Base):
+    __tablename__ = "subscription_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(16), unique=True, nullable=False, index=True)
+    display_name = Column(String(64), nullable=False)
+    device_limit = Column(Integer, nullable=False, default=1)
+    traffic_limit_gb = Column(Integer, nullable=False, default=0)
+    traffic_reset_strategy = Column(String(16), nullable=False, default="NO_RESET")
+    custom_app_only = Column(Boolean, nullable=False, default=False, server_default="false")
+    priority_support = Column(Boolean, nullable=False, default=False, server_default="false")
+    sort_order = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True, server_default="true")
+    description_md = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    prices = relationship(
+        "SubscriptionPlanPrice",
+        back_populates="plan",
+        cascade="all, delete-orphan",
+        order_by="SubscriptionPlanPrice.period_days",
+    )
+
+
+class SubscriptionPlanPrice(Base):
+    __tablename__ = "subscription_plan_prices"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "period_days", name="uq_plan_period"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(
+        Integer,
+        ForeignKey("subscription_plans.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    period_days = Column(Integer, nullable=False)
+    price_kopeks = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    plan = relationship("SubscriptionPlan", back_populates="prices")
 
 
 class Transaction(Base):

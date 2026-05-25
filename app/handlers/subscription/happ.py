@@ -78,12 +78,27 @@ from app.utils.promo_offer import (
     get_user_active_promo_discount_percent,
 )
 
+def _subscription_blocks_happ(db_user: User) -> bool:
+    sub = getattr(db_user, "subscription", None)
+    plan = getattr(sub, "plan", None) if sub else None
+    return bool(plan and getattr(plan, "custom_app_only", False))
+
+
 async def handle_happ_download_request(
         callback: types.CallbackQuery,
         db_user: User,
         db: AsyncSession
 ):
     texts = get_texts(db_user.language)
+    if _subscription_blocks_happ(db_user):
+        await callback.answer(
+            texts.t(
+                "TARIFF_APP_HAPP_BLOCKED",
+                "ℹ️ На тарифе App используется только наше приложение. Кнопка Happ недоступна.",
+            ),
+            show_alert=True,
+        )
+        return
     prompt_text = texts.t(
         "HAPP_DOWNLOAD_PROMPT",
         "📥 <b>Скачать Happ</b>\nВыберите ваше устройство:",
@@ -99,6 +114,16 @@ async def handle_happ_download_platform_choice(
         db_user: User,
         db: AsyncSession
 ):
+    if _subscription_blocks_happ(db_user):
+        texts = get_texts(db_user.language)
+        await callback.answer(
+            texts.t(
+                "TARIFF_APP_HAPP_BLOCKED",
+                "ℹ️ На тарифе App используется только наше приложение. Кнопка Happ недоступна.",
+            ),
+            show_alert=True,
+        )
+        return
     platform = callback.data.split('_')[-1]
     if platform == "pc":
         platform = "windows"

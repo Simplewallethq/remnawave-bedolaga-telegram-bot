@@ -1499,21 +1499,27 @@ async def handle_connection_link_toggle(
 async def handle_profile(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
     texts = get_texts(db_user.language)
     reg_date = format_local_datetime(db_user.created_at, "%Y-%m-%d")
-    
+
     text = (
         texts.t("PROFILE_TITLE", "👤 Профиль\n\n")
         + texts.t("PROFILE_USER_ID", "ID пользователя: {user_id}").format(user_id=db_user.telegram_id) + "\n"
         + texts.t("PROFILE_REG_DATE", "Дата регистрации: {reg_date}").format(reg_date=reg_date)
     )
-    
+
     image_path = os.path.join("images", "profile_screen.png")
     if not os.path.exists(image_path):
          image_path = None
 
+    has_subscription = db_user.subscription is not None
+
     await edit_or_answer_photo(
         callback,
-        text, 
-        get_profile_keyboard(language=db_user.language, balance_kopeks=db_user.balance_kopeks),
+        text,
+        get_profile_keyboard(
+            language=db_user.language,
+            balance_kopeks=db_user.balance_kopeks,
+            has_subscription=has_subscription,
+        ),
         parse_mode="HTML",
         photo_path=image_path
     )

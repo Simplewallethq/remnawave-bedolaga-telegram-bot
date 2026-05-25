@@ -95,7 +95,7 @@ from .purchase import (
     devices_continue,
     handle_extend_subscription,
     handle_subscription_settings,
-    register_handlers,
+    register_handlers as _register_purchase_handlers,
     resume_subscription_checkout,
     return_to_saved_cart,
     save_cart_and_redirect_to_topup,
@@ -105,6 +105,21 @@ from .purchase import (
     show_trial_offer,
     start_subscription_purchase,
 )
+
+from .tariffs import (
+    register_handlers as _register_tariffs_handlers,
+    show_tariffs_page,
+    show_tariff_periods,
+    start_tariff_purchase,
+    confirm_tier_upgrade,
+    show_renew_current,
+    apply_renewal,
+)
+
+
+def register_handlers(dp):
+    _register_tariffs_handlers(dp)
+    _register_purchase_handlers(dp)
 
 from .traffic import (
     add_traffic,

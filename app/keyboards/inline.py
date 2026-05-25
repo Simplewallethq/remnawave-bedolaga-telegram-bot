@@ -515,9 +515,13 @@ def get_main_menu_keyboard(
             else:
                 keyboard.append([_fallback_connect_button()])
 
-        happ_row = get_happ_download_button_row(texts)
-        if happ_row:
-            keyboard.append(happ_row)
+        happ_allowed = True
+        if subscription is not None and getattr(subscription, "plan", None) is not None:
+            happ_allowed = not getattr(subscription.plan, "custom_app_only", False)
+        if happ_allowed:
+            happ_row = get_happ_download_button_row(texts)
+            if happ_row:
+                keyboard.append(happ_row)
         keyboard.append([
             InlineKeyboardButton(text=texts.MENU_SUBSCRIPTION, callback_data="menu_subscription")
         ])
@@ -557,10 +561,13 @@ def get_main_menu_keyboard(
         subscription_buttons.append(
             InlineKeyboardButton(text=texts.MENU_TRIAL, callback_data="menu_trial")
         )
-    
+
     if show_buy:
         subscription_buttons.append(
-            InlineKeyboardButton(text=texts.MENU_BUY_SUBSCRIPTION, callback_data="menu_buy")
+            InlineKeyboardButton(
+                text=texts.t("MENU_SUBSCRIPTION_INACTIVE", "🎟 Активировать подписку"),
+                callback_data="subscription_tariffs",
+            )
         )
     
     if subscription_buttons:
@@ -918,24 +925,32 @@ def get_insufficient_balance_keyboard(
 
 
 def get_subscription_keyboard(
-    language: str = DEFAULT_LANGUAGE, 
-    has_subscription: bool = False, 
+    language: str = DEFAULT_LANGUAGE,
+    has_subscription: bool = False,
     is_trial: bool = False,
     subscription=None,
     subscription_is_expired: bool = False,
+    plan_custom_app_only: bool = False,
 ) -> InlineKeyboardMarkup:
-    from app.config import settings 
-    
+    from app.config import settings
+
     texts = get_texts(language)
     keyboard = []
     has_direct_payment_methods = False
 
+    is_tiered_subscription = (
+        has_subscription
+        and not subscription_is_expired
+        and subscription is not None
+        and getattr(subscription, "plan_id", None) is not None
+    )
+
     if subscription_is_expired or not has_subscription:
-        # Expired or no subscription — only show "Activate" button
+        # Expired or no subscription — route to new tariffs page
         keyboard.append([
             build_miniapp_or_callback_button(
-                text=texts.t("ACTIVATE_SUBSCRIPTION_BUTTON", "🚀 Активировать подписку"),
-                callback_data="menu_buy",
+                text=texts.t("MENU_SUBSCRIPTION_INACTIVE", "🎟 Активировать подписку"),
+                callback_data="subscription_tariffs",
             )
         ])
     elif has_subscription:
@@ -989,13 +1004,30 @@ def get_subscription_keyboard(
                 InlineKeyboardButton(text=texts.t("CONNECT_BUTTON", "🔗 Подключиться"), callback_data="subscription_connect")
             ])
 
-        happ_row = get_happ_download_button_row(texts)
-        if happ_row:
-            keyboard.append(happ_row)
+        if not plan_custom_app_only:
+            happ_row = get_happ_download_button_row(texts)
+            if happ_row:
+                keyboard.append(happ_row)
 
-        if not is_trial:
+        if is_tiered_subscription:
+            # New-tier layout: Renew, Tariffs, Settings, Autopay (bottom)
             keyboard.append([
-                build_miniapp_or_callback_button(text=texts.MENU_EXTEND_SUBSCRIPTION, callback_data="subscription_extend")
+                InlineKeyboardButton(
+                    text=texts.t("SUBSCRIPTION_RENEW_BUTTON", "💎 Продлить"),
+                    callback_data="subscription_renew_current",
+                )
+            ])
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=texts.t("SUBSCRIPTION_TARIFFS_BUTTON", "📋 Тарифы"),
+                    callback_data="subscription_tariffs",
+                )
+            ])
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=texts.t("SUBSCRIPTION_SETTINGS_BUTTON", "⚙️ Настройки подписки"),
+                    callback_data="subscription_settings",
+                )
             ])
             keyboard.append([
                 InlineKeyboardButton(
@@ -1003,24 +1035,209 @@ def get_subscription_keyboard(
                     callback_data="subscription_autopay",
                 )
             ])
-
-        if is_trial:
-            keyboard.append([
-                InlineKeyboardButton(text=texts.MENU_BUY_SUBSCRIPTION, callback_data="subscription_upgrade")
-            ])
         else:
-            keyboard.append([
-                InlineKeyboardButton(
-                    text=texts.t("SUBSCRIPTION_SETTINGS_BUTTON", "⚙️ Настройки подписки"),
-                    callback_data="subscription_settings",
-                )
-            ])
-    
+            # Legacy layout: keep current order (Extend, Autopay, then Buy/Settings)
+            if not is_trial:
+                keyboard.append([
+                    build_miniapp_or_callback_button(text=texts.MENU_EXTEND_SUBSCRIPTION, callback_data="subscription_extend")
+                ])
+                keyboard.append([
+                    InlineKeyboardButton(
+                        text=texts.t("AUTOPAY_BUTTON", "💳 Автоплатеж"),
+                        callback_data="subscription_autopay",
+                    )
+                ])
+
+            if is_trial:
+                keyboard.append([
+                    InlineKeyboardButton(text=texts.MENU_BUY_SUBSCRIPTION, callback_data="subscription_upgrade")
+                ])
+            else:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        text=texts.t("SUBSCRIPTION_SETTINGS_BUTTON", "⚙️ Настройки подписки"),
+                        callback_data="subscription_settings",
+                    )
+                ])
+                # Optional migration entry: lets legacy users see the new tiered plans
+                keyboard.append([
+                    InlineKeyboardButton(
+                        text=texts.t("SUBSCRIPTION_TARIFFS_LEGACY_BUTTON", "📋 Перейти на новые тарифы"),
+                        callback_data="subscription_tariffs",
+                    )
+                ])
+
     keyboard.append([
         InlineKeyboardButton(text=texts.BACK, callback_data="back_to_menu")
     ])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def _format_kopeks_short(amount_kopeks: int) -> str:
+    """₽-formatted price for keyboard labels (rounded to whole rubles)."""
+    rubles = int(round(amount_kopeks / 100))
+    return f"{rubles}₽"
+
+
+_TARIFF_PERIOD_LABEL_KEYS = {
+    30: "TARIFF_PERIOD_BUTTON_1M",
+    90: "TARIFF_PERIOD_BUTTON_3M",
+    180: "TARIFF_PERIOD_BUTTON_6M",
+    360: "TARIFF_PERIOD_BUTTON_1Y",
+    720: "TARIFF_PERIOD_BUTTON_2Y",
+}
+_TARIFF_PERIOD_LABEL_FALLBACKS = {
+    30: "1 мес — {price}",
+    90: "3 мес — {price}",
+    180: "6 мес — {price}",
+    360: "1 год — {price}",
+    720: "2 года — {price}",
+}
+
+
+def get_tariffs_keyboard(
+    plans_with_lowest_monthly: List[tuple],
+    language: str = DEFAULT_LANGUAGE,
+    current_plan_id: Optional[int] = None,
+    current_plan_label: Optional[str] = None,
+) -> InlineKeyboardMarkup:
+    """One row per tariff card; `plans_with_lowest_monthly` is [(plan, lowest_monthly_kopeks), ...]."""
+    texts = get_texts(language)
+    rows: List[List[InlineKeyboardButton]] = []
+
+    for plan, lowest_monthly in plans_with_lowest_monthly:
+        if current_plan_id is not None and plan.id == current_plan_id and current_plan_label:
+            label = current_plan_label
+        else:
+            price_text = _format_kopeks_short(lowest_monthly) if lowest_monthly else "—"
+            label = texts.t(
+                "TARIFF_BUTTON_SELECT_FROM",
+                "Выбрать: {name} — от {price} / мес",
+            ).format(name=plan.display_name, price=price_text)
+        rows.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"tariff_select:{plan.code}",
+            )
+        ])
+
+    rows.append([
+        InlineKeyboardButton(
+            text=texts.t("TARIFFS_BACK", "⬅️ Назад"),
+            callback_data="menu_subscription",
+        )
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def get_tariff_periods_keyboard(
+    plan_code: str,
+    period_prices: dict,
+    language: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    """`period_prices` is {period_days: price_kopeks}."""
+    texts = get_texts(language)
+    rows: List[List[InlineKeyboardButton]] = []
+
+    for period_days in (30, 90, 180, 360, 720):
+        price_kopeks = period_prices.get(period_days)
+        if price_kopeks is None:
+            continue
+        label = texts.t(
+            _TARIFF_PERIOD_LABEL_KEYS[period_days],
+            _TARIFF_PERIOD_LABEL_FALLBACKS[period_days],
+        ).format(price=_format_kopeks_short(price_kopeks))
+        rows.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"tariff_buy:{plan_code}:{period_days}",
+            )
+        ])
+
+    rows.append([
+        InlineKeyboardButton(
+            text=texts.t("TARIFFS_BACK", "⬅️ Назад"),
+            callback_data="subscription_tariffs",
+        )
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def get_tariff_upgrade_keyboard(
+    plan_code: str,
+    delta_kopeks: int,
+    plan_display_name: str,
+    language: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    """Single confirm button + back. The delta is prorated to remaining days."""
+    texts = get_texts(language)
+    if delta_kopeks <= 0:
+        label = texts.t(
+            "TARIFF_UPGRADE_FREE_BUTTON",
+            "Перейти на {name} (бесплатно)",
+        ).format(name=plan_display_name)
+    else:
+        label = texts.t(
+            "TARIFF_UPGRADE_BUTTON",
+            "Доплатить {delta} → {name}",
+        ).format(delta=_format_kopeks_short(delta_kopeks), name=plan_display_name)
+
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"tariff_upgrade_confirm:{plan_code}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=texts.t("TARIFFS_BACK", "⬅️ Назад"),
+                callback_data="subscription_tariffs",
+            )
+        ],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def get_renew_periods_keyboard(
+    plan_id: int,
+    period_prices: dict,
+    language: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    """Renew at the current tier; one row per available period plus a "change tariff" entry."""
+    texts = get_texts(language)
+    rows: List[List[InlineKeyboardButton]] = []
+
+    for period_days in (30, 90, 180, 360, 720):
+        price_kopeks = period_prices.get(period_days)
+        if price_kopeks is None:
+            continue
+        label = texts.t(
+            _TARIFF_PERIOD_LABEL_KEYS[period_days],
+            _TARIFF_PERIOD_LABEL_FALLBACKS[period_days],
+        ).format(price=_format_kopeks_short(price_kopeks))
+        rows.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"tariff_renew:{plan_id}:{period_days}",
+            )
+        ])
+
+    rows.append([
+        InlineKeyboardButton(
+            text=texts.t("RENEW_CHANGE_TARIFF", "🔀 Сменить тариф"),
+            callback_data="subscription_tariffs",
+        )
+    ])
+    rows.append([
+        InlineKeyboardButton(
+            text=texts.t("TARIFFS_BACK", "⬅️ Назад"),
+            callback_data="menu_subscription",
+        )
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
 
 def get_payment_methods_keyboard_with_cart(
     language: str = "ru",
@@ -2393,9 +2610,13 @@ def get_devices_management_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_updated_subscription_settings_keyboard(language: str = DEFAULT_LANGUAGE, show_countries_management: bool = True) -> InlineKeyboardMarkup:
+def get_updated_subscription_settings_keyboard(
+    language: str = DEFAULT_LANGUAGE,
+    show_countries_management: bool = True,
+    is_tiered: bool = False,
+) -> InlineKeyboardMarkup:
     from app.config import settings
-    
+
     texts = get_texts(language)
     keyboard = []
 
@@ -2412,20 +2633,22 @@ def get_updated_subscription_settings_keyboard(language: str = DEFAULT_LANGUAGE,
             InlineKeyboardButton(text=texts.t("SWITCH_TRAFFIC_BUTTON", "🔄 Переключить трафик"), callback_data="subscription_switch_traffic")
         ])
 
-    if settings.is_devices_selection_enabled():
+    # On tiered plans device count is fixed by the plan, and the management entry lives on the Profile page.
+    if not is_tiered:
+        if settings.is_devices_selection_enabled():
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=texts.t("CHANGE_DEVICES_BUTTON", "📱 Изменить устройства"),
+                    callback_data="subscription_change_devices"
+                )
+            ])
+
         keyboard.append([
             InlineKeyboardButton(
-                text=texts.t("CHANGE_DEVICES_BUTTON", "📱 Изменить устройства"),
-                callback_data="subscription_change_devices"
+                text=texts.t("MANAGE_DEVICES_BUTTON", "🔧 Управление устройствами"),
+                callback_data="subscription_manage_devices"
             )
         ])
-
-    keyboard.append([
-        InlineKeyboardButton(
-            text=texts.t("MANAGE_DEVICES_BUTTON", "🔧 Управление устройствами"),
-            callback_data="subscription_manage_devices"
-        )
-    ])
 
     keyboard.append([
         InlineKeyboardButton(text=texts.BACK, callback_data="menu_subscription")
@@ -3248,17 +3471,30 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
     buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_profile_keyboard(language: str = DEFAULT_LANGUAGE, balance_kopeks: int = 0) -> InlineKeyboardMarkup:
+def get_profile_keyboard(
+    language: str = DEFAULT_LANGUAGE,
+    balance_kopeks: int = 0,
+    has_subscription: bool = False,
+) -> InlineKeyboardMarkup:
     """
     Экран 9: Профиль пользователя
     """
     texts = get_texts(language)
-    return InlineKeyboardMarkup(inline_keyboard=[
+    rows = []
+    if has_subscription:
+        rows.append([
+            InlineKeyboardButton(
+                text=texts.t("PROFILE_DEVICES_BUTTON", "📱 Устройства"),
+                callback_data="subscription_manage_devices",
+            )
+        ])
+    rows.extend([
         [InlineKeyboardButton(text=texts.t("MENU_PROMOCODE", "🎫 Ввести промокод"), callback_data="profile_promo")],
         [InlineKeyboardButton(text=texts.t("MENU_LANGUAGE", "🌐 Язык/Language"), callback_data="profile_language")],
         [InlineKeyboardButton(text=texts.t("MENU_INFO", "ℹ️ Инфо"), callback_data="menu_info")],
-        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
+        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")],
     ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def get_referral_keyboard(referral_link: str, invite_text: str = "", language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """

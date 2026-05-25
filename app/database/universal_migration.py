@@ -4818,6 +4818,393 @@ async def create_partner_link_redemptions_table() -> bool:
         return False
 
 
+async def create_subscription_plans_table() -> bool:
+    """Creates subscription_plans table for tiered subscription system."""
+    table_exists = await check_table_exists('subscription_plans')
+    if table_exists:
+        logger.info("ℹ️ Таблица subscription_plans уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE subscription_plans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code VARCHAR(16) NOT NULL,
+                    display_name VARCHAR(64) NOT NULL,
+                    device_limit INTEGER NOT NULL DEFAULT 1,
+                    traffic_limit_gb INTEGER NOT NULL DEFAULT 0,
+                    traffic_reset_strategy VARCHAR(16) NOT NULL DEFAULT 'NO_RESET',
+                    custom_app_only BOOLEAN NOT NULL DEFAULT 0,
+                    priority_support BOOLEAN NOT NULL DEFAULT 0,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    is_active BOOLEAN NOT NULL DEFAULT 1,
+                    description_md TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_subscription_plans_code UNIQUE (code)
+                );
+
+                CREATE INDEX ix_subscription_plans_code ON subscription_plans(code);
+                CREATE INDEX ix_subscription_plans_is_active ON subscription_plans(is_active);
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS subscription_plans (
+                    id SERIAL PRIMARY KEY,
+                    code VARCHAR(16) NOT NULL,
+                    display_name VARCHAR(64) NOT NULL,
+                    device_limit INTEGER NOT NULL DEFAULT 1,
+                    traffic_limit_gb INTEGER NOT NULL DEFAULT 0,
+                    traffic_reset_strategy VARCHAR(16) NOT NULL DEFAULT 'NO_RESET',
+                    custom_app_only BOOLEAN NOT NULL DEFAULT FALSE,
+                    priority_support BOOLEAN NOT NULL DEFAULT FALSE,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    description_md TEXT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_subscription_plans_code UNIQUE (code)
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_subscription_plans_code ON subscription_plans(code);
+                CREATE INDEX IF NOT EXISTS ix_subscription_plans_is_active ON subscription_plans(is_active);
+                """
+            elif db_type == 'mysql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS subscription_plans (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    code VARCHAR(16) NOT NULL,
+                    display_name VARCHAR(64) NOT NULL,
+                    device_limit INT NOT NULL DEFAULT 1,
+                    traffic_limit_gb INT NOT NULL DEFAULT 0,
+                    traffic_reset_strategy VARCHAR(16) NOT NULL DEFAULT 'NO_RESET',
+                    custom_app_only BOOLEAN NOT NULL DEFAULT FALSE,
+                    priority_support BOOLEAN NOT NULL DEFAULT FALSE,
+                    sort_order INT NOT NULL DEFAULT 0,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    description_md TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_subscription_plans_code UNIQUE (code)
+                );
+
+                CREATE INDEX ix_subscription_plans_code ON subscription_plans(code);
+                CREATE INDEX ix_subscription_plans_is_active ON subscription_plans(is_active);
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица subscription_plans успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы subscription_plans: {e}")
+        return False
+
+
+async def create_subscription_plan_prices_table() -> bool:
+    """Creates subscription_plan_prices table (price per plan × period)."""
+    table_exists = await check_table_exists('subscription_plan_prices')
+    if table_exists:
+        logger.info("ℹ️ Таблица subscription_plan_prices уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE subscription_plan_prices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    plan_id INTEGER NOT NULL,
+                    period_days INTEGER NOT NULL,
+                    price_kopeks INTEGER NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_plan_period UNIQUE (plan_id, period_days),
+                    FOREIGN KEY(plan_id) REFERENCES subscription_plans(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX ix_subscription_plan_prices_plan_id ON subscription_plan_prices(plan_id);
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS subscription_plan_prices (
+                    id SERIAL PRIMARY KEY,
+                    plan_id INTEGER NOT NULL REFERENCES subscription_plans(id) ON DELETE CASCADE,
+                    period_days INTEGER NOT NULL,
+                    price_kopeks INTEGER NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_plan_period UNIQUE (plan_id, period_days)
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_subscription_plan_prices_plan_id ON subscription_plan_prices(plan_id);
+                """
+            elif db_type == 'mysql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS subscription_plan_prices (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    plan_id INT NOT NULL,
+                    period_days INT NOT NULL,
+                    price_kopeks INT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_plan_period UNIQUE (plan_id, period_days),
+                    FOREIGN KEY(plan_id) REFERENCES subscription_plans(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX ix_subscription_plan_prices_plan_id ON subscription_plan_prices(plan_id);
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица subscription_plan_prices успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы subscription_plan_prices: {e}")
+        return False
+
+
+async def add_plan_columns_to_subscriptions() -> bool:
+    """Adds Subscription.plan_id (nullable FK) and Subscription.plan_period_days columns.
+
+    plan_id NULL means legacy à-la-carte subscription. Non-null = new tiered plan.
+    """
+    try:
+        db_type = await get_database_type()
+
+        plan_id_exists = await check_column_exists('subscriptions', 'plan_id')
+        if not plan_id_exists:
+            async with engine.begin() as conn:
+                if db_type == 'sqlite':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN plan_id INTEGER NULL "
+                        "REFERENCES subscription_plans(id) ON DELETE SET NULL"
+                    ))
+                elif db_type == 'postgresql':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN plan_id INTEGER NULL "
+                        "REFERENCES subscription_plans(id) ON DELETE SET NULL"
+                    ))
+                elif db_type == 'mysql':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN plan_id INT NULL"
+                    ))
+                    try:
+                        await conn.execute(text(
+                            "ALTER TABLE subscriptions ADD CONSTRAINT fk_subscriptions_plan_id "
+                            "FOREIGN KEY (plan_id) REFERENCES subscription_plans(id) ON DELETE SET NULL"
+                        ))
+                    except Exception as fk_err:
+                        logger.warning(f"FK fk_subscriptions_plan_id не создан: {fk_err}")
+                else:
+                    logger.error(f"Неподдерживаемый тип БД для добавления plan_id: {db_type}")
+                    return False
+            logger.info("✅ Добавлена колонка plan_id в таблицу subscriptions")
+        else:
+            logger.info("ℹ️ Колонка subscriptions.plan_id уже существует")
+
+        if not await check_index_exists('subscriptions', 'ix_subscriptions_plan_id'):
+            try:
+                async with engine.begin() as conn:
+                    if db_type == 'postgresql':
+                        await conn.execute(text(
+                            "CREATE INDEX IF NOT EXISTS ix_subscriptions_plan_id ON subscriptions(plan_id)"
+                        ))
+                    else:
+                        await conn.execute(text(
+                            "CREATE INDEX ix_subscriptions_plan_id ON subscriptions(plan_id)"
+                        ))
+                logger.info("✅ Индекс ix_subscriptions_plan_id создан")
+            except Exception as ix_err:
+                logger.warning(f"Не удалось создать индекс ix_subscriptions_plan_id: {ix_err}")
+
+        period_days_exists = await check_column_exists('subscriptions', 'plan_period_days')
+        if not period_days_exists:
+            async with engine.begin() as conn:
+                if db_type == 'sqlite':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN plan_period_days INTEGER NULL"
+                    ))
+                elif db_type == 'postgresql':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN plan_period_days INTEGER NULL"
+                    ))
+                elif db_type == 'mysql':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN plan_period_days INT NULL"
+                    ))
+            logger.info("✅ Добавлена колонка plan_period_days в таблицу subscriptions")
+        else:
+            logger.info("ℹ️ Колонка subscriptions.plan_period_days уже существует")
+
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления plan_id/plan_period_days: {e}")
+        return False
+
+
+# Default tiered-plan catalogue. Edit before deploy or via SQL afterwards;
+# seed_subscription_plans() only inserts plans/prices that are not present yet.
+_SUBSCRIPTION_PLAN_SEED = [
+    {
+        "code": "app",
+        "display_name": "App",
+        "device_limit": 1,
+        "traffic_limit_gb": 30,
+        "traffic_reset_strategy": "MONTH",
+        "custom_app_only": True,
+        "priority_support": False,
+        "sort_order": 10,
+        "description_md": (
+            "App (только для Android)\n"
+            "• 1 устройство\n"
+            "• VPN только для приложений\n"
+            "• 30 ГБ/мес."
+        ),
+        "prices": {30: 12000, 90: 30000, 180: 54000, 360: 99000, 720: 180000},
+    },
+    {
+        "code": "solo",
+        "display_name": "Solo",
+        "device_limit": 1,
+        "traffic_limit_gb": 0,
+        "traffic_reset_strategy": "NO_RESET",
+        "custom_app_only": False,
+        "priority_support": False,
+        "sort_order": 20,
+        "description_md": (
+            "Solo\n"
+            "• 1 устройство\n"
+            "• полный VPN и все обходы\n"
+            "• ♾️ трафик"
+        ),
+        "prices": {30: 27000, 90: 72000, 180: 132000, 360: 240000, 720: 432000},
+    },
+    {
+        "code": "plus",
+        "display_name": "Plus",
+        "device_limit": 2,
+        "traffic_limit_gb": 0,
+        "traffic_reset_strategy": "NO_RESET",
+        "custom_app_only": False,
+        "priority_support": False,
+        "sort_order": 30,
+        "description_md": (
+            "Plus\n"
+            "• 2 устройства\n"
+            "• полный VPN и все обходы\n"
+            "• ♾️ трафик"
+        ),
+        "prices": {30: 35000, 90: 96000, 180: 174000, 360: 312000, 720: 552000},
+    },
+    {
+        "code": "pro",
+        "display_name": "Pro",
+        "device_limit": 10,
+        "traffic_limit_gb": 0,
+        "traffic_reset_strategy": "NO_RESET",
+        "custom_app_only": False,
+        "priority_support": True,
+        "sort_order": 40,
+        "description_md": (
+            "Pro\n"
+            "• 10 устройств\n"
+            "• полный VPN и все обходы\n"
+            "• ♾️ трафик\n"
+            "• приоритетные серверы и поддержка"
+        ),
+        "prices": {30: 49000, 90: 132000, 180: 234000, 360: 432000, 720: 768000},
+    },
+]
+
+
+async def seed_subscription_plans() -> bool:
+    """Insert default tiered plans + prices if absent. Idempotent."""
+    try:
+        async with engine.begin() as conn:
+            for plan in _SUBSCRIPTION_PLAN_SEED:
+                code = plan["code"]
+                existing = await conn.execute(
+                    text("SELECT id FROM subscription_plans WHERE code = :code"),
+                    {"code": code},
+                )
+                row = existing.fetchone()
+                if row:
+                    plan_id = row[0]
+                else:
+                    await conn.execute(
+                        text(
+                            "INSERT INTO subscription_plans "
+                            "(code, display_name, device_limit, traffic_limit_gb, traffic_reset_strategy, "
+                            "custom_app_only, priority_support, sort_order, is_active, description_md) "
+                            "VALUES (:code, :display_name, :device_limit, :traffic_limit_gb, :traffic_reset_strategy, "
+                            ":custom_app_only, :priority_support, :sort_order, :is_active, :description_md)"
+                        ),
+                        {
+                            "code": code,
+                            "display_name": plan["display_name"],
+                            "device_limit": plan["device_limit"],
+                            "traffic_limit_gb": plan["traffic_limit_gb"],
+                            "traffic_reset_strategy": plan["traffic_reset_strategy"],
+                            "custom_app_only": plan["custom_app_only"],
+                            "priority_support": plan["priority_support"],
+                            "sort_order": plan["sort_order"],
+                            "is_active": True,
+                            "description_md": plan["description_md"],
+                        },
+                    )
+                    new_row = await conn.execute(
+                        text("SELECT id FROM subscription_plans WHERE code = :code"),
+                        {"code": code},
+                    )
+                    plan_id = new_row.fetchone()[0]
+                    logger.info(f"  → План '{code}' создан (id={plan_id})")
+
+                for period_days, price_kopeks in plan["prices"].items():
+                    existing_price = await conn.execute(
+                        text(
+                            "SELECT id FROM subscription_plan_prices "
+                            "WHERE plan_id = :plan_id AND period_days = :period_days"
+                        ),
+                        {"plan_id": plan_id, "period_days": period_days},
+                    )
+                    if existing_price.fetchone():
+                        continue
+                    await conn.execute(
+                        text(
+                            "INSERT INTO subscription_plan_prices "
+                            "(plan_id, period_days, price_kopeks) "
+                            "VALUES (:plan_id, :period_days, :price_kopeks)"
+                        ),
+                        {
+                            "plan_id": plan_id,
+                            "period_days": period_days,
+                            "price_kopeks": price_kopeks,
+                        },
+                    )
+                    logger.info(
+                        f"  → Цена '{code}' × {period_days} дн. = {price_kopeks} коп. добавлена"
+                    )
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка сидирования subscription_plans: {e}")
+        return False
+
+
 async def run_universal_migration():
     logger.info("=== НАЧАЛО УНИВЕРСАЛЬНОЙ МИГРАЦИИ ===")
     
@@ -5294,6 +5681,35 @@ async def run_universal_migration():
             logger.info("✅ Таблица partner_link_redemptions готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей partner_link_redemptions")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ SUBSCRIPTION_PLANS ===")
+        plans_table_ready = await create_subscription_plans_table()
+        if plans_table_ready:
+            logger.info("✅ Таблица subscription_plans готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей subscription_plans")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ SUBSCRIPTION_PLAN_PRICES ===")
+        plan_prices_ready = await create_subscription_plan_prices_table()
+        if plan_prices_ready:
+            logger.info("✅ Таблица subscription_plan_prices готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей subscription_plan_prices")
+
+        logger.info("=== ДОБАВЛЕНИЕ plan_id/plan_period_days В SUBSCRIPTIONS ===")
+        plan_columns_ready = await add_plan_columns_to_subscriptions()
+        if plan_columns_ready:
+            logger.info("✅ Колонки subscriptions.plan_id и plan_period_days готовы")
+        else:
+            logger.warning("⚠️ Проблемы с колонками plan_id/plan_period_days")
+
+        if plans_table_ready and plan_prices_ready:
+            logger.info("=== СИДИРОВАНИЕ ТАРИФНЫХ ПЛАНОВ ===")
+            plans_seeded = await seed_subscription_plans()
+            if plans_seeded:
+                logger.info("✅ Тарифные планы засеяны")
+            else:
+                logger.warning("⚠️ Проблемы с сидированием тарифных планов")
 
         async with engine.begin() as conn:
             total_subs = await conn.execute(text("SELECT COUNT(*) FROM subscriptions"))

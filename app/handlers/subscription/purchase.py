@@ -208,14 +208,9 @@ async def show_subscription_info(
     subscription = db_user.subscription
 
     if not subscription:
-        await callback.message.edit_text(
-            texts.SUBSCRIPTION_NONE,
-            reply_markup=get_subscription_keyboard(
-                db_user.language,
-                has_subscription=False,
-            )
-        )
-        await callback.answer()
+        # No subscription — route to the new tiered tariffs page.
+        from app.handlers.subscription.tariffs import show_tariffs_page
+        await show_tariffs_page(callback, db_user, db)
         return
 
     from app.database.crud.subscription import check_and_update_subscription_status
@@ -358,6 +353,40 @@ async def show_subscription_info(
             "📱 Скопируйте ссылку и добавьте в ваше VPN приложение",
         )
 
+    plan_custom_app_only = bool(
+        getattr(subscription, "plan", None)
+        and getattr(subscription.plan, "custom_app_only", False)
+    )
+
+    # Header for tiered subscribers
+    if (
+        actual_status in ("paid_active", "trial_active")
+        and getattr(subscription, "plan_id", None) is not None
+        and getattr(subscription, "plan", None) is not None
+    ):
+        from app.services.plan_pricing_service import get_current_plan_price_for_period
+
+        plan = subscription.plan
+        period_days = subscription.plan_period_days or 30
+        period_label = {
+            30: texts.t("PLAN_PERIOD_LABEL_1M", "1 мес"),
+            90: texts.t("PLAN_PERIOD_LABEL_3M", "3 мес"),
+            180: texts.t("PLAN_PERIOD_LABEL_6M", "6 мес"),
+            360: texts.t("PLAN_PERIOD_LABEL_1Y", "1 год"),
+            720: texts.t("PLAN_PERIOD_LABEL_2Y", "2 года"),
+        }.get(period_days, f"{period_days} дн.")
+        plan_price = await get_current_plan_price_for_period(db, subscription)
+        if plan_price is not None:
+            header_line = texts.t(
+                "SUBSCRIPTION_PLAN_HEADER",
+                "Тариф: <b>{name}</b> — {price} за {period}",
+            ).format(
+                name=plan.display_name,
+                price=f"{int(round(plan_price / 100))}₽",
+                period=period_label,
+            )
+            message = f"{header_line}\n\n{message}"
+
     await callback.message.edit_text(
         message,
         reply_markup=get_subscription_keyboard(
@@ -366,6 +395,7 @@ async def show_subscription_info(
             is_trial=subscription.is_trial,
             subscription=subscription,
             subscription_is_expired=(actual_status == "expired"),
+            plan_custom_app_only=plan_custom_app_only,
         ),
         parse_mode="HTML"
     )
@@ -2534,10 +2564,13 @@ async def handle_subscription_settings(
     )
 
     show_countries = await _should_show_countries_management(db_user)
+    is_tiered = getattr(subscription, "plan_id", None) is not None
 
     await callback.message.edit_text(
         settings_text,
-        reply_markup=get_updated_subscription_settings_keyboard(db_user.language, show_countries),
+        reply_markup=get_updated_subscription_settings_keyboard(
+            db_user.language, show_countries, is_tiered=is_tiered
+        ),
         parse_mode="HTML"
     )
     await callback.answer()
