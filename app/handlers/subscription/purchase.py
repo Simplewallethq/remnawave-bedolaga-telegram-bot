@@ -2671,6 +2671,7 @@ async def handle_subscription_menu(
             language=db_user.language,
             balance_kopeks=db_user.balance_kopeks,
             autopay_enabled=bool(subscription.autopay_enabled),
+            has_plan=subscription.plan_id is not None,
         ),
         parse_mode="HTML",
         photo_path=image_path
@@ -2755,6 +2756,13 @@ async def handle_sub_add_days(
     db: AsyncSession
 ):
     subscription = getattr(db_user, "subscription", None)
+
+    # Tiered-plan users renew at their plan's price ladder, not the legacy à-la-carte calc.
+    if subscription is not None and subscription.plan_id is not None:
+        from app.handlers.subscription.tariffs import show_renew_current
+        await show_renew_current(callback, db_user, db)
+        return
+
     periods = settings.get_available_renewal_periods()
 
     prices: Dict[int, int] = {}

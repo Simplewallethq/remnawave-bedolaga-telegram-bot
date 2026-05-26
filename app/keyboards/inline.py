@@ -3250,9 +3250,13 @@ def get_subscription_menu_keyboard(
     language: str = DEFAULT_LANGUAGE,
     balance_kopeks: int = 0,
     autopay_enabled: bool = False,
+    has_plan: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     Экран 5: Меню подписки
+
+    has_plan=True — тарифный пользователь (App/Solo/Plus/Pro). Лимит устройств
+    задан тарифом, поэтому кнопку «Устройства» прячем.
     """
     texts = get_texts(language)
 
@@ -3272,19 +3276,26 @@ def get_subscription_menu_keyboard(
             "🔄 Автопродление: выключено",
         )
 
-    buttons = [
-        [InlineKeyboardButton(text=balance_button_text, callback_data="balance_topup")],
-        [InlineKeyboardButton(text=autopay_button_text, callback_data="subscription_autopay")],
-        [
-            InlineKeyboardButton(
-                text=texts.t("SUB_ADD_DAYS_SHORT_BUTTON", "➕ Продлить"),
-                callback_data="sub_add_days",
-            ),
+    extend_button = InlineKeyboardButton(
+        text=texts.t("SUB_ADD_DAYS_SHORT_BUTTON", "➕ Продлить"),
+        callback_data="sub_add_days",
+    )
+
+    if has_plan:
+        action_row = [extend_button]
+    else:
+        action_row = [
+            extend_button,
             InlineKeyboardButton(
                 text=texts.t("SUB_ADD_DEVICES_SHORT_BUTTON", "📱 Устройства"),
                 callback_data="sub_add_devices",
             ),
-        ],
+        ]
+
+    buttons = [
+        [InlineKeyboardButton(text=balance_button_text, callback_data="balance_topup")],
+        [InlineKeyboardButton(text=autopay_button_text, callback_data="subscription_autopay")],
+        action_row,
     ]
 
     buttons.append([
