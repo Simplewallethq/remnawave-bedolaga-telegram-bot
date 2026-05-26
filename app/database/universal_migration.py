@@ -5069,6 +5069,7 @@ _SUBSCRIPTION_PLAN_SEED = [
         "custom_app_only": True,
         "priority_support": False,
         "sort_order": 10,
+        "is_active": False,
         "description_md": (
             "App (только для Android)\n"
             "• 1 устройство\n"
@@ -5092,7 +5093,7 @@ _SUBSCRIPTION_PLAN_SEED = [
             "• полный VPN и все обходы\n"
             "• ♾️ трафик"
         ),
-        "prices": {30: 27000, 90: 72000, 180: 132000, 360: 240000, 720: 432000},
+        "prices": {30: 22000, 90: 60000, 180: 108000, 360: 192000, 720: 336000},
     },
     {
         "code": "plus",
@@ -5109,7 +5110,7 @@ _SUBSCRIPTION_PLAN_SEED = [
             "• полный VPN и все обходы\n"
             "• ♾️ трафик"
         ),
-        "prices": {30: 35000, 90: 96000, 180: 174000, 360: 312000, 720: 552000},
+        "prices": {30: 29000, 90: 81000, 180: 150000, 360: 264000, 720: 456000},
     },
     {
         "code": "pro",
@@ -5127,7 +5128,7 @@ _SUBSCRIPTION_PLAN_SEED = [
             "• ♾️ трафик\n"
             "• приоритетные серверы и поддержка"
         ),
-        "prices": {30: 49000, 90: 132000, 180: 234000, 360: 432000, 720: 768000},
+        "prices": {30: 39000, 90: 108000, 180: 198000, 360: 348000, 720: 600000},
     },
 ]
 
@@ -5163,7 +5164,7 @@ async def seed_subscription_plans() -> bool:
                             "custom_app_only": plan["custom_app_only"],
                             "priority_support": plan["priority_support"],
                             "sort_order": plan["sort_order"],
-                            "is_active": True,
+                            "is_active": plan.get("is_active", True),
                             "description_md": plan["description_md"],
                         },
                     )
