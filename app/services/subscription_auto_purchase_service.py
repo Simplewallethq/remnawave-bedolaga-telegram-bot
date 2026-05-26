@@ -613,6 +613,180 @@ async def _auto_add_devices(
     return True
 
 
+async def _notify_auto_tariff_success(bot: Bot, user: User, period_label: str) -> None:
+    """Send the user the same kind of success card the legacy auto-purchase sends."""
+    texts = get_texts(getattr(user, "language", "ru"))
+    try:
+        auto_message = texts.t(
+            "AUTO_PURCHASE_SUBSCRIPTION_SUCCESS",
+            "✅ Subscription purchased automatically after balance top-up ({period}).",
+        ).format(period=period_label)
+        hint_message = texts.t(
+            "AUTO_PURCHASE_SUBSCRIPTION_HINT",
+            "Open the ‘My subscription’ section to access your link.",
+        )
+        full_message = "\n\n".join(
+            part.strip() for part in [auto_message, hint_message] if part and part.strip()
+        )
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 My subscription"),
+                        callback_data="subscription",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "🏠 Main menu"),
+                        callback_data="back_to_menu",
+                    )
+                ],
+            ]
+        )
+
+        logo_path = get_logo_for_bot(bot.id if bot else None)
+        if settings.ENABLE_LOGO_MODE and logo_path.exists():
+            await bot.send_photo(
+                chat_id=user.telegram_id,
+                photo=FSInputFile(logo_path),
+                caption=full_message,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+        else:
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text=full_message,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+    except Exception as error:  # pragma: no cover - defensive logging
+        logger.error(
+            "⚠️ Автопокупка тарифа: не удалось уведомить пользователя %s: %s",
+            user.telegram_id,
+            error,
+        )
+
+
+async def _auto_tariff_purchase(
+    db: AsyncSession,
+    user: User,
+    cart_data: dict,
+    *,
+    bot: Optional[Bot] = None,
+) -> bool:
+    """Finalize a tiered-plan (App/Solo/Plus/Pro) purchase/renewal/upgrade from a saved intent
+    cart after a balance top-up. Mirrors the legacy à-la-carte auto-purchase."""
+    from app.database.crud.user import get_user_by_id
+    from app.handlers.subscription.tariffs import (
+        _resolve_active_subscription,
+        finalize_tariff_purchase,
+        finalize_tariff_renewal,
+        finalize_tier_switch,
+    )
+    from app.services.plan_pricing_service import (
+        calculate_upgrade_delta,
+        get_current_plan_price_for_period,
+        get_plan_by_id,
+        get_plan_price,
+    )
+
+    tariff_op = (cart_data.get("tariff_op") or "purchase").lower()
+    plan_id = _safe_int(cart_data.get("plan_id"))
+    period_days = _safe_int(cart_data.get("period_days"))
+    if plan_id <= 0 or period_days <= 0:
+        logger.warning(
+            "🔁 Автопокупка тарифа: некорректные plan_id/period в корзине пользователя %s",
+            user.telegram_id,
+        )
+        return False
+
+    # Re-fetch the user so the subscription relationship is eagerly loaded —
+    # the finalize_* helpers read user.subscription directly.
+    fresh_user = await get_user_by_id(db, user.id)
+    if fresh_user is None:
+        return False
+    user = fresh_user
+
+    plan = await get_plan_by_id(db, plan_id)
+    if not plan or not plan.is_active:
+        logger.warning("🔁 Автопокупка тарифа: план %s недоступен", plan_id)
+        return False
+
+    subscription = None
+    try:
+        if tariff_op == "upgrade":
+            active_sub = await _resolve_active_subscription(user)
+            if not active_sub:
+                logger.info(
+                    "🔁 Автопокупка тарифа: нет активной подписки для апгрейда %s",
+                    user.telegram_id,
+                )
+                return False
+            switch_period = active_sub.plan_period_days or period_days
+            new_price = await get_plan_price(db, plan.id, switch_period)
+            current_price = await get_current_plan_price_for_period(db, active_sub)
+            if new_price is None:
+                return False
+            delta = calculate_upgrade_delta(active_sub, plan, new_price, current_price)
+            if delta > 0 and user.balance_kopeks < delta:
+                logger.info(
+                    "🔁 Автопокупка тарифа: недостаточно средств для апгрейда %s (%s < %s)",
+                    user.telegram_id, user.balance_kopeks, delta,
+                )
+                return False
+            subscription = await finalize_tier_switch(db, user, active_sub, plan, delta)
+
+        elif tariff_op == "renew":
+            active_sub = await _resolve_active_subscription(user)
+            if not active_sub or active_sub.plan_id != plan.id:
+                logger.info(
+                    "🔁 Автопокупка тарифа: нет совпадающей активной подписки для продления %s",
+                    user.telegram_id,
+                )
+                return False
+            price = await get_plan_price(db, plan.id, period_days)
+            if price is None or user.balance_kopeks < price:
+                return False
+            result = await finalize_tariff_renewal(db, user, active_sub, plan, period_days, price)
+            if result is None:
+                return False
+            subscription = result[0]
+
+        else:  # purchase
+            price = await get_plan_price(db, plan.id, period_days)
+            if price is None or user.balance_kopeks < price:
+                return False
+            result = await finalize_tariff_purchase(db, user, plan, period_days, price)
+            if result is None:
+                return False
+            subscription = result[0]
+    except Exception as error:  # pragma: no cover - defensive logging
+        logger.error(
+            "❌ Автопокупка тарифа: ошибка оформления для пользователя %s: %s",
+            user.telegram_id,
+            error,
+            exc_info=True,
+        )
+        return False
+
+    await user_cart_service.delete_user_cart(user.id)
+    await clear_subscription_checkout_draft(user.id)
+
+    if bot and subscription is not None:
+        period_label = format_period_description(period_days, getattr(user, "language", "ru"))
+        await _notify_auto_tariff_success(bot, user, period_label)
+
+    logger.info(
+        "✅ Автопокупка тарифа (%s) оформлена для пользователя %s",
+        tariff_op,
+        user.telegram_id,
+    )
+    return True
+
+
 async def auto_purchase_saved_cart_after_topup(
     db: AsyncSession,
     user: User,
@@ -647,6 +821,8 @@ async def auto_purchase_saved_cart_after_topup(
         return await _auto_extend_subscription(db, user, cart_data, bot=bot)
     elif cart_mode == "add_devices":
         return await _auto_add_devices(db, user, cart_data, bot=bot)
+    elif cart_mode == "tariff":
+        return await _auto_tariff_purchase(db, user, cart_data, bot=bot)
 
     try:
         prepared = await _prepare_auto_purchase(db, user, cart_data)

@@ -77,6 +77,43 @@ async def _resolve_active_subscription(db_user: User) -> Optional[Subscription]:
     return sub
 
 
+async def _save_tariff_intent_cart(
+    db_user: User,
+    *,
+    tariff_op: str,
+    plan: SubscriptionPlan,
+    period_days: int,
+    total_price: int,
+) -> None:
+    """Persist an intent cart so the tariff purchase auto-completes after a balance top-up.
+
+    Mirrors the legacy à-la-carte intent flow: any successful top-up triggers
+    auto_purchase_saved_cart_after_topup(), which reads this cart and finalizes the buy.
+    tariff_op is one of: purchase | renew | upgrade.
+    """
+    from app.services.user_cart_service import user_cart_service
+
+    cart_data = {
+        "cart_mode": "tariff",
+        "tariff_op": tariff_op,
+        "plan_id": plan.id,
+        "plan_code": plan.code,
+        "period_days": period_days,
+        "total_price": total_price,
+        "intent": True,
+    }
+    try:
+        await user_cart_service.save_user_cart(db_user.id, cart_data, ttl=3600)
+        logger.info(
+            "Сохранён intent тарифа для пользователя %s: %s %s/%sд",
+            db_user.telegram_id, tariff_op, plan.code, period_days,
+        )
+    except Exception as e:
+        logger.warning(
+            "Не удалось сохранить intent тарифа для %s: %s", db_user.telegram_id, e
+        )
+
+
 async def show_tariffs_page(
     callback: types.CallbackQuery,
     db_user: User,
@@ -248,6 +285,181 @@ async def _show_tier_switch(
     await callback.answer()
 
 
+async def finalize_tariff_purchase(
+    db: AsyncSession,
+    db_user: User,
+    plan: SubscriptionPlan,
+    period_days: int,
+    price_kopeks: int,
+) -> Optional[Tuple[Subscription, object, bool]]:
+    """Charge price, create/replace the subscription with the tariff, activate in Remnawave.
+
+    Caller MUST verify balance >= price_kopeks first. Used by both the interactive purchase
+    handler and the post-top-up auto-purchase. Returns (subscription, transaction,
+    was_trial_conversion) or None if the balance deduction failed.
+    """
+    texts = get_texts(db_user.language)
+    description = texts.t(
+        "TARIFF_PURCHASE_INVOICE_DESCRIPTION",
+        "Подписка {name} на {period}",
+    ).format(name=plan.display_name, period=_period_label(period_days, texts))
+
+    ok = await subtract_user_balance(
+        db, db_user, price_kopeks, description=description, create_transaction=False
+    )
+    if not ok:
+        return None
+
+    transaction = await create_transaction(
+        db,
+        user_id=db_user.id,
+        type=TransactionType.SUBSCRIPTION_PAYMENT,
+        amount_kopeks=price_kopeks,
+        description=description,
+    )
+
+    connected_squads = await _all_active_server_uuids(db)
+    now = datetime.utcnow()
+    end_date = now + timedelta(days=period_days)
+
+    # Subscription.user_id is UNIQUE — for trial / expired-legacy / expired-tier users
+    # we replace the existing row in-place instead of creating a new one.
+    existing_sub = db_user.subscription
+    was_trial_conversion = bool(existing_sub and existing_sub.is_trial)
+
+    if existing_sub is not None:
+        existing_sub.status = SubscriptionStatus.ACTIVE.value
+        existing_sub.is_trial = False
+        existing_sub.start_date = now
+        existing_sub.end_date = end_date
+        existing_sub.traffic_limit_gb = plan.traffic_limit_gb
+        existing_sub.device_limit = plan.device_limit
+        existing_sub.connected_squads = connected_squads
+        existing_sub.plan_id = plan.id
+        existing_sub.plan_period_days = period_days
+        new_sub = existing_sub
+    else:
+        new_sub = Subscription(
+            user_id=db_user.id,
+            status=SubscriptionStatus.ACTIVE.value,
+            is_trial=False,
+            start_date=now,
+            end_date=end_date,
+            traffic_limit_gb=plan.traffic_limit_gb,
+            device_limit=plan.device_limit,
+            connected_squads=connected_squads,
+            autopay_enabled=False,
+            autopay_days_before=3,
+            plan_id=plan.id,
+            plan_period_days=period_days,
+        )
+        db.add(new_sub)
+
+    db_user.has_made_first_topup = True
+    db_user.has_had_paid_subscription = True
+    await db.commit()
+    await db.refresh(new_sub)
+    await db.refresh(db_user)
+
+    try:
+        await SubscriptionService().create_remnawave_user(db, new_sub)
+    except Exception as e:
+        logger.warning(f"Не удалось синхронизировать новую подписку {new_sub.id}: {e}")
+
+    return new_sub, transaction, was_trial_conversion
+
+
+async def finalize_tariff_renewal(
+    db: AsyncSession,
+    db_user: User,
+    subscription: Subscription,
+    plan: SubscriptionPlan,
+    period_days: int,
+    price_kopeks: int,
+) -> Optional[Tuple[Subscription, object, datetime]]:
+    """Charge price, extend the subscription by period_days, re-sync Remnawave.
+
+    Caller MUST verify balance >= price_kopeks first. Returns (subscription, transaction,
+    old_end_date) or None if the balance deduction failed.
+    """
+    texts = get_texts(db_user.language)
+    description = texts.t(
+        "TARIFF_RENEW_INVOICE_DESCRIPTION",
+        "Продление подписки {name} на {period}",
+    ).format(name=plan.display_name, period=_period_label(period_days, texts))
+
+    ok = await subtract_user_balance(
+        db, db_user, price_kopeks, description=description, create_transaction=False
+    )
+    if not ok:
+        return None
+
+    transaction = await create_transaction(
+        db,
+        user_id=db_user.id,
+        type=TransactionType.SUBSCRIPTION_PAYMENT,
+        amount_kopeks=price_kopeks,
+        description=description,
+    )
+
+    old_end_date = subscription.end_date
+    subscription.extend_subscription(period_days)
+    subscription.plan_period_days = period_days
+    await db.commit()
+    await db.refresh(subscription)
+
+    try:
+        await SubscriptionService().create_remnawave_user(db, subscription)
+    except Exception as e:
+        logger.warning(f"Не удалось синхронизировать продление подписки {subscription.id}: {e}")
+
+    return subscription, transaction, old_end_date
+
+
+async def finalize_tier_switch(
+    db: AsyncSession,
+    db_user: User,
+    active_sub: Subscription,
+    plan: SubscriptionPlan,
+    delta_kopeks: int,
+) -> Subscription:
+    """Charge the prorated delta (if > 0), swap plan_id + limits, re-sync Remnawave.
+
+    Caller MUST verify balance >= delta_kopeks first.
+    """
+    texts = get_texts(db_user.language)
+
+    if delta_kopeks > 0:
+        days_remaining = max(0, (active_sub.end_date - datetime.utcnow()).days)
+        description = texts.t(
+            "TARIFF_UPGRADE_INVOICE_DESCRIPTION",
+            "Смена тарифа на {name} (доплата за {days_left} дн.)",
+        ).format(name=plan.display_name, days_left=days_remaining)
+        await subtract_user_balance(
+            db, db_user, delta_kopeks, description=description, create_transaction=False
+        )
+        await create_transaction(
+            db,
+            user_id=db_user.id,
+            type=TransactionType.SUBSCRIPTION_PAYMENT,
+            amount_kopeks=delta_kopeks,
+            description=description,
+        )
+
+    active_sub.plan_id = plan.id
+    active_sub.device_limit = plan.device_limit
+    active_sub.traffic_limit_gb = plan.traffic_limit_gb
+    await db.commit()
+    await db.refresh(active_sub)
+
+    try:
+        await SubscriptionService().create_remnawave_user(db, active_sub)
+    except Exception as e:
+        logger.warning(f"Не удалось синхронизировать смену тарифа подписки {active_sub.id}: {e}")
+
+    return active_sub
+
+
 async def confirm_tier_upgrade(
     callback: types.CallbackQuery,
     db_user: User,
@@ -292,10 +504,16 @@ async def confirm_tier_upgrade(
         return
 
     delta = calculate_upgrade_delta(active_sub, plan, new_price, current_price)
-    days_remaining = max(0, (active_sub.end_date - datetime.utcnow()).days)
 
     if delta > 0 and db_user.balance_kopeks < delta:
         missing = delta - db_user.balance_kopeks
+        await _save_tariff_intent_cart(
+            db_user,
+            tariff_op="upgrade",
+            plan=plan,
+            period_days=period_days,
+            total_price=delta,
+        )
         await callback.message.edit_text(
             texts.t(
                 "ADDON_INSUFFICIENT_FUNDS_MESSAGE",
@@ -308,49 +526,14 @@ async def confirm_tier_upgrade(
             reply_markup=get_insufficient_balance_keyboard(
                 language=db_user.language,
                 amount_kopeks=missing,
+                has_saved_cart=True,
             ),
             parse_mode="HTML",
         )
         await callback.answer()
         return
 
-    if delta > 0:
-        description = texts.t(
-            "TARIFF_UPGRADE_INVOICE_DESCRIPTION",
-            "Смена тарифа на {name} (доплата за {days_left} дн.)",
-        ).format(name=plan.display_name, days_left=days_remaining)
-        ok = await subtract_user_balance(
-            db,
-            db_user,
-            delta,
-            description=description,
-            create_transaction=False,
-        )
-        if not ok:
-            await callback.answer(
-                texts.t("BALANCE_DEDUCTION_FAILED", "Не удалось списать средства."),
-                show_alert=True,
-            )
-            return
-        await create_transaction(
-            db,
-            user_id=db_user.id,
-            type=TransactionType.SUBSCRIPTION_PAYMENT,
-            amount_kopeks=delta,
-            description=description,
-        )
-
-    active_sub.plan_id = plan.id
-    active_sub.device_limit = plan.device_limit
-    active_sub.traffic_limit_gb = plan.traffic_limit_gb
-    await db.commit()
-    await db.refresh(active_sub)
-
-    try:
-        service = SubscriptionService()
-        await service.create_remnawave_user(db, active_sub)
-    except Exception as e:
-        logger.warning(f"Не удалось синхронизировать смену тарифа подписки {active_sub.id}: {e}")
+    await finalize_tier_switch(db, db_user, active_sub, plan, delta)
 
     await callback.answer(
         texts.t("TARIFF_UPGRADE_DONE", "Тариф изменён ✅"),
@@ -411,6 +594,13 @@ async def start_tariff_purchase(
 
     if db_user.balance_kopeks < price_kopeks:
         missing = price_kopeks - db_user.balance_kopeks
+        await _save_tariff_intent_cart(
+            db_user,
+            tariff_op="purchase",
+            plan=plan,
+            period_days=period_days,
+            total_price=price_kopeks,
+        )
         await callback.message.edit_text(
             texts.t(
                 "ADDON_INSUFFICIENT_FUNDS_MESSAGE",
@@ -423,88 +613,21 @@ async def start_tariff_purchase(
             reply_markup=get_insufficient_balance_keyboard(
                 language=db_user.language,
                 amount_kopeks=missing,
+                has_saved_cart=True,
             ),
             parse_mode="HTML",
         )
         await callback.answer()
         return
 
-    description = texts.t(
-        "TARIFF_PURCHASE_INVOICE_DESCRIPTION",
-        "Подписка {name} на {period}",
-    ).format(name=plan.display_name, period=_period_label(period_days, texts))
-
-    ok = await subtract_user_balance(
-        db,
-        db_user,
-        price_kopeks,
-        description=description,
-        create_transaction=False,
-    )
-    if not ok:
+    result = await finalize_tariff_purchase(db, db_user, plan, period_days, price_kopeks)
+    if result is None:
         await callback.answer(
             texts.t("BALANCE_DEDUCTION_FAILED", "Не удалось списать средства."),
             show_alert=True,
         )
         return
-
-    transaction = await create_transaction(
-        db,
-        user_id=db_user.id,
-        type=TransactionType.SUBSCRIPTION_PAYMENT,
-        amount_kopeks=price_kopeks,
-        description=description,
-    )
-
-    connected_squads = await _all_active_server_uuids(db)
-
-    now = datetime.utcnow()
-    end_date = now + timedelta(days=period_days)
-
-    # Subscription.user_id is UNIQUE — for trial / expired-legacy / expired-tier users
-    # we replace the existing row in-place instead of creating a new one.
-    existing_sub = db_user.subscription
-    was_trial_conversion = bool(existing_sub and existing_sub.is_trial)
-
-    if existing_sub is not None:
-        existing_sub.status = SubscriptionStatus.ACTIVE.value
-        existing_sub.is_trial = False
-        existing_sub.start_date = now
-        existing_sub.end_date = end_date
-        existing_sub.traffic_limit_gb = plan.traffic_limit_gb
-        existing_sub.device_limit = plan.device_limit
-        existing_sub.connected_squads = connected_squads
-        existing_sub.plan_id = plan.id
-        existing_sub.plan_period_days = period_days
-        new_sub = existing_sub
-    else:
-        new_sub = Subscription(
-            user_id=db_user.id,
-            status=SubscriptionStatus.ACTIVE.value,
-            is_trial=False,
-            start_date=now,
-            end_date=end_date,
-            traffic_limit_gb=plan.traffic_limit_gb,
-            device_limit=plan.device_limit,
-            connected_squads=connected_squads,
-            autopay_enabled=False,
-            autopay_days_before=3,
-            plan_id=plan.id,
-            plan_period_days=period_days,
-        )
-        db.add(new_sub)
-
-    db_user.has_made_first_topup = True
-    db_user.has_had_paid_subscription = True
-    await db.commit()
-    await db.refresh(new_sub)
-    await db.refresh(db_user)
-
-    try:
-        service = SubscriptionService()
-        await service.create_remnawave_user(db, new_sub)
-    except Exception as e:
-        logger.warning(f"Не удалось синхронизировать новую подписку {new_sub.id}: {e}")
+    new_sub, transaction, was_trial_conversion = result
 
     try:
         await send_purchase_notification(
@@ -624,6 +747,13 @@ async def _execute_renewal(
 
     if db_user.balance_kopeks < price_kopeks:
         missing = price_kopeks - db_user.balance_kopeks
+        await _save_tariff_intent_cart(
+            db_user,
+            tariff_op="renew",
+            plan=plan,
+            period_days=period_days,
+            total_price=price_kopeks,
+        )
         await callback.message.edit_text(
             texts.t(
                 "ADDON_INSUFFICIENT_FUNDS_MESSAGE",
@@ -636,49 +766,21 @@ async def _execute_renewal(
             reply_markup=get_insufficient_balance_keyboard(
                 language=db_user.language,
                 amount_kopeks=missing,
+                has_saved_cart=True,
             ),
             parse_mode="HTML",
         )
         await callback.answer()
         return
 
-    description = texts.t(
-        "TARIFF_RENEW_INVOICE_DESCRIPTION",
-        "Продление подписки {name} на {period}",
-    ).format(name=plan.display_name, period=_period_label(period_days, texts))
-
-    ok = await subtract_user_balance(
-        db,
-        db_user,
-        price_kopeks,
-        description=description,
-        create_transaction=False,
-    )
-    if not ok:
+    result = await finalize_tariff_renewal(db, db_user, subscription, plan, period_days, price_kopeks)
+    if result is None:
         await callback.answer(
             texts.t("BALANCE_DEDUCTION_FAILED", "Не удалось списать средства."),
             show_alert=True,
         )
         return
-    transaction = await create_transaction(
-        db,
-        user_id=db_user.id,
-        type=TransactionType.SUBSCRIPTION_PAYMENT,
-        amount_kopeks=price_kopeks,
-        description=description,
-    )
-
-    old_end_date = subscription.end_date
-    subscription.extend_subscription(period_days)
-    subscription.plan_period_days = period_days
-    await db.commit()
-    await db.refresh(subscription)
-
-    try:
-        service = SubscriptionService()
-        await service.create_remnawave_user(db, subscription)
-    except Exception as e:
-        logger.warning(f"Не удалось синхронизировать продление подписки {subscription.id}: {e}")
+    subscription, transaction, old_end_date = result
 
     try:
         await send_extension_notification(
