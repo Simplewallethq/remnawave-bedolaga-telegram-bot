@@ -1096,6 +1096,31 @@ _TARIFF_PERIOD_LABEL_FALLBACKS = {
 }
 
 
+def _tariff_period_button_label(
+    period_days: int,
+    price_kopeks: int,
+    price_30_kopeks: Optional[int],
+    texts,
+) -> str:
+    """Period button label. Adds `(-X%)` suffix vs the 1-month baseline when period > 30."""
+    base = texts.t(
+        _TARIFF_PERIOD_LABEL_KEYS[period_days],
+        _TARIFF_PERIOD_LABEL_FALLBACKS[period_days],
+    ).format(price=_format_kopeks_short(price_kopeks))
+
+    if period_days == 30 or not price_30_kopeks:
+        return base
+
+    months = period_days / 30
+    full = price_30_kopeks * months
+    if full <= 0:
+        return base
+    discount_pct = int(round((1 - price_kopeks / full) * 100))
+    if discount_pct <= 0:
+        return base
+    return f"{base} (-{discount_pct}%)"
+
+
 def get_tariffs_keyboard(
     plans_with_lowest_monthly: List[tuple],
     language: str = DEFAULT_LANGUAGE,
@@ -1140,14 +1165,12 @@ def get_tariff_periods_keyboard(
     texts = get_texts(language)
     rows: List[List[InlineKeyboardButton]] = []
 
+    price_30 = period_prices.get(30)
     for period_days in (30, 90, 180, 360, 720):
         price_kopeks = period_prices.get(period_days)
         if price_kopeks is None:
             continue
-        label = texts.t(
-            _TARIFF_PERIOD_LABEL_KEYS[period_days],
-            _TARIFF_PERIOD_LABEL_FALLBACKS[period_days],
-        ).format(price=_format_kopeks_short(price_kopeks))
+        label = _tariff_period_button_label(period_days, price_kopeks, price_30, texts)
         rows.append([
             InlineKeyboardButton(
                 text=label,
@@ -1209,14 +1232,12 @@ def get_renew_periods_keyboard(
     texts = get_texts(language)
     rows: List[List[InlineKeyboardButton]] = []
 
+    price_30 = period_prices.get(30)
     for period_days in (30, 90, 180, 360, 720):
         price_kopeks = period_prices.get(period_days)
         if price_kopeks is None:
             continue
-        label = texts.t(
-            _TARIFF_PERIOD_LABEL_KEYS[period_days],
-            _TARIFF_PERIOD_LABEL_FALLBACKS[period_days],
-        ).format(price=_format_kopeks_short(price_kopeks))
+        label = _tariff_period_button_label(period_days, price_kopeks, price_30, texts)
         rows.append([
             InlineKeyboardButton(
                 text=label,

@@ -66,12 +66,18 @@ async def get_plan_price(
 
 
 def get_lowest_monthly_price(plan: SubscriptionPlan) -> Optional[int]:
-    """Lowest per-month price across all configured periods, in kopeks.
+    """Headline monthly price (kopeks) used for the "от X ₽/мес" line on tariff cards.
 
-    Used to render the "от X ₽/мес" line on each tariff card.
+    Always returns the 30-day tariff price as-is, so users see the same number they'll
+    pay if they pick the 1-month period. (Longer periods carry a discount, but we don't
+    advertise the cheapest-per-month rate to avoid setting a wrong price expectation.)
     """
     if not plan.prices:
         return None
+    for p in plan.prices:
+        if p.period_days == 30:
+            return int(p.price_kopeks)
+    # Fallback if no 30-day price configured — use the lowest effective monthly rate.
     monthly_rates = [
         int(round(p.price_kopeks * 30 / p.period_days))
         for p in plan.prices
