@@ -2598,9 +2598,11 @@ async def handle_subscription_menu(
 ):
     texts = get_texts(db_user.language)
     subscription = db_user.subscription
-    
+
     if not subscription:
-        await callback.answer(texts.t("SUBSCRIPTION_NONE", "Нет активной подписки"), show_alert=True)
+        # No subscription yet — drop straight into the tiered catalog.
+        from app.handlers.subscription.tariffs import show_tariffs_page
+        await show_tariffs_page(callback, db_user, db)
         return
 
     from app.database.crud.subscription import check_and_update_subscription_status
@@ -2756,11 +2758,25 @@ async def handle_sub_add_days(
     db: AsyncSession
 ):
     subscription = getattr(db_user, "subscription", None)
+    now = datetime.utcnow()
+    is_paid_active = (
+        subscription is not None
+        and subscription.status == SubscriptionStatus.ACTIVE.value
+        and subscription.end_date is not None
+        and subscription.end_date > now
+        and not subscription.is_trial
+    )
 
     # Tiered-plan users renew at their plan's price ladder, not the legacy à-la-carte calc.
-    if subscription is not None and subscription.plan_id is not None:
+    if subscription is not None and subscription.plan_id is not None and is_paid_active:
         from app.handlers.subscription.tariffs import show_renew_current
         await show_renew_current(callback, db_user, db)
+        return
+
+    # Trial / no subscription / expired — send to the tiered catalog instead of legacy topup.
+    if subscription is None or subscription.is_trial or not is_paid_active:
+        from app.handlers.subscription.tariffs import show_tariffs_page
+        await show_tariffs_page(callback, db_user, db)
         return
 
     periods = settings.get_available_renewal_periods()

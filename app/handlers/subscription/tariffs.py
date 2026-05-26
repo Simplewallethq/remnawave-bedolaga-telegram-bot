@@ -458,22 +458,42 @@ async def start_tariff_purchase(
 
     connected_squads = await _all_active_server_uuids(db)
 
-    end_date = datetime.utcnow() + timedelta(days=period_days)
-    new_sub = Subscription(
-        user_id=db_user.id,
-        status=SubscriptionStatus.ACTIVE.value,
-        is_trial=False,
-        start_date=datetime.utcnow(),
-        end_date=end_date,
-        traffic_limit_gb=plan.traffic_limit_gb,
-        device_limit=plan.device_limit,
-        connected_squads=connected_squads,
-        autopay_enabled=False,
-        autopay_days_before=3,
-        plan_id=plan.id,
-        plan_period_days=period_days,
-    )
-    db.add(new_sub)
+    now = datetime.utcnow()
+    end_date = now + timedelta(days=period_days)
+
+    # Subscription.user_id is UNIQUE — for trial / expired-legacy / expired-tier users
+    # we replace the existing row in-place instead of creating a new one.
+    existing_sub = db_user.subscription
+    was_trial_conversion = bool(existing_sub and existing_sub.is_trial)
+
+    if existing_sub is not None:
+        existing_sub.status = SubscriptionStatus.ACTIVE.value
+        existing_sub.is_trial = False
+        existing_sub.start_date = now
+        existing_sub.end_date = end_date
+        existing_sub.traffic_limit_gb = plan.traffic_limit_gb
+        existing_sub.device_limit = plan.device_limit
+        existing_sub.connected_squads = connected_squads
+        existing_sub.plan_id = plan.id
+        existing_sub.plan_period_days = period_days
+        new_sub = existing_sub
+    else:
+        new_sub = Subscription(
+            user_id=db_user.id,
+            status=SubscriptionStatus.ACTIVE.value,
+            is_trial=False,
+            start_date=now,
+            end_date=end_date,
+            traffic_limit_gb=plan.traffic_limit_gb,
+            device_limit=plan.device_limit,
+            connected_squads=connected_squads,
+            autopay_enabled=False,
+            autopay_days_before=3,
+            plan_id=plan.id,
+            plan_period_days=period_days,
+        )
+        db.add(new_sub)
+
     db_user.has_made_first_topup = True
     db_user.has_had_paid_subscription = True
     await db.commit()
@@ -489,7 +509,7 @@ async def start_tariff_purchase(
     try:
         await send_purchase_notification(
             callback, db, db_user, new_sub, transaction.id, period_days,
-            was_trial_conversion=False,
+            was_trial_conversion=was_trial_conversion,
         )
     except Exception as e:
         logger.debug(f"Уведомление о покупке не отправлено: {e}")
