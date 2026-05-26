@@ -2632,6 +2632,34 @@ async def handle_subscription_menu(
         devices_count=devices_count,
     )
 
+    if (
+        is_active
+        and getattr(subscription, "plan_id", None) is not None
+        and getattr(subscription, "plan", None) is not None
+    ):
+        from app.services.plan_pricing_service import get_current_plan_price_for_period
+
+        plan = subscription.plan
+        period_days = subscription.plan_period_days or 30
+        period_label = {
+            30: texts.t("PLAN_PERIOD_LABEL_1M", "1 мес"),
+            90: texts.t("PLAN_PERIOD_LABEL_3M", "3 мес"),
+            180: texts.t("PLAN_PERIOD_LABEL_6M", "6 мес"),
+            360: texts.t("PLAN_PERIOD_LABEL_1Y", "1 год"),
+            720: texts.t("PLAN_PERIOD_LABEL_2Y", "2 года"),
+        }.get(period_days, f"{period_days} дн.")
+        plan_price = await get_current_plan_price_for_period(db, subscription)
+        if plan_price is not None:
+            header_line = texts.t(
+                "SUBSCRIPTION_PLAN_HEADER",
+                "Тариф: <b>{name}</b> — {price} за {period}",
+            ).format(
+                name=plan.display_name,
+                price=f"{int(round(plan_price / 100))}₽",
+                period=period_label,
+            )
+            text = f"{header_line}\n\n{text}"
+
     image_path = os.path.join("images", "subscription_page.png")
     if not os.path.exists(image_path):
          image_path = None
