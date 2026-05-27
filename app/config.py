@@ -176,6 +176,10 @@ class Settings(BaseSettings):
     BLACKLIST_UPDATE_INTERVAL_HOURS: int = 24
     BLACKLIST_IGNORE_ADMINS: bool = True
 
+    # Тарифная система (App/Solo/Plus/Pro). False — все юзеры идут по старой legacy-логике
+    # (à-la-carte покупка периодов/устройств/трафика), как было до ввода тарифов.
+    TARIFFS_ENABLED: bool = True
+
     # Настройки простой покупки
     SIMPLE_SUBSCRIPTION_ENABLED: bool = True
     SIMPLE_SUBSCRIPTION_PERIOD_DAYS: int = 30
