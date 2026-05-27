@@ -81,6 +81,28 @@ from app.services.payment_service import PaymentService
 logger = logging.getLogger(__name__)
 
 
+def user_uses_tariffs(db_user: User) -> bool:
+    """Whether this user should see the tiered-tariff flow rather than legacy à-la-carte.
+
+    - TARIFFS_ENABLED=true → everyone uses tariffs.
+    - TARIFFS_ENABLED=false → only users already on a tariff (plan_id set) and users
+      registered at/after TARIFFS_LEGACY_CUTOFF; everyone older stays on legacy.
+    """
+    if settings.TARIFFS_ENABLED:
+        return True
+
+    sub = getattr(db_user, "subscription", None)
+    if sub is not None and getattr(sub, "plan_id", None) is not None:
+        return True
+
+    cutoff = settings.get_tariffs_legacy_cutoff()
+    created_at = getattr(db_user, "created_at", None)
+    if cutoff is not None and created_at is not None and created_at >= cutoff:
+        return True
+
+    return False
+
+
 def _serialize_markup(markup: Optional[InlineKeyboardMarkup]) -> Optional[Any]:
     if markup is None:
         return None
@@ -208,7 +230,7 @@ async def show_subscription_info(
     subscription = db_user.subscription
 
     if not subscription:
-        if settings.TARIFFS_ENABLED:
+        if user_uses_tariffs(db_user):
             # No subscription — route to the new tiered tariffs page.
             from app.handlers.subscription.tariffs import show_tariffs_page
             await show_tariffs_page(callback, db_user, db)
@@ -2611,7 +2633,7 @@ async def handle_subscription_menu(
     subscription = db_user.subscription
 
     if not subscription:
-        if settings.TARIFFS_ENABLED:
+        if user_uses_tariffs(db_user):
             # No subscription yet — drop straight into the tiered catalog.
             from app.handlers.subscription.tariffs import show_tariffs_page
             await show_tariffs_page(callback, db_user, db)
@@ -2774,8 +2796,8 @@ async def handle_sub_add_days(
     subscription = getattr(db_user, "subscription", None)
 
     has_tariff = subscription is not None and subscription.plan_id is not None
-    # Tariffs off globally still keep the tariff flow for users who already hold a plan.
-    if settings.TARIFFS_ENABLED or has_tariff:
+    # Tariff flow for: everyone (flag on), tariff holders, and post-rollout registrants.
+    if user_uses_tariffs(db_user):
         now = datetime.utcnow()
         is_paid_active = (
             subscription is not None
