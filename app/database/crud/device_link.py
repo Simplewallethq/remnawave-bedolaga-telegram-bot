@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database.models import DeviceLink, Subscription
 
@@ -58,6 +59,7 @@ async def get_subscription_by_device_id(db: AsyncSession, device_id: str) -> Sub
     """Get subscription associated with a device_id via JOIN. Returns None if device not found."""
     result = await db.execute(
         select(Subscription)
+        .options(selectinload(Subscription.user))
         .join(DeviceLink, DeviceLink.subscription_id == Subscription.id)
         .where(DeviceLink.device_id == device_id)
     )

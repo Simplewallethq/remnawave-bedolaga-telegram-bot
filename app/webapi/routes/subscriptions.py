@@ -57,6 +57,7 @@ def _serialize_subscription(subscription: Subscription) -> SubscriptionResponse:
         subscription_url=subscription.subscription_url,
         subscription_crypto_link=subscription.subscription_crypto_link,
         connected_squads=list(subscription.connected_squads or []),
+        remnawave_user_uuid=getattr(subscription.user, "remnawave_uuid", None) if subscription.user else None,
         created_at=subscription.created_at,
         updated_at=subscription.updated_at,
     )
