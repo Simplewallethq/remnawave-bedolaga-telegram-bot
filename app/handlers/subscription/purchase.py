@@ -81,6 +81,28 @@ from app.services.payment_service import PaymentService
 logger = logging.getLogger(__name__)
 
 
+def user_uses_tariffs(db_user: User) -> bool:
+    """Whether this user should see the tiered-tariff flow rather than legacy à-la-carte.
+
+    - TARIFFS_ENABLED=true → everyone uses tariffs.
+    - TARIFFS_ENABLED=false → only users already on a tariff (plan_id set) and users
+      registered at/after TARIFFS_LEGACY_CUTOFF; everyone older stays on legacy.
+    """
+    if settings.TARIFFS_ENABLED:
+        return True
+
+    sub = getattr(db_user, "subscription", None)
+    if sub is not None and getattr(sub, "plan_id", None) is not None:
+        return True
+
+    cutoff = settings.get_tariffs_legacy_cutoff()
+    created_at = getattr(db_user, "created_at", None)
+    if cutoff is not None and created_at is not None and created_at >= cutoff:
+        return True
+
+    return False
+
+
 def _serialize_markup(markup: Optional[InlineKeyboardMarkup]) -> Optional[Any]:
     if markup is None:
         return None
@@ -208,9 +230,19 @@ async def show_subscription_info(
     subscription = db_user.subscription
 
     if not subscription:
-        # No subscription — route to the new tiered tariffs page.
-        from app.handlers.subscription.tariffs import show_tariffs_page
-        await show_tariffs_page(callback, db_user, db)
+        if user_uses_tariffs(db_user):
+            # No subscription — route to the new tiered tariffs page.
+            from app.handlers.subscription.tariffs import show_tariffs_page
+            await show_tariffs_page(callback, db_user, db)
+            return
+        await callback.message.edit_text(
+            texts.SUBSCRIPTION_NONE,
+            reply_markup=get_subscription_keyboard(
+                db_user.language,
+                has_subscription=False,
+            )
+        )
+        await callback.answer()
         return
 
     from app.database.crud.subscription import check_and_update_subscription_status
@@ -358,7 +390,8 @@ async def show_subscription_info(
         and getattr(subscription.plan, "custom_app_only", False)
     )
 
-    # Header for tiered subscribers
+    # Header for tiered subscribers. Shown whenever the subscription is tied to a plan —
+    # even if tariffs are globally disabled, existing tariff holders keep their experience.
     if (
         actual_status in ("paid_active", "trial_active")
         and getattr(subscription, "plan_id", None) is not None
@@ -2600,14 +2633,17 @@ async def handle_subscription_menu(
     subscription = db_user.subscription
 
     if not subscription:
-        # No subscription yet — drop straight into the tiered catalog.
-        from app.handlers.subscription.tariffs import show_tariffs_page
-        await show_tariffs_page(callback, db_user, db)
+        if user_uses_tariffs(db_user):
+            # No subscription yet — drop straight into the tiered catalog.
+            from app.handlers.subscription.tariffs import show_tariffs_page
+            await show_tariffs_page(callback, db_user, db)
+            return
+        await callback.answer(texts.t("SUBSCRIPTION_NONE", "Нет активной подписки"), show_alert=True)
         return
 
     from app.database.crud.subscription import check_and_update_subscription_status
     subscription = await check_and_update_subscription_status(db, subscription)
-    
+
     current_time = datetime.utcnow()
     days_left = 0
     if subscription.end_date and subscription.end_date > current_time:
@@ -2758,26 +2794,31 @@ async def handle_sub_add_days(
     db: AsyncSession
 ):
     subscription = getattr(db_user, "subscription", None)
-    now = datetime.utcnow()
-    is_paid_active = (
-        subscription is not None
-        and subscription.status == SubscriptionStatus.ACTIVE.value
-        and subscription.end_date is not None
-        and subscription.end_date > now
-        and not subscription.is_trial
-    )
 
-    # Tiered-plan users renew at their plan's price ladder, not the legacy à-la-carte calc.
-    if subscription is not None and subscription.plan_id is not None and is_paid_active:
-        from app.handlers.subscription.tariffs import show_renew_current
-        await show_renew_current(callback, db_user, db)
-        return
+    has_tariff = subscription is not None and subscription.plan_id is not None
+    # Tariff flow for: everyone (flag on), tariff holders, and post-rollout registrants.
+    if user_uses_tariffs(db_user):
+        now = datetime.utcnow()
+        is_paid_active = (
+            subscription is not None
+            and subscription.status == SubscriptionStatus.ACTIVE.value
+            and subscription.end_date is not None
+            and subscription.end_date > now
+            and not subscription.is_trial
+        )
 
-    # Trial / no subscription / expired — send to the tiered catalog instead of legacy topup.
-    if subscription is None or subscription.is_trial or not is_paid_active:
-        from app.handlers.subscription.tariffs import show_tariffs_page
-        await show_tariffs_page(callback, db_user, db)
-        return
+        # Tiered-plan users renew at their plan's price ladder, not the legacy à-la-carte calc.
+        if has_tariff and is_paid_active:
+            from app.handlers.subscription.tariffs import show_renew_current
+            await show_renew_current(callback, db_user, db)
+            return
+
+        # Trial / no subscription / expired — send to the tiered catalog instead of legacy topup.
+        # (Only reached with tariffs enabled, or for an expired tariff holder re-buying a plan.)
+        if subscription is None or subscription.is_trial or not is_paid_active:
+            from app.handlers.subscription.tariffs import show_tariffs_page
+            await show_tariffs_page(callback, db_user, db)
+            return
 
     periods = settings.get_available_renewal_periods()
 

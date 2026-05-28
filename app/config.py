@@ -6,7 +6,7 @@ import os
 import re
 import html
 from collections import defaultdict
-from datetime import time
+from datetime import time, datetime, timezone as dt_timezone
 from typing import Dict, List, Optional, Union
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -175,6 +175,19 @@ class Settings(BaseSettings):
     BLACKLIST_GITHUB_URL: Optional[str] = None
     BLACKLIST_UPDATE_INTERVAL_HOURS: int = 24
     BLACKLIST_IGNORE_ADMINS: bool = True
+
+    # Тарифная система (App/Solo/Plus/Pro).
+    # true  — тарифы для всех.
+    # false — legacy для «старых» юзеров (зарегавшихся до TARIFFS_LEGACY_CUTOFF и не имеющих
+    #         тарифа). При этом тарифы ОСТАЮТСЯ для тех, кто уже на тарифе (plan_id задан),
+    #         и для всех, кто зарегался после отсечки.
+    TARIFFS_ENABLED: bool = True
+
+    # Дата обновления (момент ввода тарифов) в UTC, ISO-формат. Юзеры, зарегавшиеся
+    # начиная с этого момента, считаются «новыми» и получают тарифы даже при
+    # TARIFFS_ENABLED=false. created_at в БД хранится в наивном UTC.
+    # 2026-05-26T12:00:00 UTC = 2026-05-26 15:00 МСК.
+    TARIFFS_LEGACY_CUTOFF: str = "2026-05-26T12:00:00"
 
     # Настройки простой покупки
     SIMPLE_SUBSCRIPTION_ENABLED: bool = True
@@ -765,6 +778,21 @@ class Settings(BaseSettings):
             return normalized in {"1", "true", "yes", "on"}
 
         return bool(value)
+
+    def get_tariffs_legacy_cutoff(self) -> Optional[datetime]:
+        """Naive-UTC datetime of the tariffs rollout. Users registered at/after this
+        moment are treated as 'new' and keep tariffs even when TARIFFS_ENABLED=false."""
+        raw = getattr(self, "TARIFFS_LEGACY_CUTOFF", None)
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(raw))
+        except (ValueError, TypeError):
+            return None
+        # Normalize to naive UTC to compare with naive-UTC created_at.
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(dt_timezone.utc).replace(tzinfo=None)
+        return parsed
 
     def is_auto_purchase_after_topup_enabled(self) -> bool:
         value = getattr(self, "AUTO_PURCHASE_AFTER_TOPUP_ENABLED", False)
