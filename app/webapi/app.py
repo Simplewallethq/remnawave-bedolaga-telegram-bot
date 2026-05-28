@@ -10,6 +10,7 @@ from .middleware import RequestLoggingMiddleware
 from .routes import (
     broadcasts,
     backups,
+    ad_attribution,
     campaigns,
     config,
     devices,
@@ -156,6 +157,10 @@ OPENAPI_TAGS = [
         ),
     },
     {
+        "name": "ad-attribution",
+        "description": "Трекинг рекламных кампаний по диплинк-формату {source}-{campaign_id}.",
+    },
+    {
         "name": "devices",
         "description": "Device-to-subscription linking for Android app integration.",
     },
@@ -235,6 +240,7 @@ def create_web_api_app() -> FastAPI:
     app.include_router(broadcasts.router, prefix="/broadcasts", tags=["broadcasts"])
     app.include_router(backups.router, prefix="/backups", tags=["backups"])
     app.include_router(campaigns.router, prefix="/campaigns", tags=["campaigns"])
+    app.include_router(ad_attribution.router, prefix="/ad-campaigns", tags=["ad-attribution"])
     app.include_router(tokens.router, prefix="/tokens", tags=["auth"])
     app.include_router(remnawave.router, prefix="/remnawave", tags=["remnawave"])
     app.include_router(media.router, tags=["media"])

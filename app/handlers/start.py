@@ -21,6 +21,12 @@ from app.database.crud.campaign import (
     get_campaign_by_start_parameter,
     get_campaign_by_id,
 )
+from app.database.crud.ad_attribution import (
+    link_visit_to_user,
+    record_ad_visit,
+    set_user_attribution,
+)
+from app.utils.ad_attribution import parse_ad_payload
 from app.database.models import PinnedMessage, SubscriptionStatus, UserStatus
 from app.keyboards.inline import (
     get_rules_keyboard,
@@ -718,7 +724,20 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             )
             await state.update_data(campaign_id=campaign.id)
         else:
-            if start_parameter.startswith("d_"):
+            ad_parsed = parse_ad_payload(start_parameter)
+            if ad_parsed:
+                ad_source, ad_campaign_id = ad_parsed
+                await state.update_data(
+                    ad_source=ad_source,
+                    ad_campaign_id=ad_campaign_id,
+                    raw_start_payload=start_parameter,
+                )
+                logger.info(
+                    "📊 Ad attribution detected: source=%s campaign_id=%s",
+                    ad_source,
+                    ad_campaign_id,
+                )
+            elif start_parameter.startswith("d_"):
                 raw_device_id = start_parameter[2:]
                 await state.update_data(device_id=raw_device_id)
                 logger.info("Device ID saved to FSM state: %s", raw_device_id)
@@ -746,6 +765,24 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
                 campaign.id,
                 notify_error,
             )
+
+    _ad_state = await state.get_data()
+    _ad_cid = _ad_state.get("ad_campaign_id")
+    if _ad_cid:
+        try:
+            await record_ad_visit(
+                db,
+                telegram_id=message.from_user.id,
+                raw_payload=_ad_state["raw_start_payload"],
+                source=_ad_state["ad_source"],
+                campaign_id=_ad_cid,
+                is_new_user=(user is None),
+                user_id=user.id if user else None,
+            )
+            await db.commit()
+        except Exception as _ad_err:
+            logger.error("Ошибка записи ad visit: %s", _ad_err)
+            await db.rollback()
 
     if user and user.status != UserStatus.DELETED.value:
         logger.info(f"✅ Активный пользователь найден: {user.telegram_id}")
@@ -1708,6 +1745,22 @@ async def complete_registration_from_callback(
     _partner_jti = _fsm_data.get("partner_token_jti")
     _partner_sub_until_raw = _fsm_data.get("partner_sub_until")
 
+    _ad_cid_reg = _fsm_data.get("ad_campaign_id")
+    if _ad_cid_reg and not user.attribution_campaign_id:
+        try:
+            await set_user_attribution(
+                db,
+                user.id,
+                _fsm_data.get("raw_start_payload", ""),
+                _fsm_data.get("ad_source", ""),
+                _ad_cid_reg,
+            )
+            await link_visit_to_user(db, user.telegram_id, user.id)
+            await db.commit()
+        except Exception as _attr_err:
+            logger.error("Ошибка записи ad attribution: %s", _attr_err)
+            await db.rollback()
+
     await state.clear()
 
     if campaign_message:
@@ -2000,6 +2053,22 @@ async def complete_registration(
     _device_id = _fsm_data.get("device_id")
     _partner_jti = _fsm_data.get("partner_token_jti")
     _partner_sub_until_raw = _fsm_data.get("partner_sub_until")
+
+    _ad_cid_reg = _fsm_data.get("ad_campaign_id")
+    if _ad_cid_reg and not user.attribution_campaign_id:
+        try:
+            await set_user_attribution(
+                db,
+                user.id,
+                _fsm_data.get("raw_start_payload", ""),
+                _fsm_data.get("ad_source", ""),
+                _ad_cid_reg,
+            )
+            await link_visit_to_user(db, user.telegram_id, user.id)
+            await db.commit()
+        except Exception as _attr_err:
+            logger.error("Ошибка записи ad attribution: %s", _attr_err)
+            await db.rollback()
 
     await state.clear()
 
