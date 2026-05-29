@@ -691,6 +691,9 @@ class User(Base):
     poll_responses = relationship("PollResponse", back_populates="user")
     last_pinned_message_id = Column(Integer, nullable=True)
     bot_id = Column(BigInteger, nullable=True)
+    raw_start_payload = Column(String(64), nullable=True)
+    attribution_source = Column(String(100), nullable=True)
+    attribution_campaign_id = Column(String(8), nullable=True, index=True)
 
     @property
     def balance_rubles(self) -> float:
@@ -2031,3 +2034,21 @@ class PartnerLinkRedemption(Base):
 
     def __repr__(self) -> str:
         return f"<PartnerLinkRedemption jti={self.jti} user_id={self.user_id} sub_until={self.sub_until}>"
+
+
+class AdCampaignVisit(Base):
+    __tablename__ = "ad_campaign_visits"
+
+    id = Column(Integer, primary_key=True)
+    telegram_id = Column(BigInteger, nullable=False, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    raw_payload = Column(String(64), nullable=False)
+    source = Column(String(100), nullable=False)
+    campaign_id = Column(String(8), nullable=False, index=True)
+    is_new_user = Column(Boolean, nullable=False, default=False)
+    visited_at = Column(DateTime, nullable=False, default=func.now())
