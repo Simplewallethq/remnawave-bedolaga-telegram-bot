@@ -5206,6 +5206,227 @@ async def seed_subscription_plans() -> bool:
         return False
 
 
+async def create_advertising_campaigns_table() -> bool:
+    if await check_table_exists('advertising_campaigns'):
+        logger.info("ℹ️ Таблица advertising_campaigns уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE advertising_campaigns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name VARCHAR(255) NOT NULL,
+                    start_parameter VARCHAR(64) NOT NULL,
+                    bonus_type VARCHAR(20) NOT NULL,
+                    balance_bonus_kopeks INTEGER NOT NULL DEFAULT 0,
+                    subscription_duration_days INTEGER NULL,
+                    subscription_traffic_gb INTEGER NULL,
+                    subscription_device_limit INTEGER NULL,
+                    subscription_squads TEXT NULL,
+                    is_active BOOLEAN NOT NULL DEFAULT 1,
+                    created_by INTEGER NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+                );
+                CREATE UNIQUE INDEX ix_advertising_campaigns_start_parameter ON advertising_campaigns(start_parameter);
+                CREATE TABLE advertising_campaign_registrations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    campaign_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    bonus_type VARCHAR(20) NOT NULL,
+                    balance_bonus_kopeks INTEGER NOT NULL DEFAULT 0,
+                    subscription_duration_days INTEGER NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_campaign_user UNIQUE (campaign_id, user_id),
+                    FOREIGN KEY(campaign_id) REFERENCES advertising_campaigns(id) ON DELETE CASCADE,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS advertising_campaigns (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    start_parameter VARCHAR(64) NOT NULL,
+                    bonus_type VARCHAR(20) NOT NULL,
+                    balance_bonus_kopeks INTEGER NOT NULL DEFAULT 0,
+                    subscription_duration_days INTEGER NULL,
+                    subscription_traffic_gb INTEGER NULL,
+                    subscription_device_limit INTEGER NULL,
+                    subscription_squads JSON NULL,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_by INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS ix_advertising_campaigns_start_parameter ON advertising_campaigns(start_parameter);
+                CREATE TABLE IF NOT EXISTS advertising_campaign_registrations (
+                    id SERIAL PRIMARY KEY,
+                    campaign_id INTEGER NOT NULL REFERENCES advertising_campaigns(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    bonus_type VARCHAR(20) NOT NULL,
+                    balance_bonus_kopeks INTEGER NOT NULL DEFAULT 0,
+                    subscription_duration_days INTEGER NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_campaign_user UNIQUE (campaign_id, user_id)
+                )
+                """
+            else:
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS advertising_campaigns (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    start_parameter VARCHAR(64) NOT NULL,
+                    bonus_type VARCHAR(20) NOT NULL,
+                    balance_bonus_kopeks INT NOT NULL DEFAULT 0,
+                    subscription_duration_days INT NULL,
+                    subscription_traffic_gb INT NULL,
+                    subscription_device_limit INT NULL,
+                    subscription_squads JSON NULL,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_by INT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+                );
+                CREATE UNIQUE INDEX ix_advertising_campaigns_start_parameter ON advertising_campaigns(start_parameter);
+                CREATE TABLE IF NOT EXISTS advertising_campaign_registrations (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    campaign_id INT NOT NULL,
+                    user_id INT NOT NULL,
+                    bonus_type VARCHAR(20) NOT NULL,
+                    balance_bonus_kopeks INT NOT NULL DEFAULT 0,
+                    subscription_duration_days INT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_campaign_user UNIQUE (campaign_id, user_id),
+                    FOREIGN KEY(campaign_id) REFERENCES advertising_campaigns(id) ON DELETE CASCADE,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблицы advertising_campaigns и advertising_campaign_registrations созданы")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы advertising_campaigns: {e}")
+        return False
+
+
+async def add_ad_attribution_columns() -> bool:
+    raw_exists = await check_column_exists('users', 'raw_start_payload')
+    source_exists = await check_column_exists('users', 'attribution_source')
+    campaign_id_exists = await check_column_exists('users', 'attribution_campaign_id')
+
+    if raw_exists and source_exists and campaign_id_exists:
+        logger.info("ℹ️ Колонки ad attribution в users уже существуют")
+        return True
+
+    try:
+        db_type = await get_database_type()
+        async with engine.begin() as conn:
+            if not raw_exists:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN raw_start_payload VARCHAR(64) NULL"))
+            if not source_exists:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN attribution_source VARCHAR(100) NULL"))
+            if not campaign_id_exists:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN attribution_campaign_id VARCHAR(8) NULL"))
+                if db_type == 'postgresql':
+                    await conn.execute(text(
+                        "CREATE INDEX IF NOT EXISTS ix_users_attribution_campaign_id "
+                        "ON users(attribution_campaign_id)"
+                    ))
+                else:
+                    await conn.execute(text(
+                        "CREATE INDEX ix_users_attribution_campaign_id ON users(attribution_campaign_id)"
+                    ))
+
+        logger.info("✅ Колонки raw_start_payload, attribution_source, attribution_campaign_id добавлены в users")
+        return True
+
+    except Exception as error:
+        logger.error(f"❌ Ошибка добавления колонок ad attribution в users: {error}")
+        return False
+
+
+async def create_ad_campaign_visits_table() -> bool:
+    if await check_table_exists('ad_campaign_visits'):
+        logger.info("ℹ️ Таблица ad_campaign_visits уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE ad_campaign_visits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id BIGINT NOT NULL,
+                    user_id INTEGER NULL,
+                    raw_payload VARCHAR(64) NOT NULL,
+                    source VARCHAR(100) NOT NULL,
+                    campaign_id VARCHAR(8) NOT NULL,
+                    is_new_user BOOLEAN NOT NULL DEFAULT 0,
+                    visited_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+                );
+                CREATE INDEX ix_ad_campaign_visits_telegram_id ON ad_campaign_visits(telegram_id);
+                CREATE INDEX ix_ad_campaign_visits_user_id ON ad_campaign_visits(user_id);
+                CREATE INDEX ix_ad_campaign_visits_campaign_id ON ad_campaign_visits(campaign_id)
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS ad_campaign_visits (
+                    id SERIAL PRIMARY KEY,
+                    telegram_id BIGINT NOT NULL,
+                    user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+                    raw_payload VARCHAR(64) NOT NULL,
+                    source VARCHAR(100) NOT NULL,
+                    campaign_id VARCHAR(8) NOT NULL,
+                    is_new_user BOOLEAN NOT NULL DEFAULT FALSE,
+                    visited_at TIMESTAMP NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS ix_ad_campaign_visits_telegram_id ON ad_campaign_visits(telegram_id);
+                CREATE INDEX IF NOT EXISTS ix_ad_campaign_visits_user_id ON ad_campaign_visits(user_id);
+                CREATE INDEX IF NOT EXISTS ix_ad_campaign_visits_campaign_id ON ad_campaign_visits(campaign_id)
+                """
+            else:
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS ad_campaign_visits (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    telegram_id BIGINT NOT NULL,
+                    user_id INT NULL,
+                    raw_payload VARCHAR(64) NOT NULL,
+                    source VARCHAR(100) NOT NULL,
+                    campaign_id VARCHAR(8) NOT NULL,
+                    is_new_user BOOLEAN NOT NULL DEFAULT FALSE,
+                    visited_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+                );
+                CREATE INDEX ix_ad_campaign_visits_telegram_id ON ad_campaign_visits(telegram_id);
+                CREATE INDEX ix_ad_campaign_visits_user_id ON ad_campaign_visits(user_id);
+                CREATE INDEX ix_ad_campaign_visits_campaign_id ON ad_campaign_visits(campaign_id)
+                """
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица ad_campaign_visits создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы ad_campaign_visits: {e}")
+        return False
+
+
 async def run_universal_migration():
     logger.info("=== НАЧАЛО УНИВЕРСАЛЬНОЙ МИГРАЦИИ ===")
     
@@ -5712,6 +5933,27 @@ async def run_universal_migration():
             else:
                 logger.warning("⚠️ Проблемы с сидированием тарифных планов")
 
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ ADVERTISING_CAMPAIGNS ===")
+        ad_campaigns_ready = await create_advertising_campaigns_table()
+        if ad_campaigns_ready:
+            logger.info("✅ Таблицы advertising_campaigns готовы")
+        else:
+            logger.warning("⚠️ Проблемы с таблицами advertising_campaigns")
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНОК AD ATTRIBUTION В USERS ===")
+        ad_attribution_ready = await add_ad_attribution_columns()
+        if ad_attribution_ready:
+            logger.info("✅ Колонки ad attribution в users готовы")
+        else:
+            logger.warning("⚠️ Проблемы с колонками ad attribution в users")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ AD_CAMPAIGN_VISITS ===")
+        ad_visits_ready = await create_ad_campaign_visits_table()
+        if ad_visits_ready:
+            logger.info("✅ Таблица ad_campaign_visits готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей ad_campaign_visits")
+
         async with engine.begin() as conn:
             total_subs = await conn.execute(text("SELECT COUNT(*) FROM subscriptions"))
             unique_users = await conn.execute(text("SELECT COUNT(DISTINCT user_id) FROM subscriptions"))
@@ -5809,6 +6051,11 @@ async def check_migration_status():
             "promo_offer_templates_active_discount_column": False,
             "promo_offer_logs_table": False,
             "subscription_temporary_access_table": False,
+            "advertising_campaigns_table": False,
+            "advertising_campaign_registrations_table": False,
+            "users_raw_start_payload_column": False,
+            "users_attribution_campaign_id_column": False,
+            "ad_campaign_visits_table": False,
         }
         
         status["has_made_first_topup_column"] = await check_column_exists('users', 'has_made_first_topup')
@@ -5841,6 +6088,11 @@ async def check_migration_status():
         status["promo_offer_templates_active_discount_column"] = await check_column_exists('promo_offer_templates', 'active_discount_hours')
         status["promo_offer_logs_table"] = await check_table_exists('promo_offer_logs')
         status["subscription_temporary_access_table"] = await check_table_exists('subscription_temporary_access')
+        status["advertising_campaigns_table"] = await check_table_exists('advertising_campaigns')
+        status["advertising_campaign_registrations_table"] = await check_table_exists('advertising_campaign_registrations')
+        status["users_raw_start_payload_column"] = await check_column_exists('users', 'raw_start_payload')
+        status["users_attribution_campaign_id_column"] = await check_column_exists('users', 'attribution_campaign_id')
+        status["ad_campaign_visits_table"] = await check_table_exists('ad_campaign_visits')
 
         status["welcome_texts_is_enabled_column"] = await check_column_exists('welcome_texts', 'is_enabled')
         status["users_promo_group_column"] = await check_column_exists('users', 'promo_group_id')
@@ -5943,6 +6195,11 @@ async def check_migration_status():
             "promo_offer_templates_active_discount_column": "Колонка active_discount_hours в promo_offer_templates",
             "promo_offer_logs_table": "Таблица promo_offer_logs",
             "subscription_temporary_access_table": "Таблица subscription_temporary_access",
+            "advertising_campaigns_table": "Таблица advertising_campaigns",
+            "advertising_campaign_registrations_table": "Таблица advertising_campaign_registrations",
+            "users_raw_start_payload_column": "Колонка raw_start_payload у пользователей",
+            "users_attribution_campaign_id_column": "Колонка attribution_campaign_id у пользователей",
+            "ad_campaign_visits_table": "Таблица ad_campaign_visits",
         }
         
         for check_key, check_status in status.items():
