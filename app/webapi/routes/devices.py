@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Security, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database.crud.device_binding_code import (
     CONSUME_EXPIRED,
@@ -171,7 +172,9 @@ async def bind_device_by_code(
 
     # Re-fetch the subscription with the device_links relationship hydrated.
     sub_result = await db.execute(
-        select(Subscription).where(Subscription.id == subscription.id)
+        select(Subscription)
+        .options(selectinload(Subscription.user))
+        .where(Subscription.id == subscription.id)
     )
     subscription = sub_result.scalar_one_or_none()
     if subscription is None:
