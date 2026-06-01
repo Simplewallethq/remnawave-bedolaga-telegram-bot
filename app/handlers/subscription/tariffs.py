@@ -304,60 +304,82 @@ async def finalize_tariff_purchase(
         "Подписка {name} на {period}",
     ).format(name=plan.display_name, period=_period_label(period_days, texts))
 
+    # Charge, record the payment, and create the subscription in ONE DB
+    # transaction. subtract_user_balance/create_transaction defer their commits
+    # (commit=False) so a failure while building the subscription rolls the
+    # charge back instead of leaving money debited without an active subscription.
     ok = await subtract_user_balance(
-        db, db_user, price_kopeks, description=description, create_transaction=False
+        db, db_user, price_kopeks, description=description,
+        create_transaction=False, commit=False,
     )
     if not ok:
+        await db.rollback()
         return None
 
-    transaction = await create_transaction(
-        db,
-        user_id=db_user.id,
-        type=TransactionType.SUBSCRIPTION_PAYMENT,
-        amount_kopeks=price_kopeks,
-        description=description,
-    )
+    try:
+        connected_squads = await _all_active_server_uuids(db)
+        now = datetime.utcnow()
+        end_date = now + timedelta(days=period_days)
 
-    connected_squads = await _all_active_server_uuids(db)
-    now = datetime.utcnow()
-    end_date = now + timedelta(days=period_days)
+        # Subscription.user_id is UNIQUE — for trial / expired-legacy / expired-tier users
+        # we replace the existing row in-place instead of creating a new one.
+        # Query explicitly instead of touching db_user.subscription: the relationship
+        # may be unloaded/expired here, and a lazy load in async context raises
+        # greenlet_spawn ("IO attempted in an unexpected place").
+        existing_sub = (
+            await db.execute(
+                select(Subscription).where(Subscription.user_id == db_user.id)
+            )
+        ).scalar_one_or_none()
+        was_trial_conversion = bool(existing_sub and existing_sub.is_trial)
 
-    # Subscription.user_id is UNIQUE — for trial / expired-legacy / expired-tier users
-    # we replace the existing row in-place instead of creating a new one.
-    existing_sub = db_user.subscription
-    was_trial_conversion = bool(existing_sub and existing_sub.is_trial)
+        if existing_sub is not None:
+            existing_sub.status = SubscriptionStatus.ACTIVE.value
+            existing_sub.is_trial = False
+            existing_sub.start_date = now
+            existing_sub.end_date = end_date
+            existing_sub.traffic_limit_gb = plan.traffic_limit_gb
+            existing_sub.device_limit = plan.device_limit
+            existing_sub.connected_squads = connected_squads
+            existing_sub.plan_id = plan.id
+            existing_sub.plan_period_days = period_days
+            new_sub = existing_sub
+        else:
+            new_sub = Subscription(
+                user_id=db_user.id,
+                status=SubscriptionStatus.ACTIVE.value,
+                is_trial=False,
+                start_date=now,
+                end_date=end_date,
+                traffic_limit_gb=plan.traffic_limit_gb,
+                device_limit=plan.device_limit,
+                connected_squads=connected_squads,
+                autopay_enabled=False,
+                autopay_days_before=3,
+                plan_id=plan.id,
+                plan_period_days=period_days,
+            )
+            db.add(new_sub)
 
-    if existing_sub is not None:
-        existing_sub.status = SubscriptionStatus.ACTIVE.value
-        existing_sub.is_trial = False
-        existing_sub.start_date = now
-        existing_sub.end_date = end_date
-        existing_sub.traffic_limit_gb = plan.traffic_limit_gb
-        existing_sub.device_limit = plan.device_limit
-        existing_sub.connected_squads = connected_squads
-        existing_sub.plan_id = plan.id
-        existing_sub.plan_period_days = period_days
-        new_sub = existing_sub
-    else:
-        new_sub = Subscription(
+        db_user.has_made_first_topup = True
+        db_user.has_had_paid_subscription = True
+
+        # Surface IntegrityError (e.g. UNIQUE on user_id) BEFORE the payment is committed.
+        await db.flush()
+
+        # This commit persists the balance change, the subscription row, and the
+        # transaction together — atomically.
+        transaction = await create_transaction(
+            db,
             user_id=db_user.id,
-            status=SubscriptionStatus.ACTIVE.value,
-            is_trial=False,
-            start_date=now,
-            end_date=end_date,
-            traffic_limit_gb=plan.traffic_limit_gb,
-            device_limit=plan.device_limit,
-            connected_squads=connected_squads,
-            autopay_enabled=False,
-            autopay_days_before=3,
-            plan_id=plan.id,
-            plan_period_days=period_days,
+            type=TransactionType.SUBSCRIPTION_PAYMENT,
+            amount_kopeks=price_kopeks,
+            description=description,
         )
-        db.add(new_sub)
+    except Exception:
+        await db.rollback()
+        raise
 
-    db_user.has_made_first_topup = True
-    db_user.has_had_paid_subscription = True
-    await db.commit()
     await db.refresh(new_sub)
     await db.refresh(db_user)
 
@@ -388,24 +410,33 @@ async def finalize_tariff_renewal(
         "Продление подписки {name} на {period}",
     ).format(name=plan.display_name, period=_period_label(period_days, texts))
 
+    # Charge + extend + record the payment atomically (single commit) so a
+    # failure can't leave the user charged without the extension applied.
     ok = await subtract_user_balance(
-        db, db_user, price_kopeks, description=description, create_transaction=False
+        db, db_user, price_kopeks, description=description,
+        create_transaction=False, commit=False,
     )
     if not ok:
+        await db.rollback()
         return None
 
-    transaction = await create_transaction(
-        db,
-        user_id=db_user.id,
-        type=TransactionType.SUBSCRIPTION_PAYMENT,
-        amount_kopeks=price_kopeks,
-        description=description,
-    )
+    try:
+        old_end_date = subscription.end_date
+        subscription.extend_subscription(period_days)
+        subscription.plan_period_days = period_days
+        await db.flush()
 
-    old_end_date = subscription.end_date
-    subscription.extend_subscription(period_days)
-    subscription.plan_period_days = period_days
-    await db.commit()
+        transaction = await create_transaction(
+            db,
+            user_id=db_user.id,
+            type=TransactionType.SUBSCRIPTION_PAYMENT,
+            amount_kopeks=price_kopeks,
+            description=description,
+        )
+    except Exception:
+        await db.rollback()
+        raise
+
     await db.refresh(subscription)
 
     try:
@@ -429,27 +460,43 @@ async def finalize_tier_switch(
     """
     texts = get_texts(db_user.language)
 
-    if delta_kopeks > 0:
-        days_remaining = max(0, (active_sub.end_date - datetime.utcnow()).days)
-        description = texts.t(
-            "TARIFF_UPGRADE_INVOICE_DESCRIPTION",
-            "Смена тарифа на {name} (доплата за {days_left} дн.)",
-        ).format(name=plan.display_name, days_left=days_remaining)
-        await subtract_user_balance(
-            db, db_user, delta_kopeks, description=description, create_transaction=False
-        )
-        await create_transaction(
-            db,
-            user_id=db_user.id,
-            type=TransactionType.SUBSCRIPTION_PAYMENT,
-            amount_kopeks=delta_kopeks,
-            description=description,
-        )
+    # Charge the delta, swap the plan, and record the payment atomically.
+    try:
+        if delta_kopeks > 0:
+            days_remaining = max(0, (active_sub.end_date - datetime.utcnow()).days)
+            description = texts.t(
+                "TARIFF_UPGRADE_INVOICE_DESCRIPTION",
+                "Смена тарифа на {name} (доплата за {days_left} дн.)",
+            ).format(name=plan.display_name, days_left=days_remaining)
+            ok = await subtract_user_balance(
+                db, db_user, delta_kopeks, description=description,
+                create_transaction=False, commit=False,
+            )
+            if not ok:
+                await db.rollback()
+                return active_sub
 
-    active_sub.plan_id = plan.id
-    active_sub.device_limit = plan.device_limit
-    active_sub.traffic_limit_gb = plan.traffic_limit_gb
-    await db.commit()
+            active_sub.plan_id = plan.id
+            active_sub.device_limit = plan.device_limit
+            active_sub.traffic_limit_gb = plan.traffic_limit_gb
+            await db.flush()
+
+            await create_transaction(
+                db,
+                user_id=db_user.id,
+                type=TransactionType.SUBSCRIPTION_PAYMENT,
+                amount_kopeks=delta_kopeks,
+                description=description,
+            )
+        else:
+            active_sub.plan_id = plan.id
+            active_sub.device_limit = plan.device_limit
+            active_sub.traffic_limit_gb = plan.traffic_limit_gb
+            await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
     await db.refresh(active_sub)
 
     try:

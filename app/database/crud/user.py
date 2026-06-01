@@ -423,6 +423,7 @@ async def subtract_user_balance(
     payment_method: Optional[PaymentMethod] = None,
     *,
     consume_promo_offer: bool = False,
+    commit: bool = True,
 ) -> bool:
     logger.info(f"💸 ОТЛАДКА subtract_user_balance:")
     logger.info(f"   👤 User ID: {user.id} (TG: {user.telegram_id})")
@@ -481,8 +482,14 @@ async def subtract_user_balance(
 
         user.updated_at = datetime.utcnow()
 
-        await db.commit()
-        await db.refresh(user)
+        if commit:
+            await db.commit()
+            await db.refresh(user)
+        else:
+            # Defer the commit to the caller so the balance change can land in
+            # the SAME DB transaction as the subscription/transaction rows.
+            # Prevents charging money without persisting the subscription.
+            await db.flush()
 
         if create_transaction:
             from app.database.crud.transaction import (
