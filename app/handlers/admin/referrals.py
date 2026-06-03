@@ -65,10 +65,7 @@ async def show_referral_statistics(
         text += f"""
 
 <b>Настройки реферальной системы:</b>
-- Минимальное пополнение: {settings.format_price(settings.REFERRAL_MINIMUM_TOPUP_KOPEKS)}
-- Бонус за первое пополнение: {settings.format_price(settings.REFERRAL_FIRST_TOPUP_BONUS_KOPEKS)}
-- Бонус пригласившему: {settings.format_price(settings.REFERRAL_INVITER_BONUS_KOPEKS)}
-- Комиссия с покупок: {settings.REFERRAL_COMMISSION_PERCENT}%
+- Комиссия со всех платежей реферала: {settings.REFERRAL_COMMISSION_PERCENT}%
 - Уведомления: {'✅ Включены' if settings.REFERRAL_NOTIFICATIONS_ENABLED else '❌ Отключены'}
 
 <i>🕐 Обновлено: {current_time}</i>
@@ -101,10 +98,7 @@ async def show_referral_statistics(
 ❌ <b>Ошибка загрузки данных</b>
 
 <b>Текущие настройки:</b>
-- Минимальное пополнение: {settings.format_price(settings.REFERRAL_MINIMUM_TOPUP_KOPEKS)}
-- Бонус за первое пополнение: {settings.format_price(settings.REFERRAL_FIRST_TOPUP_BONUS_KOPEKS)}
-- Бонус пригласившему: {settings.format_price(settings.REFERRAL_INVITER_BONUS_KOPEKS)}
-- Комиссия с покупок: {settings.REFERRAL_COMMISSION_PERCENT}%
+- Комиссия со всех платежей реферала: {settings.REFERRAL_COMMISSION_PERCENT}%
 
 <i>🕐 Время: {current_time}</i>
 """
@@ -184,13 +178,8 @@ async def show_referral_settings(
     text = f"""
 ⚙️ <b>Настройки реферальной системы</b>
 
-<b>Бонусы и награды:</b>
-• Минимальная сумма пополнения для участия: {settings.format_price(settings.REFERRAL_MINIMUM_TOPUP_KOPEKS)}
-• Бонус за первое пополнение реферала: {settings.format_price(settings.REFERRAL_FIRST_TOPUP_BONUS_KOPEKS)}
-• Бонус пригласившему за первое пополнение: {settings.format_price(settings.REFERRAL_INVITER_BONUS_KOPEKS)}
-
 <b>Комиссионные:</b>
-• Процент с каждой покупки реферала: {settings.REFERRAL_COMMISSION_PERCENT}%
+• Процент со всех платежей реферала: {settings.REFERRAL_COMMISSION_PERCENT}%
 
 <b>Уведомления:</b>
 • Статус: {'✅ Включены' if settings.REFERRAL_NOTIFICATIONS_ENABLED else '❌ Отключены'}

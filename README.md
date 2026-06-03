@@ -1031,17 +1031,8 @@ MAX_DEVICES_LIMIT=15
 # Включение/выключение реферальной программы
 REFERRAL_PROGRAM_ENABLED=true
 
-# Минимальная сумма пополнения для активации бонусов
-REFERRAL_MINIMUM_TOPUP_KOPEKS=10000
-
-# Бонус новому пользователю при первом пополнении
-REFERRAL_FIRST_TOPUP_BONUS_KOPEKS=10000
-
-# Бонус пригласившему при первом пополнении реферала
-REFERRAL_INVITER_BONUS_KOPEKS=10000
-
-# Процент комиссии с последующих пополнений
-REFERRAL_COMMISSION_PERCENT=25
+# Процент комиссии, которую пригласивший получает со всех пополнений реферала
+REFERRAL_COMMISSION_PERCENT=50
 ```
 
 ### 🔄 Автосинхронизация Remnawave

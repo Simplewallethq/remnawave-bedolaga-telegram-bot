@@ -1541,7 +1541,7 @@ async def handle_referral(callback: types.CallbackQuery, db_user: User, db: Asyn
         + texts.t("REFERRAL_EARNED", "💰 Заработано: {amount}₽").format(amount=int(amount)) + "\n\n"
         + texts.t("REFERRAL_YOUR_LINK", "Ваша реферальная ссылка:") + "\n"
         + f"<code>{referral_link}</code>\n\n"
-        + texts.t("REFERRAL_REWARD", "Получайте 20₽ за каждого друга, который активирует подписку!")
+        + texts.t("REFERRAL_REWARD", "Получайте 50% со всех платежей приглашённых друзей!")
     )
     
     invite_text = texts.t("REFERRAL_INVITE_TEXT", "🔥 Лови 3 дня бесплатного VPN!\n{link}").format(link=referral_link)

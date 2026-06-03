@@ -2816,9 +2816,6 @@ async def _build_referral_info(
     if referral_code and bot_username:
         referral_link = f"https://t.me/{bot_username}?start={referral_code}"
 
-    minimum_topup_kopeks = int(referral_settings.get("minimum_topup_kopeks") or 0)
-    first_topup_bonus_kopeks = int(referral_settings.get("first_topup_bonus_kopeks") or 0)
-    inviter_bonus_kopeks = int(referral_settings.get("inviter_bonus_kopeks") or 0)
     commission_percent = float(
         get_effective_referral_commission_percent(user)
         if user
@@ -2827,12 +2824,6 @@ async def _build_referral_info(
     )
 
     terms = MiniAppReferralTerms(
-        minimum_topup_kopeks=minimum_topup_kopeks,
-        minimum_topup_label=settings.format_price(minimum_topup_kopeks),
-        first_topup_bonus_kopeks=first_topup_bonus_kopeks,
-        first_topup_bonus_label=settings.format_price(first_topup_bonus_kopeks),
-        inviter_bonus_kopeks=inviter_bonus_kopeks,
-        inviter_bonus_label=settings.format_price(inviter_bonus_kopeks),
         commission_percent=commission_percent,
     )
 

@@ -308,12 +308,6 @@ class MiniAppLegalDocuments(BaseModel):
 
 
 class MiniAppReferralTerms(BaseModel):
-    minimum_topup_kopeks: int = 0
-    minimum_topup_label: Optional[str] = None
-    first_topup_bonus_kopeks: int = 0
-    first_topup_bonus_label: Optional[str] = None
-    inviter_bonus_kopeks: int = 0
-    inviter_bonus_label: Optional[str] = None
     commission_percent: float = 0.0
 
 

@@ -7,7 +7,6 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.database.models import User
 from app.keyboards.inline import get_referral_keyboard
 from app.localization.texts import get_texts
@@ -43,7 +42,7 @@ async def show_referral_info(
         + "\n"
         + texts.t("REFERRAL_YOUR_LINK", "\nВаша реферальная ссылка:")
         + f"\n<code>{referral_link}</code>\n"
-        + texts.t("REFERRAL_REWARD", "\nПолучайте 20₽ за каждого друга, который активирует подписку!")
+        + texts.t("REFERRAL_REWARD", "\nПолучайте 50% со всех платежей приглашённых друзей!")
     )
 
     await edit_or_answer_photo(
@@ -275,14 +274,6 @@ async def create_invite_message(
 
     invite_text = (
         texts.t("REFERRAL_INVITE_TITLE", "🎉 Присоединяйся к VPN сервису!")
-        + "\n\n"
-        + texts.t(
-            "REFERRAL_INVITE_BONUS",
-            "💎 При первом пополнении от {minimum} ты получишь {bonus} бонусом на баланс!",
-        ).format(
-            minimum=texts.format_price(settings.REFERRAL_MINIMUM_TOPUP_KOPEKS),
-            bonus=texts.format_price(settings.REFERRAL_FIRST_TOPUP_BONUS_KOPEKS),
-        )
         + "\n\n"
         + texts.t("REFERRAL_INVITE_FEATURE_FAST", "🚀 Быстрое подключение")
         + "\n"

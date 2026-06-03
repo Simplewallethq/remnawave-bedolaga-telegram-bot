@@ -203,7 +203,6 @@ PRESET_CONFIGS: Dict[str, Dict[str, object]] = {
         "MAINTENANCE_AUTO_ENABLE": True,
         "ADMIN_NOTIFICATIONS_ENABLED": True,
         "ADMIN_REPORTS_ENABLED": True,
-        "REFERRAL_MINIMUM_TOPUP_KOPEKS": 100000,
         "SERVER_STATUS_MODE": "disabled",
     },
     "testing": {
@@ -310,11 +309,10 @@ def _get_group_status(group_key: str) -> Tuple[str, str]:
 
     if key == "referral":
         active = (
-            settings.REFERRAL_COMMISSION_PERCENT
-            or settings.REFERRAL_FIRST_TOPUP_BONUS_KOPEKS
-            or settings.REFERRAL_INVITER_BONUS_KOPEKS
+            settings.is_referral_program_enabled()
+            and settings.REFERRAL_COMMISSION_PERCENT > 0
         )
-        return ("🟢", "Программа активна") if active else ("⚪", "Бонусы не заданы")
+        return ("🟢", "Программа активна") if active else ("⚪", "Программа отключена")
 
     if key == "core":
         token_ok = bool(getattr(settings, "BOT_TOKEN", ""))

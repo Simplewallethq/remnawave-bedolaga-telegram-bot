@@ -156,10 +156,7 @@ class Settings(BaseSettings):
     FIXED_TRAFFIC_LIMIT_GB: int = 100
     BUY_TRAFFIC_BUTTON_VISIBLE: bool = True 
     
-    REFERRAL_MINIMUM_TOPUP_KOPEKS: int = 10000 
-    REFERRAL_FIRST_TOPUP_BONUS_KOPEKS: int = 10000 
-    REFERRAL_INVITER_BONUS_KOPEKS: int = 10000 
-    REFERRAL_COMMISSION_PERCENT: int = 25 
+    REFERRAL_COMMISSION_PERCENT: int = 50
 
     REFERRAL_PROGRAM_ENABLED: bool = True
     REFERRAL_NOTIFICATIONS_ENABLED: bool = True
@@ -1500,9 +1497,6 @@ class Settings(BaseSettings):
     def get_referral_settings(self) -> Dict:
         return {
             "program_enabled": self.is_referral_program_enabled(),
-            "minimum_topup_kopeks": self.REFERRAL_MINIMUM_TOPUP_KOPEKS,
-            "first_topup_bonus_kopeks": self.REFERRAL_FIRST_TOPUP_BONUS_KOPEKS,
-            "inviter_bonus_kopeks": self.REFERRAL_INVITER_BONUS_KOPEKS,
             "commission_percent": self.REFERRAL_COMMISSION_PERCENT,
             "notifications_enabled": self.REFERRAL_NOTIFICATIONS_ENABLED,
         }
