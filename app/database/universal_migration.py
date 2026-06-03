@@ -3394,6 +3394,82 @@ async def add_referral_commission_percent_column() -> bool:
         return False
 
 
+async def add_referral_qualified_columns() -> bool:
+    """Добавляет колонки для учёта "качественных" рефералов партнёра.
+
+    - users.referral_total_topup_kopeks — суммарные пополнения реферала.
+    - users.qualified_referrals_count — счётчик рефералов партнёра, внёсших
+      суммарно более 1000₽.
+
+    При первом добавлении выполняется бэкфилл по существующим данным транзакций.
+    """
+    try:
+        total_exists = await check_column_exists('users', 'referral_total_topup_kopeks')
+        count_exists = await check_column_exists('users', 'qualified_referrals_count')
+
+        if total_exists and count_exists:
+            logger.info("ℹ️ Колонки качественных рефералов уже существуют")
+            return True
+
+        threshold_kopeks = 100000  # 1000₽
+
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+            true_literal = "1" if db_type == 'sqlite' else "TRUE"
+
+            if not total_exists:
+                if db_type == 'mysql':
+                    total_def = "BIGINT NOT NULL DEFAULT 0"
+                else:
+                    total_def = "BIGINT NOT NULL DEFAULT 0"
+                await conn.execute(text(
+                    f"ALTER TABLE users ADD COLUMN referral_total_topup_kopeks {total_def}"
+                ))
+                logger.info("✅ Добавлена колонка users.referral_total_topup_kopeks")
+
+            if not count_exists:
+                count_def = "INTEGER NOT NULL DEFAULT 0" if db_type != 'mysql' else "INT NOT NULL DEFAULT 0"
+                await conn.execute(text(
+                    f"ALTER TABLE users ADD COLUMN qualified_referrals_count {count_def}"
+                ))
+                logger.info("✅ Добавлена колонка users.qualified_referrals_count")
+
+            # Бэкфилл суммарных пополнений рефералов на основе транзакций пополнения
+            await conn.execute(text(
+                f"""
+                UPDATE users
+                SET referral_total_topup_kopeks = (
+                    SELECT COALESCE(SUM(t.amount_kopeks), 0)
+                    FROM transactions t
+                    WHERE t.user_id = users.id
+                      AND t.type = 'deposit'
+                      AND t.is_completed = {true_literal}
+                )
+                WHERE referred_by_id IS NOT NULL
+                """
+            ))
+
+            # Бэкфилл счётчика качественных рефералов у каждого партнёра
+            await conn.execute(text(
+                f"""
+                UPDATE users
+                SET qualified_referrals_count = (
+                    SELECT COUNT(*)
+                    FROM users AS ref
+                    WHERE ref.referred_by_id = users.id
+                      AND ref.referral_total_topup_kopeks > {threshold_kopeks}
+                )
+                """
+            ))
+
+            logger.info("✅ Бэкфилл качественных рефералов завершён")
+            return True
+
+    except Exception as error:
+        logger.error(f"Ошибка добавления колонок качественных рефералов: {error}")
+        return False
+
+
 async def add_referral_system_columns():
     logger.info("=== МИГРАЦИЯ РЕФЕРАЛЬНОЙ СИСТЕМЫ ===")
     
@@ -5451,6 +5527,12 @@ async def run_universal_migration():
             logger.info("✅ Колонка referral_commission_percent готова")
         else:
             logger.warning("⚠️ Проблемы с колонкой referral_commission_percent")
+
+        qualified_columns_ready = await add_referral_qualified_columns()
+        if qualified_columns_ready:
+            logger.info("✅ Колонки качественных рефералов готовы")
+        else:
+            logger.warning("⚠️ Проблемы с колонками качественных рефералов")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ SYSTEM_SETTINGS ===")
         system_settings_ready = await create_system_settings_table()

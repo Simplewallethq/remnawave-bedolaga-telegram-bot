@@ -676,6 +676,10 @@ class User(Base):
     auto_promo_group_assigned = Column(Boolean, nullable=False, default=False)
     auto_promo_group_threshold_kopeks = Column(BigInteger, nullable=False, default=0)
     referral_commission_percent = Column(Integer, nullable=True)
+    # Суммарные пополнения реферала (для квалификации в партнёрской программе)
+    referral_total_topup_kopeks = Column(BigInteger, nullable=False, default=0)
+    # Счётчик рефералов партнёра, внёсших суммарно более 1000₽
+    qualified_referrals_count = Column(Integer, nullable=False, default=0)
     promo_offer_discount_percent = Column(Integer, nullable=False, default=0)
     promo_offer_discount_source = Column(String(100), nullable=True)
     promo_offer_discount_expires_at = Column(DateTime, nullable=True)

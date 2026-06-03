@@ -9,6 +9,11 @@ from app.utils.user_utils import get_effective_referral_commission_percent
 
 logger = logging.getLogger(__name__)
 
+# Порог суммарных пополнений реферала, после превышения которого он засчитывается
+# в счётчик "качественных" рефералов партнёра (1000₽). Используется для будущей
+# партнёрской программы и системы достижений.
+REFERRAL_QUALIFIED_TOPUP_THRESHOLD_KOPEKS = 100_000
+
 
 async def send_referral_notification(
     bot: Bot,
@@ -88,12 +93,35 @@ async def process_referral_topup(
             logger.error(f"Реферер {user.referred_by_id} не найден")
             return False
 
-        commission_percent = get_effective_referral_commission_percent(referrer)
-        commission_amount = int(topup_amount_kopeks * commission_percent / 100)
+        # Накопительная сумма пополнений реферала и счётчик "качественных" рефералов
+        # партнёра (внёсших суммарно более 1000₽). Данные сохраняются для будущей
+        # партнёрской программы и системы достижений (пока нигде не отображаются).
+        previous_total = user.referral_total_topup_kopeks or 0
+        new_total = previous_total + topup_amount_kopeks
+        user.referral_total_topup_kopeks = new_total
+
+        newly_qualified = (
+            previous_total <= REFERRAL_QUALIFIED_TOPUP_THRESHOLD_KOPEKS < new_total
+        )
+        if newly_qualified:
+            referrer.qualified_referrals_count = (referrer.qualified_referrals_count or 0) + 1
 
         if not user.has_made_first_topup:
             user.has_made_first_topup = True
-            await db.commit()
+
+        await db.commit()
+
+        if newly_qualified:
+            logger.info(
+                "⭐ Реферал %s превысил порог %s₽ по сумме пополнений; счётчик партнёра %s = %s",
+                user.telegram_id,
+                REFERRAL_QUALIFIED_TOPUP_THRESHOLD_KOPEKS / 100,
+                referrer.telegram_id,
+                referrer.qualified_referrals_count,
+            )
+
+        commission_percent = get_effective_referral_commission_percent(referrer)
+        commission_amount = int(topup_amount_kopeks * commission_percent / 100)
 
         if commission_amount <= 0:
             return True
