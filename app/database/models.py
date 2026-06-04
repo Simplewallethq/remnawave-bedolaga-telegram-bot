@@ -650,10 +650,16 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    telegram_id = Column(BigInteger, unique=True, index=True, nullable=False)
+    # telegram_id может быть NULL для пользователей, зарегистрированных через веб-кабинет
+    telegram_id = Column(BigInteger, unique=True, index=True, nullable=True)
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
     last_name = Column(String(255), nullable=True)
+    # Веб-аутентификация (личный кабинет без Telegram)
+    email = Column(String(255), unique=True, index=True, nullable=True)
+    password_hash = Column(String(255), nullable=True)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    auth_source = Column(String(20), default="telegram", nullable=False)
     status = Column(String(20), default=UserStatus.ACTIVE.value)
     language = Column(String(5), default="ru")
     balance_kopeks = Column(Integer, default=0)
@@ -706,7 +712,16 @@ class User(Base):
     @property
     def full_name(self) -> str:
         parts = [self.first_name, self.last_name]
-        return " ".join(filter(None, parts)) or self.username or f"ID{self.telegram_id}"
+        joined = " ".join(filter(None, parts))
+        if joined:
+            return joined
+        if self.username:
+            return self.username
+        if self.telegram_id:
+            return f"ID{self.telegram_id}"
+        if self.email:
+            return self.email
+        return f"user_{self.id}"
 
     def get_primary_promo_group(self):
         """Возвращает промогруппу с максимальным приоритетом."""

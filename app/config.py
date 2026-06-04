@@ -443,7 +443,14 @@ class Settings(BaseSettings):
     WEB_API_DEFAULT_TOKEN_NAME: str = "Bootstrap Token"
     WEB_API_TOKEN_HASH_ALGORITHM: str = "sha256"
     WEB_API_REQUEST_LOGGING: bool = True
-    
+
+    # Личный кабинет (веб-аутентификация без Telegram)
+    CABINET_ENABLED: bool = True
+    CABINET_JWT_SECRET: Optional[str] = None  # если пусто — выводится из BOT_TOKEN
+    CABINET_JWT_TTL_HOURS: int = 720
+    CABINET_BASE_URL: str = ""  # для реф-ссылок и return_url оплат
+    CABINET_EMAIL_VERIFICATION: bool = False
+
     APP_CONFIG_PATH: str = "app-config.json"
     ENABLE_DEEP_LINKS: bool = True
     APP_CONFIG_CACHE_TTL: int = 3600 
@@ -1731,6 +1738,13 @@ class Settings(BaseSettings):
 
     def is_web_api_enabled(self) -> bool:
         return bool(self.WEB_API_ENABLED)
+
+    def get_cabinet_jwt_secret(self) -> str:
+        secret = (self.CABINET_JWT_SECRET or "").strip()
+        if secret:
+            return secret
+        # Фолбэк: выводим стабильный секрет из BOT_TOKEN
+        return f"cabinet:{self.BOT_TOKEN}"
 
     def get_web_api_allowed_origins(self) -> list[str]:
         raw = (self.WEB_API_ALLOWED_ORIGINS or "").split(",")

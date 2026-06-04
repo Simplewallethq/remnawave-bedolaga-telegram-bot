@@ -189,7 +189,12 @@ class SubscriptionService:
 
             async with self.get_api_client() as api:
                 hwid_limit = resolve_hwid_device_limit_for_payload(subscription)
-                existing_users = await api.get_user_by_telegram_id(user.telegram_id)
+                # Веб-пользователи кабинета не имеют telegram_id — поиск по нему пропускаем
+                existing_users = (
+                    await api.get_user_by_telegram_id(user.telegram_id)
+                    if user.telegram_id
+                    else None
+                )
                 if existing_users:
                     logger.info(f"🔄 Найден существующий пользователь в панели для {user.telegram_id}")
                     remnawave_user = existing_users[0]
@@ -231,12 +236,16 @@ class SubscriptionService:
                         )
 
                 else:
-                    logger.info(f"🆕 Создаем нового пользователя в панели для {user.telegram_id}")
-                    username = settings.format_remnawave_username(
-                        full_name=user.full_name,
-                        username=user.username,
-                        telegram_id=user.telegram_id,
-                    )
+                    logger.info(f"🆕 Создаем нового пользователя в панели для {user.telegram_id or user.email}")
+                    if user.telegram_id:
+                        username = settings.format_remnawave_username(
+                            full_name=user.full_name,
+                            username=user.username,
+                            telegram_id=user.telegram_id,
+                        )
+                    else:
+                        # Веб-пользователь без Telegram: детерминированный username
+                        username = f"web_{user.id}"
                     create_kwargs = dict(
                         username=username,
                         expire_at=subscription.end_date,
