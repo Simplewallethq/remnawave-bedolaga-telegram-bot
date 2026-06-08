@@ -38,6 +38,8 @@ app/**/*.pyd
 *.pyc
 *.pyo
 *.pyd
+.env
 
 logo.png
 docker-compose.yml
+mirrors_bots.yaml

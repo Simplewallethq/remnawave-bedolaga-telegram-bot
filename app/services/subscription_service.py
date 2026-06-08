@@ -244,8 +244,9 @@ class SubscriptionService:
                             telegram_id=user.telegram_id,
                         )
                     else:
-                        # Веб-пользователь без Telegram: детерминированный username
-                        username = f"web_{user.id}"
+                        # Веб-пользователь без Telegram: детерминированный username.
+                        # Паддинг до 10 символов — RemnaWave требует username длиннее 5.
+                        username = f"web_{user.id:06d}"
                     create_kwargs = dict(
                         username=username,
                         expire_at=subscription.end_date,
@@ -253,6 +254,7 @@ class SubscriptionService:
                         traffic_limit_bytes=self._gb_to_bytes(subscription.traffic_limit_gb),
                         traffic_limit_strategy=get_traffic_reset_strategy(),
                         telegram_id=user.telegram_id,
+                        email=user.email,
                         description=settings.format_remnawave_user_description(
                             full_name=user.full_name,
                             username=user.username,

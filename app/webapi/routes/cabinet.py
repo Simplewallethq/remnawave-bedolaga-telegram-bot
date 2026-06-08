@@ -19,10 +19,12 @@ from app.database.crud.subscription import (
     extend_subscription,
     update_subscription_autopay,
 )
+from app.database.crud.device_binding_code import get_or_create_binding_code
 from app.database.crud.transaction import create_transaction
 from app.database.crud.user import (
     create_web_user,
     get_user_by_email,
+    get_user_by_id,
     get_user_by_referral_code,
 )
 from app.database.models import (
@@ -63,7 +65,10 @@ def _ensure_enabled() -> None:
 
 async def _auth_response(db: AsyncSession, user: User) -> Dict[str, Any]:
     token = cabinet_auth_service.issue_token(user)
-    return {"token": token, "user": cabinet_service.build_user_profile(user)}
+    # Перечитываем с eager-подпиской: build_user_profile читает user.subscription,
+    # иначе ленивая загрузка вне async-сессии → MissingGreenlet.
+    full = await get_user_by_id(db, user.id) or user
+    return {"token": token, "user": cabinet_service.build_user_profile(full)}
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────
@@ -99,14 +104,47 @@ async def register(
     # Триальная подписка + аккаунт в remnawave
     try:
         subscription = await create_trial_subscription(db, user.id)
-        service = SubscriptionService()
-        if service.is_configured():
-            await service.create_remnawave_user(db, subscription)
-    except Exception as error:
-        logger.error(f"Не удалось создать подписку/панель для {email}: {error}")
+    except Exception:
+        logger.exception("Не удалось создать триальную подписку для %s", email)
+        subscription = None
 
-    await db.refresh(user)
+    if subscription is not None:
+        await _provision_remnawave(db, subscription)
+
     return await _auth_response(db, user)
+
+
+async def _provision_remnawave(db: AsyncSession, subscription) -> bool:
+    """Создаёт/обновляет аккаунт в панели RemnaWave для подписки.
+
+    is_configured — это @property (без скобок!). Ошибку логируем с traceback,
+    но регистрацию не валим: до-создание возможно позже (lazy).
+    """
+    service = SubscriptionService()
+    if not service.is_configured:
+        logger.warning("RemnaWave не сконфигурирован: %s", service.configuration_error)
+        return False
+    try:
+        result = await service.create_remnawave_user(db, subscription)
+        if result is None:
+            logger.error("create_remnawave_user вернул None для подписки %s", subscription.id)
+            return False
+        return True
+    except Exception:
+        logger.exception("Ошибка создания RemnaWave аккаунта для подписки %s", subscription.id)
+        return False
+
+
+async def ensure_remnawave_account(db: AsyncSession, user: User) -> None:
+    """Ленивое до-создание аккаунта RemnaWave для веб-юзеров, у которых он отсутствует."""
+    if user.remnawave_uuid:
+        return
+    subscription = getattr(user, "subscription", None)
+    if subscription is None:
+        return
+    created = await _provision_remnawave(db, subscription)
+    if created:
+        await db.refresh(user)
 
 
 @router.post("/auth/login")
@@ -175,8 +213,11 @@ async def get_me(
 
 @router.get("/subscription")
 async def get_subscription(
+    db: AsyncSession = Depends(get_db_session),
     user: User = Depends(get_current_cabinet_user),
 ) -> Dict[str, Any]:
+    # Ленивое до-создание панельного аккаунта (для юзеров, у кого он не создался ранее)
+    await ensure_remnawave_account(db, user)
     return {"subscription": cabinet_service.build_subscription(user)}
 
 
@@ -252,13 +293,13 @@ async def purchase(
     user.has_had_paid_subscription = True
     await db.commit()
 
-    # Синхронизация с панелью
+    # Синхронизация с панелью (is_configured — @property, без скобок!)
     try:
         service = SubscriptionService()
-        if service.is_configured():
+        if service.is_configured:
             await service.update_remnawave_user(db, subscription)
-    except Exception as error:
-        logger.error(f"Ошибка синхронизации подписки {subscription.id}: {error}")
+    except Exception:
+        logger.exception("Ошибка синхронизации подписки %s", subscription.id)
 
     await db.refresh(user)
     return {"subscription": cabinet_service.build_subscription(user)}
@@ -352,6 +393,32 @@ async def topup(
 
 
 # ── Устройства ───────────────────────────────────────────────────────────
+
+@router.post("/device-binding-code")
+async def device_binding_code(
+    db: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_cabinet_user),
+) -> Dict[str, Any]:
+    """Код для привязки устройства (вводится в приложении), как в боте.
+
+    Тот же механизм: get_or_create_binding_code — переиспользуем активный код,
+    создаём новый только если активного нет.
+    """
+    if not user.subscription:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No subscription")
+    try:
+        record = await get_or_create_binding_code(db, user.subscription.id)
+    except Exception:
+        logger.exception("Не удалось создать код привязки для пользователя %s", user.id)
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="Failed to generate code")
+
+    ttl_hours = max(1, int((record.expires_at - datetime.utcnow()).total_seconds() // 3600))
+    return {
+        "code": record.code,
+        "expiresAt": record.expires_at.isoformat(),
+        "ttlHours": ttl_hours,
+    }
+
 
 @router.get("/devices")
 async def get_devices(

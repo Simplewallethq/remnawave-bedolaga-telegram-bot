@@ -32,21 +32,30 @@ logger = logging.getLogger(__name__)
 
 # ── Профиль ──────────────────────────────────────────────────────────────
 
-def _account_code(user: User) -> str:
-    """Стабильный человекочитаемый код аккаунта для входа в кабинет."""
-    return user.referral_code or (
-        user.subscription.remnawave_short_uuid
-        if user.subscription and user.subscription.remnawave_short_uuid
-        else f"user-{user.id}"
-    )
+def _subscription_code(user: User) -> Optional[str]:
+    """Реальный код подписки (идентификатор в RemnaWave), НЕ реферальный код."""
+    sub = user.subscription
+    if sub and sub.remnawave_short_uuid:
+        return sub.remnawave_short_uuid
+    return None
+
+
+def _account_id(user: User) -> str:
+    """Стабильный отображаемый ID аккаунта (не реферальный код)."""
+    sub = user.subscription
+    if sub and sub.remnawave_short_uuid:
+        return sub.remnawave_short_uuid
+    if user.remnawave_uuid:
+        return user.remnawave_uuid
+    return f"user-{user.id}"
 
 
 def build_user_profile(user: User) -> Dict[str, Any]:
-    code = _account_code(user)
+    account_id = _account_id(user)
     return {
-        "id": code,
-        "glyphSeed": user.remnawave_uuid or code,
-        "subscriptionCode": code,
+        "id": account_id,
+        "glyphSeed": user.remnawave_uuid or account_id,
+        "subscriptionCode": _subscription_code(user),
         "balanceRub": round(user.balance_kopeks / 100, 2),
         "email": user.email,
         "authSource": user.auth_source,
@@ -213,11 +222,9 @@ async def build_referral_payouts(
     earnings = await get_referral_earnings_by_user(db, user.id, limit=limit, offset=offset)
     payouts: List[Dict[str, Any]] = []
     for e in earnings:
-        referral = getattr(e, "referral", None)
+        # Не трогаем referral.subscription — связь не загружена eager,
+        # ленивый доступ вне async-сессии даёт MissingGreenlet. planName опционально.
         plan_name = None
-        if referral and getattr(referral, "subscription", None):
-            sub_plan = getattr(referral.subscription, "plan", None)
-            plan_name = sub_plan.display_name if sub_plan else None
         payouts.append(
             {
                 "id": f"rp_{e.id}",
