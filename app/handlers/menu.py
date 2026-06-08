@@ -1390,7 +1390,7 @@ async def handle_onboarding_connect(
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
     texts = get_texts(user.language)
-    support_url = settings.get_support_contact_url() or "https://t.me/letovpnsupport"
+    support_url = settings.get_support_contact_url() or "https://t.me/letosupportbot"
     buttons = []
     if redirect_link:
         buttons.append([InlineKeyboardButton(
@@ -1461,7 +1461,7 @@ async def handle_onboarding_manual_link(
         + f"<blockquote expandable><code>{link}</code></blockquote>"
     )
 
-    support_url = settings.get_support_contact_url() or "https://t.me/letovpnsupport"
+    support_url = settings.get_support_contact_url() or "https://t.me/letosupportbot"
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -1624,7 +1624,7 @@ async def handle_support(callback: types.CallbackQuery, db_user: User, db: Async
     texts = get_texts(db_user.language)
     text = (
         texts.t("SUPPORT_TITLE", "🛠 Поддержка\n\n")
-        + texts.t("SUPPORT_TEXT", "Возникли вопросы или проблемы?\nСвяжитесь с нашей службой поддержки:\n\n📧 Email: support@letovpn.com\n💬 Telegram: @letovpnsupport\n\nМы отвечаем в течение 24 часов.")
+        + texts.t("SUPPORT_TEXT", "Возникли вопросы или проблемы?\nСвяжитесь с нашей службой поддержки:\n\n📧 Email: support@letovpn.com\n💬 Telegram: @letosupportbot\n\nМы отвечаем в течение 24 часов.")
     )
     
     image_path = os.path.join("images", "support_screen.png")

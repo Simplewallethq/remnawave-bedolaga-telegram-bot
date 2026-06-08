@@ -3214,7 +3214,7 @@ def get_onboarding_connected_keyboard(language: str = DEFAULT_LANGUAGE) -> Inlin
     Shown after user clicks Подключиться and deep link is sent.
     """
     texts = get_texts(language)
-    support_url = settings.get_support_contact_url() or "https://t.me/letovpnsupport"
+    support_url = settings.get_support_contact_url() or "https://t.me/letosupportbot"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text=texts.t("ONBOARDING_CONNECTED_BUTTON", "✅ Я подключился"),
@@ -3561,7 +3561,7 @@ def get_support_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
     """
     texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=texts.t("CONTACT_SUPPORT_BUTTON", "💬 Написать в поддержку"), url="https://t.me/letovpnsupport")],
+        [InlineKeyboardButton(text=texts.t("CONTACT_SUPPORT_BUTTON", "💬 Написать в поддержку"), url="https://t.me/letosupportbot")],
         [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
     ])
 
