@@ -5105,9 +5105,10 @@ async def create_subscription_plan_prices_table() -> bool:
                     plan_id INTEGER NOT NULL,
                     period_days INTEGER NOT NULL,
                     price_kopeks INTEGER NOT NULL,
+                    audience VARCHAR(8) NOT NULL DEFAULT 'all',
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT uq_plan_period UNIQUE (plan_id, period_days),
+                    CONSTRAINT uq_plan_period UNIQUE (plan_id, period_days, audience),
                     FOREIGN KEY(plan_id) REFERENCES subscription_plans(id) ON DELETE CASCADE
                 );
 
@@ -5120,9 +5121,10 @@ async def create_subscription_plan_prices_table() -> bool:
                     plan_id INTEGER NOT NULL REFERENCES subscription_plans(id) ON DELETE CASCADE,
                     period_days INTEGER NOT NULL,
                     price_kopeks INTEGER NOT NULL,
+                    audience VARCHAR(8) NOT NULL DEFAULT 'all',
                     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                    CONSTRAINT uq_plan_period UNIQUE (plan_id, period_days)
+                    CONSTRAINT uq_plan_period UNIQUE (plan_id, period_days, audience)
                 );
 
                 CREATE INDEX IF NOT EXISTS ix_subscription_plan_prices_plan_id ON subscription_plan_prices(plan_id);
@@ -5134,9 +5136,10 @@ async def create_subscription_plan_prices_table() -> bool:
                     plan_id INT NOT NULL,
                     period_days INT NOT NULL,
                     price_kopeks INT NOT NULL,
+                    audience VARCHAR(8) NOT NULL DEFAULT 'all',
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    CONSTRAINT uq_plan_period UNIQUE (plan_id, period_days),
+                    CONSTRAINT uq_plan_period UNIQUE (plan_id, period_days, audience),
                     FOREIGN KEY(plan_id) REFERENCES subscription_plans(id) ON DELETE CASCADE
                 );
 
@@ -5235,6 +5238,130 @@ async def add_plan_columns_to_subscriptions() -> bool:
         return False
 
 
+# New-cohort 1-month prices for the Solo/Plus/Pro repricing (kopeks).
+_NEW_MONTHLY_PRICES = {"solo": 32000, "plus": 49000, "pro": 69000}
+
+
+async def add_audience_to_plan_prices() -> bool:
+    """Adds subscription_plan_prices.audience and splits Solo/Plus/Pro 1-month and
+    6-month pricing into cohorts: existing users keep the old prices and the 180-day
+    period ('legacy'); new users get the higher 1-month price ('new') and no 180.
+
+    Idempotent — the data split runs only when the column is first added (existing
+    installs). Fresh installs create the column in the CREATE TABLE and seed both
+    cohorts via seed_subscription_plans().
+    """
+    try:
+        db_type = await get_database_type()
+
+        if await check_column_exists('subscription_plan_prices', 'audience'):
+            logger.info("ℹ️ Колонка subscription_plan_prices.audience уже существует")
+            return True
+
+        async with engine.begin() as conn:
+            # 1. Establish the column + 3-column unique constraint.
+            if db_type == 'sqlite':
+                # sqlite can't drop a named constraint, and keeping the old 2-col UNIQUE
+                # would block the second 30-day row — rebuild the table.
+                await conn.execute(text("""
+                    CREATE TABLE subscription_plan_prices_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        plan_id INTEGER NOT NULL,
+                        period_days INTEGER NOT NULL,
+                        price_kopeks INTEGER NOT NULL,
+                        audience VARCHAR(8) NOT NULL DEFAULT 'all',
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        CONSTRAINT uq_plan_period UNIQUE (plan_id, period_days, audience),
+                        FOREIGN KEY(plan_id) REFERENCES subscription_plans(id) ON DELETE CASCADE
+                    )
+                """))
+                await conn.execute(text(
+                    "INSERT INTO subscription_plan_prices_new "
+                    "(id, plan_id, period_days, price_kopeks, audience, created_at, updated_at) "
+                    "SELECT id, plan_id, period_days, price_kopeks, 'all', created_at, updated_at "
+                    "FROM subscription_plan_prices"
+                ))
+                await conn.execute(text("DROP TABLE subscription_plan_prices"))
+                await conn.execute(text(
+                    "ALTER TABLE subscription_plan_prices_new RENAME TO subscription_plan_prices"
+                ))
+                await conn.execute(text(
+                    "CREATE INDEX ix_subscription_plan_prices_plan_id "
+                    "ON subscription_plan_prices(plan_id)"
+                ))
+            elif db_type == 'postgresql':
+                await conn.execute(text(
+                    "ALTER TABLE subscription_plan_prices "
+                    "ADD COLUMN audience VARCHAR(8) NOT NULL DEFAULT 'all'"
+                ))
+                await conn.execute(text(
+                    "ALTER TABLE subscription_plan_prices DROP CONSTRAINT IF EXISTS uq_plan_period"
+                ))
+                await conn.execute(text(
+                    "ALTER TABLE subscription_plan_prices "
+                    "ADD CONSTRAINT uq_plan_period UNIQUE (plan_id, period_days, audience)"
+                ))
+            elif db_type == 'mysql':
+                await conn.execute(text(
+                    "ALTER TABLE subscription_plan_prices "
+                    "ADD COLUMN audience VARCHAR(8) NOT NULL DEFAULT 'all'"
+                ))
+                try:
+                    await conn.execute(text(
+                        "ALTER TABLE subscription_plan_prices DROP INDEX uq_plan_period"
+                    ))
+                except Exception as drop_err:
+                    logger.warning(f"uq_plan_period не удалён (mysql): {drop_err}")
+                await conn.execute(text(
+                    "ALTER TABLE subscription_plan_prices "
+                    "ADD CONSTRAINT uq_plan_period UNIQUE (plan_id, period_days, audience)"
+                ))
+            else:
+                logger.error(f"Неподдерживаемый тип БД для audience: {db_type}")
+                return False
+
+            # 2. Grandfather Solo/Plus/Pro 1-month and 6-month rows as 'legacy'.
+            await conn.execute(text(
+                "UPDATE subscription_plan_prices SET audience='legacy' "
+                "WHERE period_days IN (30, 180) AND plan_id IN ("
+                "SELECT id FROM subscription_plans WHERE code IN ('solo', 'plus', 'pro'))"
+            ))
+
+            # 3. Insert the new-cohort 1-month prices.
+            for code, price in _NEW_MONTHLY_PRICES.items():
+                row = (await conn.execute(
+                    text("SELECT id FROM subscription_plans WHERE code = :code"),
+                    {"code": code},
+                )).fetchone()
+                if not row:
+                    continue
+                plan_id = row[0]
+                exists = (await conn.execute(
+                    text(
+                        "SELECT id FROM subscription_plan_prices "
+                        "WHERE plan_id = :p AND period_days = 30 AND audience = 'new'"
+                    ),
+                    {"p": plan_id},
+                )).fetchone()
+                if exists:
+                    continue
+                await conn.execute(
+                    text(
+                        "INSERT INTO subscription_plan_prices "
+                        "(plan_id, period_days, price_kopeks, audience) "
+                        "VALUES (:p, 30, :price, 'new')"
+                    ),
+                    {"p": plan_id, "price": price},
+                )
+
+        logger.info("✅ Колонка audience добавлена, цены Solo/Plus/Pro разделены на когорты")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления audience в subscription_plan_prices: {e}")
+        return False
+
+
 # Default tiered-plan catalogue. Edit before deploy or via SQL afterwards;
 # seed_subscription_plans() only inserts plans/prices that are not present yet.
 _SUBSCRIPTION_PLAN_SEED = [
@@ -5254,7 +5381,15 @@ _SUBSCRIPTION_PLAN_SEED = [
             "• VPN только для приложений\n"
             "• 30 ГБ/мес."
         ),
-        "prices": {30: 12000, 90: 30000, 180: 54000, 360: 99000, 720: 180000},
+        # (period_days, audience, price_kopeks). 'all' = everyone; 'legacy'/'new' split
+        # the cohorts. App is not repriced, so all rows are 'all'.
+        "prices": [
+            (30, "all", 12000),
+            (90, "all", 30000),
+            (180, "all", 54000),
+            (360, "all", 99000),
+            (720, "all", 180000),
+        ],
     },
     {
         "code": "solo",
@@ -5271,7 +5406,14 @@ _SUBSCRIPTION_PLAN_SEED = [
             "• полный VPN и все обходы\n"
             "• ♾️ трафик"
         ),
-        "prices": {30: 22000, 90: 60000, 180: 108000, 360: 192000, 720: 336000},
+        "prices": [
+            (30, "legacy", 22000),
+            (30, "new", 32000),
+            (90, "all", 60000),
+            (180, "legacy", 108000),
+            (360, "all", 192000),
+            (720, "all", 336000),
+        ],
     },
     {
         "code": "plus",
@@ -5288,7 +5430,14 @@ _SUBSCRIPTION_PLAN_SEED = [
             "• полный VPN и все обходы\n"
             "• ♾️ трафик"
         ),
-        "prices": {30: 29000, 90: 81000, 180: 150000, 360: 264000, 720: 456000},
+        "prices": [
+            (30, "legacy", 29000),
+            (30, "new", 49000),
+            (90, "all", 81000),
+            (180, "legacy", 150000),
+            (360, "all", 264000),
+            (720, "all", 456000),
+        ],
     },
     {
         "code": "pro",
@@ -5306,7 +5455,14 @@ _SUBSCRIPTION_PLAN_SEED = [
             "• ♾️ трафик\n"
             "• приоритетные серверы и поддержка"
         ),
-        "prices": {30: 39000, 90: 108000, 180: 198000, 360: 348000, 720: 600000},
+        "prices": [
+            (30, "legacy", 39000),
+            (30, "new", 69000),
+            (90, "all", 108000),
+            (180, "legacy", 198000),
+            (360, "all", 348000),
+            (720, "all", 600000),
+        ],
     },
 ]
 
@@ -5353,30 +5509,37 @@ async def seed_subscription_plans() -> bool:
                     plan_id = new_row.fetchone()[0]
                     logger.info(f"  → План '{code}' создан (id={plan_id})")
 
-                for period_days, price_kopeks in plan["prices"].items():
+                for period_days, audience, price_kopeks in plan["prices"]:
                     existing_price = await conn.execute(
                         text(
                             "SELECT id FROM subscription_plan_prices "
-                            "WHERE plan_id = :plan_id AND period_days = :period_days"
+                            "WHERE plan_id = :plan_id AND period_days = :period_days "
+                            "AND audience = :audience"
                         ),
-                        {"plan_id": plan_id, "period_days": period_days},
+                        {
+                            "plan_id": plan_id,
+                            "period_days": period_days,
+                            "audience": audience,
+                        },
                     )
                     if existing_price.fetchone():
                         continue
                     await conn.execute(
                         text(
                             "INSERT INTO subscription_plan_prices "
-                            "(plan_id, period_days, price_kopeks) "
-                            "VALUES (:plan_id, :period_days, :price_kopeks)"
+                            "(plan_id, period_days, price_kopeks, audience) "
+                            "VALUES (:plan_id, :period_days, :price_kopeks, :audience)"
                         ),
                         {
                             "plan_id": plan_id,
                             "period_days": period_days,
                             "price_kopeks": price_kopeks,
+                            "audience": audience,
                         },
                     )
                     logger.info(
-                        f"  → Цена '{code}' × {period_days} дн. = {price_kopeks} коп. добавлена"
+                        f"  → Цена '{code}' × {period_days} дн. [{audience}] "
+                        f"= {price_kopeks} коп. добавлена"
                     )
         return True
     except Exception as e:
@@ -6114,6 +6277,13 @@ async def run_universal_migration():
             logger.info("✅ Таблица subscription_plan_prices готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей subscription_plan_prices")
+
+        if plan_prices_ready:
+            logger.info("=== РАЗДЕЛЕНИЕ ЦЕН НА КОГОРТЫ (audience) ===")
+            if await add_audience_to_plan_prices():
+                logger.info("✅ Колонка audience готова")
+            else:
+                logger.warning("⚠️ Проблемы с колонкой audience")
 
         logger.info("=== ДОБАВЛЕНИЕ plan_id/plan_period_days В SUBSCRIPTIONS ===")
         plan_columns_ready = await add_plan_columns_to_subscriptions()

@@ -12,12 +12,34 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.database.models import Subscription, SubscriptionPlan, SubscriptionPlanPrice
 
 logger = logging.getLogger(__name__)
 
 
 SUPPORTED_PERIOD_DAYS: List[int] = [30, 90, 180, 360, 720]
+
+
+def resolve_pricing_cohort(db_user) -> str:
+    """Pricing cohort for a user: 'new' if they registered at/after the new-pricing
+    cutoff, else 'legacy'. None-safe — missing user/created_at/cutoff falls back to
+    'legacy' (the grandfathered, current-prices set)."""
+    cutoff = settings.get_tariffs_new_pricing_cutoff()
+    created_at = getattr(db_user, "created_at", None)
+    if cutoff is not None and created_at is not None and created_at >= cutoff:
+        return "new"
+    return "legacy"
+
+
+def select_prices_for_cohort(plan: SubscriptionPlan, cohort: str) -> dict:
+    """{period_days: price_kopeks} for the cohort — rows tagged 'all' plus the cohort's
+    own rows. `plan.prices` is already eagerly loaded, so this filters in memory."""
+    return {
+        p.period_days: p.price_kopeks
+        for p in plan.prices
+        if getattr(p, "audience", "all") in ("all", cohort)
+    }
 
 
 async def list_active_plans(db: AsyncSession) -> List[SubscriptionPlan]:
@@ -53,34 +75,38 @@ async def get_plan_price(
     db: AsyncSession,
     plan_id: int,
     period_days: int,
+    cohort: str = "new",
 ) -> Optional[int]:
-    """Absolute price (kopeks) for (plan, period). None if combo not configured."""
+    """Absolute price (kopeks) for (plan, period) in the given cohort. None if not
+    configured. A period is either tagged 'all' or split per-cohort, never both, so
+    filtering audience IN ('all', cohort) yields at most one row."""
     result = await db.execute(
         select(SubscriptionPlanPrice.price_kopeks).where(
             SubscriptionPlanPrice.plan_id == plan_id,
             SubscriptionPlanPrice.period_days == period_days,
+            SubscriptionPlanPrice.audience.in_(("all", cohort)),
         )
     )
     row = result.scalar_one_or_none()
     return int(row) if row is not None else None
 
 
-def get_lowest_monthly_price(plan: SubscriptionPlan) -> Optional[int]:
-    """Headline monthly price (kopeks) used for the "от X ₽/мес" line on tariff cards.
+def get_lowest_monthly_price(plan: SubscriptionPlan, cohort: str = "new") -> Optional[int]:
+    """Headline monthly price (kopeks) for the cohort — the 30-day tariff price as-is.
 
-    Always returns the 30-day tariff price as-is, so users see the same number they'll
-    pay if they pick the 1-month period. (Longer periods carry a discount, but we don't
-    advertise the cheapest-per-month rate to avoid setting a wrong price expectation.)
+    (Longer periods carry a discount, but we don't advertise the cheapest-per-month rate
+    to avoid setting a wrong price expectation.)
     """
-    if not plan.prices:
+    prices = [p for p in plan.prices if getattr(p, "audience", "all") in ("all", cohort)]
+    if not prices:
         return None
-    for p in plan.prices:
+    for p in prices:
         if p.period_days == 30:
             return int(p.price_kopeks)
     # Fallback if no 30-day price configured — use the lowest effective monthly rate.
     monthly_rates = [
         int(round(p.price_kopeks * 30 / p.period_days))
-        for p in plan.prices
+        for p in prices
         if p.period_days > 0
     ]
     return min(monthly_rates) if monthly_rates else None
@@ -123,8 +149,17 @@ def calculate_upgrade_delta(
 async def get_current_plan_price_for_period(
     db: AsyncSession,
     subscription: Subscription,
+    db_user=None,
 ) -> Optional[int]:
-    """Helper for upgrade math: price of the user's current plan at their original period."""
+    """Helper for upgrade math: price of the user's current plan at their original period.
+
+    Uses the user's cohort so a legacy user on the 180-day period still resolves their
+    (legacy) price. Defaults to 'legacy' when no user is supplied, since an existing
+    subscription was bought under the grandfathered set.
+    """
     if subscription.plan_id is None or subscription.plan_period_days is None:
         return None
-    return await get_plan_price(db, subscription.plan_id, subscription.plan_period_days)
+    cohort = resolve_pricing_cohort(db_user) if db_user is not None else "legacy"
+    return await get_plan_price(
+        db, subscription.plan_id, subscription.plan_period_days, cohort=cohort
+    )

@@ -17,7 +17,7 @@ from app.config import PERIOD_PRICES, settings
 from app.database.crud.device_link import get_subscription_by_device_id
 from app.database.models import User
 from app.handlers.subscription.purchase import user_uses_tariffs
-from app.services.plan_pricing_service import list_active_plans
+from app.services.plan_pricing_service import list_active_plans, resolve_pricing_cohort
 
 from ..dependencies import get_db_session, require_api_token
 from ..schemas.plans import (
@@ -38,7 +38,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _build_plan_items(plans) -> list[PlanItem]:
+def _build_plan_items(plans, cohort: str = "new") -> list[PlanItem]:
+    """Serialize plans, keeping only the price rows visible to `cohort` (rows tagged
+    'all' plus the cohort's own). Defaults to 'new' — the public current catalog."""
     return [
         PlanItem(
             id=plan.id,
@@ -55,6 +57,7 @@ def _build_plan_items(plans) -> list[PlanItem]:
             prices=[
                 PlanPriceItem(period_days=p.period_days, price_kopeks=p.price_kopeks)
                 for p in plan.prices
+                if getattr(p, "audience", "all") in ("all", cohort)
             ],
         )
         for plan in plans
@@ -152,10 +155,14 @@ async def get_tariffs_for_device(
     else:
         user_type = "legacy"
 
+    # Pricing cohort is by registration date (separate from the new/legacy/trial
+    # client classification): pre-cutoff users keep the old prices and the 180-day period.
+    cohort = resolve_pricing_cohort(db_user)
+
     plans = await list_active_plans(db)
     response = ForDeviceResponse(
         user_type=user_type,
-        plans=_build_plan_items(plans),
+        plans=_build_plan_items(plans, cohort),
     )
 
     if user_type == "legacy":

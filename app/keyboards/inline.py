@@ -1099,26 +1099,23 @@ _TARIFF_PERIOD_LABEL_FALLBACKS = {
 def _tariff_period_button_label(
     period_days: int,
     price_kopeks: int,
-    price_30_kopeks: Optional[int],
     texts,
 ) -> str:
-    """Period button label. Adds `(-X%)` suffix vs the 1-month baseline when period > 30."""
+    """Period button label. For periods > 30 days appends the per-month price, e.g.
+    "3 мес — 600₽ · (200₽/мес)"."""
     base = texts.t(
         _TARIFF_PERIOD_LABEL_KEYS[period_days],
         _TARIFF_PERIOD_LABEL_FALLBACKS[period_days],
     ).format(price=_format_kopeks_short(price_kopeks))
 
-    if period_days == 30 or not price_30_kopeks:
+    if period_days <= 30:
         return base
 
     months = period_days / 30
-    full = price_30_kopeks * months
-    if full <= 0:
-        return base
-    discount_pct = int(round((1 - price_kopeks / full) * 100))
-    if discount_pct <= 0:
-        return base
-    return f"{base} (-{discount_pct}%)"
+    per_month = int(round(price_kopeks / months))
+    return texts.t(
+        "TARIFF_PERIOD_PERMONTH_SUFFIX", "{base} · ({per_month}/мес)"
+    ).format(base=base, per_month=_format_kopeks_short(per_month))
 
 
 def get_tariffs_keyboard(
@@ -1135,11 +1132,10 @@ def get_tariffs_keyboard(
         if current_plan_id is not None and plan.id == current_plan_id and current_plan_label:
             label = current_plan_label
         else:
-            price_text = _format_kopeks_short(lowest_monthly) if lowest_monthly else "—"
             label = texts.t(
-                "TARIFF_BUTTON_SELECT_FROM",
-                "Выбрать: {name} — от {price} / мес",
-            ).format(name=plan.display_name, price=price_text)
+                "TARIFF_BUTTON_SELECT",
+                "Выбрать {name}",
+            ).format(name=plan.display_name)
         rows.append([
             InlineKeyboardButton(
                 text=label,
@@ -1165,12 +1161,11 @@ def get_tariff_periods_keyboard(
     texts = get_texts(language)
     rows: List[List[InlineKeyboardButton]] = []
 
-    price_30 = period_prices.get(30)
     for period_days in (30, 90, 180, 360, 720):
         price_kopeks = period_prices.get(period_days)
         if price_kopeks is None:
             continue
-        label = _tariff_period_button_label(period_days, price_kopeks, price_30, texts)
+        label = _tariff_period_button_label(period_days, price_kopeks, texts)
         rows.append([
             InlineKeyboardButton(
                 text=label,
@@ -1232,12 +1227,11 @@ def get_renew_periods_keyboard(
     texts = get_texts(language)
     rows: List[List[InlineKeyboardButton]] = []
 
-    price_30 = period_prices.get(30)
     for period_days in (30, 90, 180, 360, 720):
         price_kopeks = period_prices.get(period_days)
         if price_kopeks is None:
             continue
-        label = _tariff_period_button_label(period_days, price_kopeks, price_30, texts)
+        label = _tariff_period_button_label(period_days, price_kopeks, texts)
         rows.append([
             InlineKeyboardButton(
                 text=label,
@@ -3214,7 +3208,7 @@ def get_onboarding_connected_keyboard(language: str = DEFAULT_LANGUAGE) -> Inlin
     Shown after user clicks Подключиться and deep link is sent.
     """
     texts = get_texts(language)
-    support_url = settings.get_support_contact_url() or "https://t.me/letovpnsupport"
+    support_url = settings.get_support_contact_url() or "https://t.me/letosupportbot"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text=texts.t("ONBOARDING_CONNECTED_BUTTON", "✅ Я подключился"),
@@ -3561,7 +3555,7 @@ def get_support_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
     """
     texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=texts.t("CONTACT_SUPPORT_BUTTON", "💬 Написать в поддержку"), url="https://t.me/letovpnsupport")],
+        [InlineKeyboardButton(text=texts.t("CONTACT_SUPPORT_BUTTON", "💬 Написать в поддержку"), url="https://t.me/letosupportbot")],
         [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
     ])
 
