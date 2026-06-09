@@ -41,6 +41,8 @@ from app.services.plan_pricing_service import (
     get_plan_by_id,
     get_plan_price,
     list_active_plans,
+    resolve_pricing_cohort,
+    select_prices_for_cohort,
 )
 from app.services.subscription_service import SubscriptionService
 
@@ -130,14 +132,15 @@ async def show_tariffs_page(
         )
         return
 
-    plans_with_lowest = [(plan, get_lowest_monthly_price(plan)) for plan in plans]
+    cohort = resolve_pricing_cohort(db_user)
+    plans_with_lowest = [(plan, get_lowest_monthly_price(plan, cohort)) for plan in plans]
 
     current_plan_id: Optional[int] = None
     current_plan_label: Optional[str] = None
     active_sub = await _resolve_active_subscription(db_user)
     if active_sub:
         current_plan_id = active_sub.plan_id
-        period_price = await get_current_plan_price_for_period(db, active_sub)
+        period_price = await get_current_plan_price_for_period(db, active_sub, db_user)
         if period_price is not None and active_sub.plan is not None:
             current_plan_label = texts.t(
                 "TARIFF_BUTTON_CURRENT",
@@ -202,7 +205,7 @@ async def show_tariff_periods(
         await _show_tier_switch(callback, db_user, db, active_sub, plan)
         return
 
-    period_prices = {p.period_days: p.price_kopeks for p in plan.prices}
+    period_prices = select_prices_for_cohort(plan, resolve_pricing_cohort(db_user))
     if not period_prices:
         await callback.answer(
             texts.t("TARIFFS_PRICES_MISSING", "Цены для этого тарифа не настроены."),
@@ -243,9 +246,10 @@ async def _show_tier_switch(
     """Show the prorated-delta confirm screen for switching tiers mid-subscription."""
     texts = get_texts(db_user.language)
     period_days = active_sub.plan_period_days or 30
+    cohort = resolve_pricing_cohort(db_user)
 
-    new_price = await get_plan_price(db, new_plan.id, period_days)
-    current_price = await get_current_plan_price_for_period(db, active_sub)
+    new_price = await get_plan_price(db, new_plan.id, period_days, cohort=cohort)
+    current_price = await get_current_plan_price_for_period(db, active_sub, db_user)
 
     if new_price is None:
         await callback.answer(
@@ -540,8 +544,10 @@ async def confirm_tier_upgrade(
         return
 
     period_days = active_sub.plan_period_days or 30
-    new_price = await get_plan_price(db, plan.id, period_days)
-    current_price = await get_current_plan_price_for_period(db, active_sub)
+    new_price = await get_plan_price(
+        db, plan.id, period_days, cohort=resolve_pricing_cohort(db_user)
+    )
+    current_price = await get_current_plan_price_for_period(db, active_sub, db_user)
 
     if new_price is None:
         await callback.answer(
@@ -621,7 +627,9 @@ async def start_tariff_purchase(
         )
         return
 
-    price_kopeks = await get_plan_price(db, plan.id, period_days)
+    price_kopeks = await get_plan_price(
+        db, plan.id, period_days, cohort=resolve_pricing_cohort(db_user)
+    )
     if price_kopeks is None:
         await callback.answer(
             texts.t("TARIFFS_PRICES_MISSING", "Цены для этого тарифа не настроены."),
@@ -717,7 +725,7 @@ async def show_renew_current(
         )
         return
 
-    period_prices = {p.period_days: p.price_kopeks for p in plan.prices}
+    period_prices = select_prices_for_cohort(plan, resolve_pricing_cohort(db_user))
 
     description = texts.t(
         f"TARIFF_CARD_{plan.code.upper()}",
@@ -784,7 +792,9 @@ async def _execute_renewal(
     period_days: int,
 ):
     texts = get_texts(db_user.language)
-    price_kopeks = await get_plan_price(db, plan.id, period_days)
+    price_kopeks = await get_plan_price(
+        db, plan.id, period_days, cohort=resolve_pricing_cohort(db_user)
+    )
     if price_kopeks is None:
         await callback.answer(
             texts.t("TARIFFS_PRICES_MISSING", "Цены для этого тарифа не настроены."),

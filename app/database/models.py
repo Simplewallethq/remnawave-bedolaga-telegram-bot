@@ -982,7 +982,7 @@ class SubscriptionPlan(Base):
 class SubscriptionPlanPrice(Base):
     __tablename__ = "subscription_plan_prices"
     __table_args__ = (
-        UniqueConstraint("plan_id", "period_days", name="uq_plan_period"),
+        UniqueConstraint("plan_id", "period_days", "audience", name="uq_plan_period"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -994,6 +994,9 @@ class SubscriptionPlanPrice(Base):
     )
     period_days = Column(Integer, nullable=False)
     price_kopeks = Column(Integer, nullable=False)
+    # Cohort this price applies to: 'all' (everyone), 'legacy' (registered before the
+    # new-pricing cutoff), or 'new' (registered at/after it). See plan_pricing_service.
+    audience = Column(String(8), nullable=False, default="all", server_default="all")
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 

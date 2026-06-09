@@ -691,6 +691,7 @@ async def _auto_tariff_purchase(
         get_current_plan_price_for_period,
         get_plan_by_id,
         get_plan_price,
+        resolve_pricing_cohort,
     )
 
     tariff_op = (cart_data.get("tariff_op") or "purchase").lower()
@@ -709,6 +710,8 @@ async def _auto_tariff_purchase(
     if fresh_user is None:
         return False
     user = fresh_user
+    # Charge the same cohort price the user saw when the cart was saved.
+    cohort = resolve_pricing_cohort(user)
 
     plan = await get_plan_by_id(db, plan_id)
     if not plan or not plan.is_active:
@@ -726,8 +729,8 @@ async def _auto_tariff_purchase(
                 )
                 return False
             switch_period = active_sub.plan_period_days or period_days
-            new_price = await get_plan_price(db, plan.id, switch_period)
-            current_price = await get_current_plan_price_for_period(db, active_sub)
+            new_price = await get_plan_price(db, plan.id, switch_period, cohort=cohort)
+            current_price = await get_current_plan_price_for_period(db, active_sub, user)
             if new_price is None:
                 return False
             delta = calculate_upgrade_delta(active_sub, plan, new_price, current_price)
@@ -747,7 +750,7 @@ async def _auto_tariff_purchase(
                     user.telegram_id,
                 )
                 return False
-            price = await get_plan_price(db, plan.id, period_days)
+            price = await get_plan_price(db, plan.id, period_days, cohort=cohort)
             if price is None or user.balance_kopeks < price:
                 return False
             result = await finalize_tariff_renewal(db, user, active_sub, plan, period_days, price)
@@ -756,7 +759,7 @@ async def _auto_tariff_purchase(
             subscription = result[0]
 
         else:  # purchase
-            price = await get_plan_price(db, plan.id, period_days)
+            price = await get_plan_price(db, plan.id, period_days, cohort=cohort)
             if price is None or user.balance_kopeks < price:
                 return False
             result = await finalize_tariff_purchase(db, user, plan, period_days, price)

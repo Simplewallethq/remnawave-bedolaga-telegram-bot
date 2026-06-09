@@ -408,7 +408,7 @@ async def show_subscription_info(
             360: texts.t("PLAN_PERIOD_LABEL_1Y", "1 год"),
             720: texts.t("PLAN_PERIOD_LABEL_2Y", "2 года"),
         }.get(period_days, f"{period_days} дн.")
-        plan_price = await get_current_plan_price_for_period(db, subscription)
+        plan_price = await get_current_plan_price_for_period(db, subscription, db_user)
         if plan_price is not None:
             header_line = texts.t(
                 "SUBSCRIPTION_PLAN_HEADER",
@@ -2686,7 +2686,7 @@ async def handle_subscription_menu(
             360: texts.t("PLAN_PERIOD_LABEL_1Y", "1 год"),
             720: texts.t("PLAN_PERIOD_LABEL_2Y", "2 года"),
         }.get(period_days, f"{period_days} дн.")
-        plan_price = await get_current_plan_price_for_period(db, subscription)
+        plan_price = await get_current_plan_price_for_period(db, subscription, db_user)
         if plan_price is not None:
             header_line = texts.t(
                 "SUBSCRIPTION_PLAN_HEADER",

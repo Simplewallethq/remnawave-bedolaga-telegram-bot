@@ -186,6 +186,13 @@ class Settings(BaseSettings):
     # 2026-05-26T12:00:00 UTC = 2026-05-26 15:00 МСК.
     TARIFFS_LEGACY_CUTOFF: str = "2026-05-26T12:00:00"
 
+    # Момент смены цен на 1-месячный период. Пользователи, зарегавшиеся начиная
+    # с этого момента, видят НОВЫЕ цены (Solo 320 / Plus 490 / Pro 690) и не видят
+    # 180-дневный период; зарегавшиеся раньше сохраняют старые цены и 6 мес.
+    # created_at в БД хранится в наивном UTC.
+    # 2026-06-09T12:00:00 UTC = 2026-06-09 15:00 МСК.
+    TARIFFS_NEW_PRICING_CUTOFF: str = "2026-06-09T12:00:00"
+
     # Настройки простой покупки
     SIMPLE_SUBSCRIPTION_ENABLED: bool = True
     SIMPLE_SUBSCRIPTION_PERIOD_DAYS: int = 30
@@ -780,6 +787,22 @@ class Settings(BaseSettings):
         """Naive-UTC datetime of the tariffs rollout. Users registered at/after this
         moment are treated as 'new' and keep tariffs even when TARIFFS_ENABLED=false."""
         raw = getattr(self, "TARIFFS_LEGACY_CUTOFF", None)
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(raw))
+        except (ValueError, TypeError):
+            return None
+        # Normalize to naive UTC to compare with naive-UTC created_at.
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(dt_timezone.utc).replace(tzinfo=None)
+        return parsed
+
+    def get_tariffs_new_pricing_cutoff(self) -> Optional[datetime]:
+        """Naive-UTC datetime of the price update. Users registered at/after this
+        moment get the new prices (Solo 320 / Plus 490 / Pro 690) and lose the
+        180-day period; earlier users keep the old prices and 6 months."""
+        raw = getattr(self, "TARIFFS_NEW_PRICING_CUTOFF", None)
         if not raw:
             return None
         try:
