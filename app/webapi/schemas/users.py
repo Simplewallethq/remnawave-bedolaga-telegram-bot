@@ -34,7 +34,9 @@ class SubscriptionSummary(BaseModel):
 
 class UserResponse(BaseModel):
     id: int
-    telegram_id: int
+    # NULL у веб-пользователей кабинета (auth_source="web")
+    telegram_id: Optional[int] = None
+    email: Optional[str] = None
     username: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None

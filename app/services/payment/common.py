@@ -139,6 +139,10 @@ class PaymentCommonMixin:
         payment_method_title: str | None = None,
     ) -> None:
         """Отправляет пользователю уведомление об успешном платеже."""
+        if not telegram_id:
+            # Веб-пользователь кабинета без Telegram — уведомление в боте пропускаем.
+            return
+
         if not getattr(self, "bot", None):
             # Если бот не передан (например, внутри фоновых задач), уведомление пропускаем.
             return

@@ -100,6 +100,31 @@ async def get_user_by_username(db: AsyncSession, username: str) -> Optional[User
     return user
 
 
+async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
+    if not email:
+        return None
+
+    normalized = email.strip().lower()
+
+    result = await db.execute(
+        select(User)
+        .options(
+            selectinload(User.subscription),
+            selectinload(User.user_promo_groups).selectinload(UserPromoGroup.promo_group),
+            selectinload(User.referrer),
+            selectinload(User.promo_group),
+        )
+        .where(func.lower(User.email) == normalized)
+    )
+
+    user = result.scalar_one_or_none()
+
+    if user and user.subscription:
+        _ = user.subscription.is_active
+
+    return user
+
+
 async def get_user_by_referral_code(db: AsyncSession, referral_code: str) -> Optional[User]:
     result = await db.execute(
         select(User)
@@ -328,6 +353,55 @@ async def create_user(
             raise
 
     raise RuntimeError("Не удалось создать пользователя после синхронизации последовательности")
+
+
+async def create_web_user(
+    db: AsyncSession,
+    email: str,
+    password_hash: str,
+    language: str = "ru",
+    referred_by_id: int = None,
+    referral_code: str = None,
+    first_name: str = None,
+) -> User:
+    """
+    Создаёт пользователя личного кабинета без Telegram (email + пароль).
+    telegram_id остаётся NULL, auth_source = "web".
+    """
+
+    if not referral_code:
+        referral_code = await create_unique_referral_code(db)
+
+    normalized_email = email.strip().lower()
+
+    default_group = await _get_or_create_default_promo_group(db)
+    promo_group_id = default_group.id
+
+    user = User(
+        telegram_id=None,
+        email=normalized_email,
+        password_hash=password_hash,
+        auth_source="web",
+        email_verified=False,
+        first_name=sanitize_telegram_name(first_name),
+        language=language,
+        referred_by_id=referred_by_id,
+        referral_code=referral_code,
+        balance_kopeks=0,
+        has_had_paid_subscription=False,
+        has_made_first_topup=False,
+        promo_group_id=promo_group_id,
+    )
+
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    user.promo_group = default_group
+    logger.info(
+        f"✅ Создан веб-пользователь {normalized_email} с реферальным кодом {referral_code}"
+    )
+    return user
 
 
 async def update_user(

@@ -374,6 +374,7 @@ async def main():
         ) as stage:
             should_start_web_app = (
                 settings.is_web_api_enabled()
+                or settings.CABINET_ENABLED
                 or telegram_webhook_enabled
                 or payment_webhooks_enabled
                 or settings.get_miniapp_static_path().exists()

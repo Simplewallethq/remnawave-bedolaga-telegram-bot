@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -13,6 +14,7 @@ from aiogram import Dispatcher
 from app.config import settings
 from app.services.payment_service import PaymentService
 from app.webapi.app import create_web_api_app
+from app.webapi.routes import cabinet as cabinet_routes
 from app.webapi.docs import add_redoc_endpoint
 
 from . import payments
@@ -90,6 +92,20 @@ def create_unified_app(
     enable_telegram_webhook: bool,
 ) -> FastAPI:
     app = _create_base_app()
+
+    # Личный кабинет (LetoVPNSite). Когда админский Web API включён, cabinet-роутер
+    # и CORS уже подключены внутри create_web_api_app(). Когда выключен — базовое
+    # приложение их не содержит, поэтому монтируем здесь, чтобы /cabinet/* работал
+    # независимо от админки (иначе фронт ловит CORS-ошибку на 404 без заголовков).
+    if settings.CABINET_ENABLED and not settings.is_web_api_enabled():
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.get_web_api_allowed_origins(),
+            allow_credentials=False,  # кабинет авторизуется Bearer-токеном, не cookies
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        app.include_router(cabinet_routes.router, prefix="/cabinet", tags=["cabinet"])
 
     bot = all_bots[0]
     app.state.bot = bot

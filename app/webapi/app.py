@@ -11,6 +11,7 @@ from .routes import (
     broadcasts,
     backups,
     ad_attribution,
+    cabinet,
     campaigns,
     config,
     devices,
@@ -260,5 +261,6 @@ def create_web_api_app() -> FastAPI:
     )
     app.include_router(devices.router, prefix="/api/devices", tags=["devices"])
     app.include_router(plans.router, prefix="/api/plans", tags=["plans"])
+    app.include_router(cabinet.router, prefix="/cabinet", tags=["cabinet"])
 
     return app

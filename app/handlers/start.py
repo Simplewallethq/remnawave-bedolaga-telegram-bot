@@ -667,6 +667,42 @@ async def _continue_registration_after_language(
 
 
 
+async def _send_cabinet_login_link(message: types.Message, user, texts) -> None:
+    """Выдаёт ссылку авто-входа в веб-кабинет (deep-link /start cabinet)."""
+    from app.services.cabinet_auth_service import cabinet_auth_service
+
+    base = (settings.CABINET_BASE_URL or "").rstrip("/")
+    if not settings.CABINET_ENABLED or not base:
+        await message.answer(
+            texts.t("CABINET_DISABLED", "ℹ️ Личный кабинет временно недоступен.")
+        )
+        return
+
+    token = cabinet_auth_service.issue_token(user)
+    url = f"{base}/app/auth/callback?token={token}"
+    text = texts.t(
+        "CABINET_LOGIN_LINK",
+        "🔐 <b>Вход в личный кабинет</b>\n\n"
+        "Нажмите кнопку ниже — вы войдёте автоматически.\n"
+        "Не передавайте эту ссылку другим: она даёт доступ к вашему аккаунту.",
+    )
+
+    # Telegram не принимает не-https URL в inline-кнопках (локальная отладка) —
+    # в этом случае шлём ссылку текстом.
+    if url.startswith("https://"):
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[[
+            types.InlineKeyboardButton(
+                text=texts.t("CABINET_LOGIN_BUTTON", "🔐 Открыть личный кабинет"),
+                url=url,
+            )
+        ]])
+        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        await message.answer(
+            f"{text}\n\n{url}", parse_mode="HTML", disable_web_page_preview=True
+        )
+
+
 async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession, db_user=None):
     logger.info(f"🚀 START: Обработка /start от {message.from_user.id}")
 
@@ -693,6 +729,14 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
 
     if state_needs_update:
         await state.set_data(data)
+
+    # Deep-link "cabinet": пользователь пришёл с сайта за входом в личный кабинет.
+    # Обрабатываем до кампаний/рефералов, чтобы payload не считался реф-кодом.
+    cabinet_login = False
+    if start_parameter == "cabinet":
+        cabinet_login = True
+        start_parameter = None
+        logger.info("🔐 START: Запрошен вход в личный кабинет (deep-link cabinet)")
 
     if start_parameter and start_parameter.startswith("p_"):
         # Partner VIP-link: locally HMAC-verified before any DB/network calls.
@@ -886,6 +930,11 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
                     except Exception as e:
                         logger.error("Не удалось отправить partner-предупреждение: %s", e)
                 await db.refresh(user, ["subscription"])
+
+        # Cabinet deep-link: отправляем ссылку авто-входа и не показываем меню.
+        if cabinet_login:
+            await _send_cabinet_login_link(message, user, texts)
+            return
 
         # Device-link deeplink for existing user without any subscription:
         # auto-create trial (same as for new users) and link the device, instead of showing the menu.

@@ -3179,6 +3179,108 @@ async def ensure_user_bot_id_column():
         return False
 
 
+async def ensure_user_web_auth_columns() -> bool:
+    """Колонки для веб-аутентификации личного кабинета (email/пароль)."""
+
+    web_auth_fields = {
+        "email": "VARCHAR(255)",
+        "password_hash": "VARCHAR(255)",
+        "email_verified": "BOOLEAN DEFAULT FALSE",
+        "auth_source": "VARCHAR(20) DEFAULT 'telegram'",
+    }
+
+    try:
+        db_type = await get_database_type()
+
+        for field_name, field_type in web_auth_fields.items():
+            if await check_column_exists("users", field_name):
+                continue
+
+            column_type = field_type
+            if db_type == "sqlite":
+                column_type = column_type.replace(
+                    "BOOLEAN DEFAULT FALSE", "BOOLEAN DEFAULT 0"
+                )
+
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text(f"ALTER TABLE users ADD COLUMN {field_name} {column_type}")
+                )
+            logger.info(f"✅ Добавлена колонка {field_name} в таблицу users")
+
+        # Уникальный индекс на email (имя совпадает с автогенерируемым SQLAlchemy)
+        if not await check_index_exists("users", "ix_users_email"):
+            try:
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("CREATE UNIQUE INDEX ix_users_email ON users (email)")
+                    )
+                logger.info("✅ Создан уникальный индекс ix_users_email")
+            except Exception as index_error:
+                logger.warning(
+                    f"⚠️ Не удалось создать индекс ix_users_email: {index_error}"
+                )
+
+        logger.info("✅ Колонки веб-аутентификации готовы")
+        return True
+
+    except Exception as error:
+        logger.error(f"Ошибка добавления колонок веб-аутентификации: {error}")
+        return False
+
+
+async def relax_users_telegram_id_nullable() -> bool:
+    """Снимает NOT NULL с users.telegram_id (для веб-юзеров без Telegram)."""
+
+    try:
+        db_type = await get_database_type()
+
+        if db_type == "postgresql":
+            async with engine.begin() as conn:
+                result = await conn.execute(
+                    text(
+                        """
+                        SELECT is_nullable
+                        FROM information_schema.columns
+                        WHERE table_name = 'users' AND column_name = 'telegram_id'
+                        """
+                    )
+                )
+                row = result.fetchone()
+                if row and row[0] == "NO":
+                    await conn.execute(
+                        text("ALTER TABLE users ALTER COLUMN telegram_id DROP NOT NULL")
+                    )
+                    logger.info("✅ users.telegram_id теперь NULLABLE")
+                else:
+                    logger.info("ℹ️ users.telegram_id уже NULLABLE")
+            return True
+
+        if db_type == "mysql":
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("ALTER TABLE users MODIFY COLUMN telegram_id BIGINT NULL")
+                )
+            logger.info("✅ users.telegram_id теперь NULLABLE")
+            return True
+
+        if db_type == "sqlite":
+            # SQLite не умеет DROP NOT NULL без пересоздания таблицы.
+            # SQLite используется только в dev; на проде PostgreSQL.
+            logger.warning(
+                "⚠️ SQLite: пропускаем снятие NOT NULL с telegram_id "
+                "(требует пересоздания таблицы; используйте PostgreSQL на проде)"
+            )
+            return True
+
+        logger.error(f"Неподдерживаемый тип БД для relax telegram_id: {db_type}")
+        return False
+
+    except Exception as error:
+        logger.error(f"Ошибка снятия NOT NULL с telegram_id: {error}")
+        return False
+
+
 async def add_media_fields_to_broadcast_history():
     logger.info("=== ДОБАВЛЕНИЕ ПОЛЕЙ МЕДИА В BROADCAST_HISTORY ===")
     
@@ -5680,6 +5782,19 @@ async def run_universal_migration():
                 logger.info("✅ Последовательности PostgreSQL синхронизированы")
             else:
                 logger.warning("⚠️ Не удалось синхронизировать последовательности PostgreSQL")
+
+        logger.info("=== ВЕБ-АУТЕНТИФИКАЦИЯ ЛИЧНОГО КАБИНЕТА ===")
+        web_auth_columns_ready = await ensure_user_web_auth_columns()
+        if web_auth_columns_ready:
+            logger.info("✅ Колонки веб-аутентификации готовы")
+        else:
+            logger.warning("⚠️ Проблемы с колонками веб-аутентификации")
+
+        telegram_id_nullable_ready = await relax_users_telegram_id_nullable()
+        if telegram_id_nullable_ready:
+            logger.info("✅ users.telegram_id допускает NULL")
+        else:
+            logger.warning("⚠️ Проблемы со снятием NOT NULL с telegram_id")
 
         referral_migration_success = await add_referral_system_columns()
         if not referral_migration_success:
