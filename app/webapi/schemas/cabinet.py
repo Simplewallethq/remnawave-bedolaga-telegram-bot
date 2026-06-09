@@ -11,6 +11,14 @@ class RegisterRequest(BaseModel):
     email: str = Field(..., max_length=255)
     password: str = Field(..., min_length=6, max_length=128)
     ref: Optional[str] = Field(default=None, description="Реферальный код пригласившего")
+    code: Optional[str] = Field(
+        default=None, max_length=12,
+        description="Email-код подтверждения (обязателен при CABINET_EMAIL_VERIFICATION)",
+    )
+
+
+class RegisterOtpRequest(BaseModel):
+    email: str = Field(..., max_length=255)
 
 
 class LoginRequest(BaseModel):

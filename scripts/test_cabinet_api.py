@@ -15,6 +15,8 @@ import argparse
 import hashlib
 import hmac
 import json
+import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -70,6 +72,46 @@ def request(method, url, body=None, token=None, headers=None):
         return 0, str(e)
 
 
+def read_otp_from_logs(email: str, container: str = "remnawave_bot"):
+    """Достаёт OTP-код из логов бота (SENDGRID_MOCK=true пишет код в лог)."""
+    try:
+        out = subprocess.run(
+            ["docker", "logs", container, "--since", "2m"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception:
+        return None
+    logs = out.stdout + out.stderr
+    codes = re.findall(rf"OTP email \| to={re.escape(email)} code=(\d{{6}})", logs)
+    return codes[-1] if codes else None
+
+
+def register_with_otp(cab: str, email: str, password: str):
+    """Полный двухшаговый register: запрос кода → код из логов → register."""
+    st, data = request("POST", f"{cab}/auth/register-otp", {"email": email})
+    check("register-otp 200", st == 200 and (data or {}).get("ok") is True, f"got {st}: {data}")
+
+    st, data = request("POST", f"{cab}/auth/register-otp", {"email": email})
+    check("повторный register-otp в кулдауне → 429", st == 429, f"got {st}: {data}")
+
+    code = read_otp_from_logs(email)
+    check("OTP-код найден в логах (SENDGRID_MOCK)", bool(code), "включите SENDGRID_MOCK=true")
+
+    st, data = request("POST", f"{cab}/auth/register", {"email": email, "password": password})
+    check("register без кода → 400 code_required", st == 400 and (data or {}).get("detail") == "code_required", f"got {st}: {data}")
+
+    st, data = request("POST", f"{cab}/auth/register", {"email": email, "password": password, "code": "000000" if code != "000000" else "111111"})
+    check("register с неверным кодом → 400 invalid_code", st == 400 and (data or {}).get("detail") == "invalid_code", f"got {st}: {data}")
+
+    st, data = request("POST", f"{cab}/auth/register", {"email": email, "password": password, "code": code})
+    check("register с верным кодом 200", st == 200, f"got {st}: {data}")
+
+    # Код одноразовый: повторная регистрация с тем же кодом не пройдёт
+    st, data2 = request("POST", f"{cab}/auth/register", {"email": email, "password": password, "code": code})
+    check("повторный register → 409 (email занят)", st == 409, f"got {st}")
+    return data
+
+
 def sign_init_data(bot_token: str, telegram_id: int) -> str:
     """Собирает валидный Telegram WebApp initData (подпись HMAC по BOT_TOKEN)."""
     user = json.dumps(
@@ -103,16 +145,15 @@ def main():
     email = f"test+{ts}@letovpn.test"
     password = "E2e-test-password-1"
 
-    print(f"\n— Auth: register/login ({email})")
-    st, data = request("POST", f"{cab}/auth/register", {"email": email, "password": password})
-    check("register 200", st == 200, f"got {st}: {data}")
+    print(f"\n— Auth: регистрация с OTP ({email})")
+    data = register_with_otp(cab, email, password)
     token = (data or {}).get("token")
     user0 = (data or {}).get("user") or {}
     check("register: token присутствует", bool(token))
     check("register: профиль {id,glyphSeed,balanceRub}", all(k in user0 for k in ("id", "glyphSeed", "balanceRub")), str(user0))
 
-    st, data = request("POST", f"{cab}/auth/register", {"email": email, "password": password})
-    check("повторный register → 409", st == 409, f"got {st}")
+    st, data = request("POST", f"{cab}/auth/register-otp", {"email": email})
+    check("register-otp для занятого email → 409", st == 409, f"got {st}")
 
     st, data = request("POST", f"{cab}/auth/login", {"email": email, "password": "wrong"})
     check("login с неверным паролем → 401", st == 401, f"got {st}")

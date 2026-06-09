@@ -457,6 +457,15 @@ class Settings(BaseSettings):
     CABINET_JWT_TTL_HOURS: int = 720
     CABINET_BASE_URL: str = ""  # для реф-ссылок и return_url оплат
     CABINET_EMAIL_VERIFICATION: bool = False
+    CABINET_OTP_TTL_MINUTES: int = 10
+    CABINET_OTP_RESEND_SECONDS: int = 60  # минимальный интервал между отправками кода
+    CABINET_OTP_MAX_ATTEMPTS: int = 5
+
+    # SendGrid (письма кабинета: коды подтверждения)
+    SENDGRID_API_KEY: Optional[str] = None
+    SENDGRID_FROM_EMAIL: Optional[str] = None
+    SENDGRID_FROM_NAME: str = "LetoVPN"
+    SENDGRID_MOCK: bool = False  # true: код пишется в лог вместо отправки письма
 
     APP_CONFIG_PATH: str = "app-config.json"
     ENABLE_DEEP_LINKS: bool = True

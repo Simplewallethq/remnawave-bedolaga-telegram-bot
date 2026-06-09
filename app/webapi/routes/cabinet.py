@@ -52,6 +52,7 @@ from app.webapi.schemas.cabinet import (
     LoginCodeRequest,
     LoginRequest,
     PurchaseRequest,
+    RegisterOtpRequest,
     RegisterRequest,
     TelegramLoginRequest,
     TopupRequest,
@@ -77,6 +78,75 @@ async def _auth_response(db: AsyncSession, user: User) -> Dict[str, Any]:
 
 # ── Auth ─────────────────────────────────────────────────────────────────
 
+@router.post("/auth/register-otp")
+async def register_otp(
+    payload: RegisterOtpRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """Шлёт email-код подтверждения для регистрации (шаг 1 из 2)."""
+    from app.database.crud import cabinet_otp as otp_crud
+    from app.services import email_service
+
+    _ensure_enabled()
+    if not settings.CABINET_EMAIL_VERIFICATION:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Email verification is disabled")
+    if not email_service.is_email_configured():
+        logger.error("SendGrid не сконфигурирован — register-otp недоступен")
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="Email delivery unavailable")
+
+    email = payload.email.strip().lower()
+    if not validate_email(email):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid email")
+
+    existing = await get_user_by_email(db, email)
+    if existing:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="Email already registered")
+
+    active = await otp_crud.get_active_otp(db, email)
+    if active:
+        age = (datetime.utcnow() - active.created_at).total_seconds()
+        retry_after = int(settings.CABINET_OTP_RESEND_SECONDS - age)
+        if retry_after > 0:
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Code already sent",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+    code = otp_crud.generate_otp_code()
+    await otp_crud.create_otp(db, email, code)
+    try:
+        await email_service.send_otp_email(email, code)
+    except email_service.EmailDeliveryError:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="Failed to send email")
+
+    return {
+        "ok": True,
+        "ttlSeconds": settings.CABINET_OTP_TTL_MINUTES * 60,
+        "resendAfter": settings.CABINET_OTP_RESEND_SECONDS,
+    }
+
+
+async def _verify_registration_code(db: AsyncSession, email: str, code: Optional[str]) -> None:
+    """Проверяет email-код регистрации; 400 invalid_code / 410 code_expired."""
+    from app.database.crud import cabinet_otp as otp_crud
+
+    if not code or not code.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="code_required")
+
+    record = await otp_crud.get_active_otp(db, email)
+    if not record:
+        raise HTTPException(status.HTTP_410_GONE, detail="code_expired")
+
+    if not otp_crud.verify_otp_code(code.strip(), record.hashed_code):
+        attempts = await otp_crud.register_failed_attempt(db, record)
+        if attempts >= settings.CABINET_OTP_MAX_ATTEMPTS:
+            raise HTTPException(status.HTTP_410_GONE, detail="code_expired")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="invalid_code")
+
+    await otp_crud.delete_otp(db, record)
+
+
 @router.post("/auth/register")
 async def register(
     payload: RegisterRequest,
@@ -92,6 +162,9 @@ async def register(
     if existing:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="Email already registered")
 
+    if settings.CABINET_EMAIL_VERIFICATION:
+        await _verify_registration_code(db, email, payload.code)
+
     referred_by_id = None
     if payload.ref:
         referrer = await get_user_by_referral_code(db, payload.ref.strip())
@@ -104,6 +177,10 @@ async def register(
         password_hash=hash_password(payload.password),
         referred_by_id=referred_by_id,
     )
+
+    if settings.CABINET_EMAIL_VERIFICATION:
+        user.email_verified = True
+        await db.commit()
 
     # Триальная подписка + аккаунт в remnawave
     try:

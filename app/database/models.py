@@ -969,6 +969,19 @@ class DeviceBindingCode(Base):
     subscription = relationship("Subscription", back_populates="binding_codes")
 
 
+class CabinetOtp(Base):
+    """Email-код подтверждения регистрации в веб-кабинете (хранится только HMAC)."""
+
+    __tablename__ = "cabinet_otps"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), nullable=False, index=True)
+    hashed_code = Column(String(64), nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+
+
 class SubscriptionPlan(Base):
     __tablename__ = "subscription_plans"
 
