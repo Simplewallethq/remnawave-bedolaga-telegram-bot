@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,7 +36,11 @@ from app.database.models import (
 from app.services import cabinet_service
 from app.services.cabinet_auth_service import cabinet_auth_service
 from app.services.payment_service import PaymentService
-from app.services.plan_pricing_service import get_plan_by_code, get_plan_price
+from app.services.plan_pricing_service import (
+    get_plan_by_code,
+    get_plan_price,
+    resolve_pricing_cohort,
+)
 from app.services.subscription_service import SubscriptionService
 from app.utils.passwords import hash_password
 from app.utils.telegram_webapp import parse_webapp_init_data
@@ -226,7 +230,7 @@ async def get_plans(
     db: AsyncSession = Depends(get_db_session),
     user: User = Depends(get_current_cabinet_user),
 ) -> Dict[str, Any]:
-    return {"plans": await cabinet_service.build_plans(db)}
+    return {"plans": await cabinet_service.build_plans(db, cohort=resolve_pricing_cohort(user))}
 
 
 @router.post("/subscription/autorenew")
@@ -257,7 +261,9 @@ async def purchase(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Plan not found")
 
     period_days = payload.months * 30
-    price_kopeks = await get_plan_price(db, plan.id, period_days)
+    price_kopeks = await get_plan_price(
+        db, plan.id, period_days, cohort=resolve_pricing_cohort(user)
+    )
     if price_kopeks is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -317,6 +323,47 @@ async def get_transactions(
     return await cabinet_service.build_transactions(db, user, limit=limit, offset=offset)
 
 
+_CRYPTOBOT_FALLBACK_RATE = 95.0
+
+
+async def _usd_to_rub_rate() -> float:
+    from app.utils.currency_converter import currency_converter
+
+    try:
+        rate = await currency_converter.get_usd_to_rub_rate()
+    except Exception:
+        rate = 0.0
+    if not rate or rate <= 0:
+        rate = _CRYPTOBOT_FALLBACK_RATE
+    return float(rate)
+
+
+def _platega_method_code(kind: str) -> Optional[int]:
+    """Код метода Platega под наш kind: sbp → 2 (СБП QR), card → 11/10/12."""
+    active = settings.get_platega_active_methods()
+    preferred = {"sbp": [2], "card": [11, 10, 12]}.get(kind, [])
+    for code in preferred:
+        if code in active:
+            return code
+    return None
+
+
+async def _create_platega_topup(
+    ps: PaymentService, db: AsyncSession, user: User, kind: str,
+    amount_kopeks: int, description: str,
+) -> Optional[str]:
+    method_code = _platega_method_code(kind)
+    if method_code is None:
+        return None
+    result = await ps.create_platega_payment(
+        db=db, user_id=user.id, amount_kopeks=amount_kopeks,
+        description=description,
+        language=user.language or settings.DEFAULT_LANGUAGE,
+        payment_method_code=method_code,
+    )
+    return (result or {}).get("redirect_url")
+
+
 async def _create_topup_payment(
     db: AsyncSession, user: User, kind: str, amount_kopeks: int
 ) -> Dict[str, Any]:
@@ -343,6 +390,8 @@ async def _create_topup_payment(
                 description=description, language=user.language,
             )
             url = result.get("payment_url") if result else None
+        elif settings.is_platega_enabled() and _platega_method_code("card") is not None:
+            url = await _create_platega_topup(ps, db, user, "card", amount_kopeks, description)
         else:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Card payments unavailable")
 
@@ -359,6 +408,8 @@ async def _create_topup_payment(
                 payment_method="sbp",
             )
             url = (result or {}).get("sbp_url") or (result or {}).get("link_url") or (result or {}).get("payment_url")
+        elif settings.is_platega_enabled() and _platega_method_code("sbp") is not None:
+            url = await _create_platega_topup(ps, db, user, "sbp", amount_kopeks, description)
         else:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="SBP payments unavailable")
 
@@ -369,6 +420,25 @@ async def _create_topup_payment(
                 description=description, language=user.language or settings.DEFAULT_LANGUAGE,
             )
             url = result.get("payment_url") if result else None
+        elif settings.is_cryptobot_enabled():
+            rate = await _usd_to_rub_rate()
+            amount_usd = round(amount_kopeks / 100 / rate, 2)
+            if amount_usd < 1.0:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail=f"Amount is below minimum ({rate:.0f} RUB)",
+                )
+            result = await ps.create_cryptobot_payment(
+                db=db, user_id=user.id, amount_usd=amount_usd,
+                asset=settings.CRYPTOBOT_DEFAULT_ASSET,
+                description=description,
+                payload=f"balance_{user.id}_{amount_kopeks}",
+            )
+            url = (
+                (result or {}).get("bot_invoice_url")
+                or (result or {}).get("mini_app_invoice_url")
+                or (result or {}).get("web_app_invoice_url")
+            )
         else:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Crypto payments unavailable")
     else:

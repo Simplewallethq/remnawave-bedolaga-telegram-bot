@@ -103,8 +103,8 @@ def _plan_features(plan) -> List[Dict[str, Any]]:
     return features
 
 
-def _serialize_plan(plan) -> Dict[str, Any]:
-    monthly_kopeks = get_lowest_monthly_price(plan)
+def _serialize_plan(plan, cohort: str = "new") -> Dict[str, Any]:
+    monthly_kopeks = get_lowest_monthly_price(plan, cohort)
     traffic_gb = plan.traffic_limit_gb or 0
     return {
         "id": plan.code,
@@ -118,9 +118,9 @@ def _serialize_plan(plan) -> Dict[str, Any]:
     }
 
 
-async def build_plans(db: AsyncSession) -> List[Dict[str, Any]]:
+async def build_plans(db: AsyncSession, cohort: str = "new") -> List[Dict[str, Any]]:
     plans = await list_active_plans(db)
-    return [_serialize_plan(plan) for plan in plans]
+    return [_serialize_plan(plan, cohort) for plan in plans]
 
 
 # ── Транзакции ───────────────────────────────────────────────────────────
