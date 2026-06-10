@@ -467,6 +467,10 @@ class Settings(BaseSettings):
     SENDGRID_FROM_NAME: str = "LetoVPN"
     SENDGRID_MOCK: bool = False  # true: код пишется в лог вместо отправки письма
 
+    # hCaptcha (защита email-входа/регистрации кабинета)
+    HCAPTCHA_ENABLED: bool = False
+    HCAPTCHA_SECRET_KEY: Optional[str] = None
+
     APP_CONFIG_PATH: str = "app-config.json"
     ENABLE_DEEP_LINKS: bool = True
     APP_CONFIG_CACHE_TTL: int = 3600 

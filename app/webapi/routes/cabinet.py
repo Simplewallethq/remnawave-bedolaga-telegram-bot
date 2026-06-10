@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -68,6 +68,17 @@ def _ensure_enabled() -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Cabinet is disabled")
 
 
+async def _ensure_captcha(token: Optional[str], request: Request) -> None:
+    """Проверяет hCaptcha-токен; no-op при HCAPTCHA_ENABLED=false."""
+    from app.services import captcha_service
+
+    if not settings.HCAPTCHA_ENABLED:
+        return
+    remote_ip = request.client.host if request.client else None
+    if not await captcha_service.verify_captcha(token, remote_ip):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="captcha_failed")
+
+
 async def _auth_response(db: AsyncSession, user: User) -> Dict[str, Any]:
     token = cabinet_auth_service.issue_token(user)
     # Перечитываем с eager-подпиской: build_user_profile читает user.subscription,
@@ -81,6 +92,7 @@ async def _auth_response(db: AsyncSession, user: User) -> Dict[str, Any]:
 @router.post("/auth/register-otp")
 async def register_otp(
     payload: RegisterOtpRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db_session),
 ) -> Dict[str, Any]:
     """Шлёт email-код подтверждения для регистрации (шаг 1 из 2)."""
@@ -88,6 +100,7 @@ async def register_otp(
     from app.services import email_service
 
     _ensure_enabled()
+    await _ensure_captcha(payload.captcha_token, request)
     if not settings.CABINET_EMAIL_VERIFICATION:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Email verification is disabled")
     if not email_service.is_email_configured():
@@ -231,9 +244,11 @@ async def ensure_remnawave_account(db: AsyncSession, user: User) -> None:
 @router.post("/auth/login")
 async def login(
     payload: LoginRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db_session),
 ) -> Dict[str, Any]:
     _ensure_enabled()
+    await _ensure_captcha(payload.captcha_token, request)
     user = await cabinet_auth_service.authenticate_email(
         db, payload.email.strip().lower(), payload.password
     )

@@ -19,11 +19,13 @@ class RegisterRequest(BaseModel):
 
 class RegisterOtpRequest(BaseModel):
     email: str = Field(..., max_length=255)
+    captcha_token: Optional[str] = Field(default=None, max_length=4096, description="hCaptcha token")
 
 
 class LoginRequest(BaseModel):
     email: str = Field(..., max_length=255)
     password: str = Field(..., min_length=1, max_length=128)
+    captcha_token: Optional[str] = Field(default=None, max_length=4096, description="hCaptcha token")
 
 
 class LoginCodeRequest(BaseModel):
