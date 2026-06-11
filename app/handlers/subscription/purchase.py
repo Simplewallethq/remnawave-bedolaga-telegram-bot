@@ -813,6 +813,15 @@ async def start_subscription_purchase(
         db_user: User,
         db: AsyncSession,
 ):
+    if user_uses_tariffs(db_user):
+        # Tariff users must never enter the legacy à-la-carte checkout: it creates
+        # subscriptions without plan_id, which the tariff system treats as "no tariff".
+        # menu_buy still arrives from custom menu layouts, monitoring notifications
+        # and post-topup keyboards — route all of them to the tariffs page.
+        from app.handlers.subscription.tariffs import show_tariffs_page
+        await show_tariffs_page(callback, db_user, db)
+        return
+
     texts = get_texts(db_user.language)
 
     keyboard = get_subscription_period_keyboard(db_user.language, db_user)
