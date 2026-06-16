@@ -8,6 +8,7 @@ from app.webapi.docs import add_redoc_endpoint
 
 from .middleware import RequestLoggingMiddleware
 from .routes import (
+    auth_otp,
     broadcasts,
     backups,
     ad_attribution,
@@ -261,6 +262,7 @@ def create_web_api_app() -> FastAPI:
     )
     app.include_router(devices.router, prefix="/api/devices", tags=["devices"])
     app.include_router(plans.router, prefix="/api/plans", tags=["plans"])
+    app.include_router(auth_otp.router, prefix="/api/auth", tags=["auth-otp"])
     app.include_router(cabinet.router, prefix="/cabinet", tags=["cabinet"])
 
     return app
