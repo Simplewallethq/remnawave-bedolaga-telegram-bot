@@ -47,6 +47,7 @@ def _serialize_subscription(subscription: Subscription) -> SubscriptionResponse:
         status=subscription.status,
         actual_status=subscription.actual_status,
         is_trial=subscription.is_trial,
+        used_trial_failed=getattr(subscription, "used_trial_failed", False),
         start_date=subscription.start_date,
         end_date=subscription.end_date,
         traffic_limit_gb=subscription.traffic_limit_gb,

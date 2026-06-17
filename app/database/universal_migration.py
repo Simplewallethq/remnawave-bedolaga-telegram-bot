@@ -4917,6 +4917,46 @@ async def add_subscription_is_partner_column() -> bool:
         return False
 
 
+async def add_subscription_used_trial_failed_column() -> bool:
+    """Adds Subscription.used_trial_failed boolean.
+
+    Set when trial issuance is denied for a device_id that had already been
+    linked to a subscription before. Idempotent: re-running on a DB where the
+    column already exists is a no-op.
+    """
+    column_exists = await check_column_exists('subscriptions', 'used_trial_failed')
+
+    try:
+        if not column_exists:
+            async with engine.begin() as conn:
+                db_type = await get_database_type()
+
+                if db_type == 'sqlite':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN used_trial_failed BOOLEAN NOT NULL DEFAULT 0"
+                    ))
+                elif db_type == 'postgresql':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN used_trial_failed BOOLEAN NOT NULL DEFAULT FALSE"
+                    ))
+                elif db_type == 'mysql':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN used_trial_failed BOOLEAN NOT NULL DEFAULT FALSE"
+                    ))
+                else:
+                    logger.error(f"Неподдерживаемый тип БД для добавления used_trial_failed: {db_type}")
+                    return False
+
+            logger.info("✅ Добавлена колонка used_trial_failed в таблицу subscriptions")
+        else:
+            logger.info("ℹ️ Колонка subscriptions.used_trial_failed уже существует")
+
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления колонки used_trial_failed: {e}")
+        return False
+
+
 async def create_partner_link_redemptions_table() -> bool:
     """Creates the partner_link_redemptions table tracking one-time-use VIP-link
     redemptions (UNIQUE(jti) enforces replay protection).
@@ -6265,6 +6305,13 @@ async def run_universal_migration():
             logger.info("✅ Колонка subscriptions.is_partner готова")
         else:
             logger.warning("⚠️ Проблемы с добавлением колонки is_partner")
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ used_trial_failed В SUBSCRIPTIONS ===")
+        used_trial_failed_ready = await add_subscription_used_trial_failed_column()
+        if used_trial_failed_ready:
+            logger.info("✅ Колонка subscriptions.used_trial_failed готова")
+        else:
+            logger.warning("⚠️ Проблемы с добавлением колонки used_trial_failed")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ PARTNER_LINK_REDEMPTIONS ===")
         partner_redemptions_ready = await create_partner_link_redemptions_table()

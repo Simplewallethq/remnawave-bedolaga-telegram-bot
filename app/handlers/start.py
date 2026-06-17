@@ -42,6 +42,7 @@ from app.keyboards.inline import (
 )
 from app.database.crud.subscription import (
     create_trial_subscription,
+    create_trial_denied_subscription,
     create_partner_subscription,
     replace_subscription,
 )
@@ -468,6 +469,58 @@ async def _auto_activate_trial_and_show_device_selection(
             )
 
     return True
+
+
+async def _activate_trial_or_deny_for_device(
+    bot,
+    db: AsyncSession,
+    user,
+    device_id: str | None,
+    message_or_callback,
+    is_callback: bool = False,
+    language: str | None = None,
+) -> bool:
+    """Activate a trial during device-deeplink registration, or deny it when the
+    device_id has already been linked to a subscription before (anti-abuse).
+
+    Detection relies on the device_links table never deleting rows: if a row
+    already exists for device_id, the device was previously attached to some
+    subscription, so no new trial is granted. Instead a disabled placeholder
+    subscription with used_trial_failed=True is created (no RemnaWave access),
+    which the API surfaces so the client can prompt the user to subscribe.
+
+    Returns True if the user ends up registered (trial granted OR denied
+    placeholder created); False only if trial activation itself failed.
+    """
+    existing_link = await get_device_link(db, device_id) if device_id else None
+    if existing_link is not None:
+        logger.info(
+            "🚫 Устройство %s уже привязывалось к подписке %s — триал не выдаётся",
+            device_id,
+            existing_link.subscription_id,
+        )
+        await create_trial_denied_subscription(db, user.id)
+        await db.refresh(user, ["subscription"])
+
+        lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
+        texts = get_texts(lang)
+        denied_text = texts.t(
+            "TRIAL_DENIED_DEVICE_REUSED",
+            "⚠️ Пробный период для этого устройства недоступен — оно уже "
+            "использовалось ранее. Оформите подписку, чтобы продолжить.",
+        )
+        target_message = message_or_callback
+        if is_callback:
+            target_message = getattr(message_or_callback, "message", message_or_callback)
+        try:
+            await target_message.answer(denied_text)
+        except Exception as e:
+            logger.error("Не удалось отправить сообщение об отказе в триале: %s", e)
+        return True
+
+    return await _auto_activate_trial_and_show_device_selection(
+        bot, db, user, message_or_callback, is_callback=is_callback, language=language
+    )
 
 
 async def _send_pinned_message(
@@ -941,8 +994,9 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
         _device_link_data = await state.get_data() or {}
         _pending_device_id = _device_link_data.get("device_id")
         if _pending_device_id and not user.subscription:
-            await _auto_activate_trial_and_show_device_selection(
-                message.bot, db, user, message, is_callback=False, language=user.language
+            await _activate_trial_or_deny_for_device(
+                message.bot, db, user, _pending_device_id, message,
+                is_callback=False, language=user.language,
             )
             await db.refresh(user, ["subscription"])
             if user.subscription:
@@ -1845,8 +1899,8 @@ async def complete_registration_from_callback(
 
     if not trial_success:
         try:
-            trial_success = await _auto_activate_trial_and_show_device_selection(
-                callback.bot, db, user, callback, is_callback=True, language=language
+            trial_success = await _activate_trial_or_deny_for_device(
+                callback.bot, db, user, _device_id, callback, is_callback=True, language=language
             )
         except Exception as e:
             logger.error(f"Ошибка авто-активации триала при регистрации (callback): {e}")
@@ -2154,8 +2208,8 @@ async def complete_registration(
     if not trial_success:
         # Default path or partner fallback: trial.
         try:
-            trial_success = await _auto_activate_trial_and_show_device_selection(
-                message.bot, db, user, message, is_callback=False, language=language
+            trial_success = await _activate_trial_or_deny_for_device(
+                message.bot, db, user, _device_id, message, is_callback=False, language=language
             )
         except Exception as e:
             logger.error(f"Ошибка авто-активации триала при регистрации: {e}")

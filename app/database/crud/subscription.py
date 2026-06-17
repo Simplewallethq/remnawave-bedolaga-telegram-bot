@@ -120,6 +120,50 @@ async def create_trial_subscription(
     return subscription
 
 
+async def create_trial_denied_subscription(
+    db: AsyncSession,
+    user_id: int,
+    device_limit: Optional[int] = None,
+) -> Subscription:
+    """Create a placeholder subscription when a trial is denied.
+
+    Used when registration happens via a device_id that was already linked to
+    some subscription before — the user must not get another trial. No trial is
+    granted and no RemnaWave user is created (there is no VPN access). The
+    subscription is created as disabled/expired with ``used_trial_failed=True``
+    so the API (GET /api/devices/{id}/subscription) can report the denial.
+    """
+    if device_limit is None:
+        device_limit = settings.TRIAL_DEVICE_LIMIT
+
+    now = datetime.utcnow()
+
+    subscription = Subscription(
+        user_id=user_id,
+        status=SubscriptionStatus.DISABLED.value,
+        is_trial=False,
+        used_trial_failed=True,
+        start_date=now,
+        end_date=now,
+        traffic_limit_gb=0,
+        device_limit=device_limit,
+        connected_squads=[],
+        autopay_enabled=settings.is_autopay_enabled_by_default(),
+        autopay_days_before=settings.DEFAULT_AUTOPAY_DAYS_BEFORE,
+    )
+
+    db.add(subscription)
+    await db.commit()
+    await db.refresh(subscription)
+
+    logger.info(
+        "🚫 Триал отклонён (устройство уже использовалось): создана пустая подписка для пользователя %s",
+        user_id,
+    )
+
+    return subscription
+
+
 async def create_paid_subscription(
     db: AsyncSession,
     user_id: int,

@@ -12,6 +12,7 @@ class SubscriptionResponse(BaseModel):
     status: str
     actual_status: str
     is_trial: bool
+    used_trial_failed: bool = False
     start_date: datetime
     end_date: datetime
     traffic_limit_gb: int

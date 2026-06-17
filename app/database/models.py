@@ -774,6 +774,7 @@ class Subscription(Base):
     status = Column(String(20), default=SubscriptionStatus.TRIAL.value)
     is_trial = Column(Boolean, default=True)
     is_partner = Column(Boolean, default=False, nullable=False, server_default="false")
+    used_trial_failed = Column(Boolean, default=False, nullable=False, server_default="false")
 
     start_date = Column(DateTime, default=func.now())
     end_date = Column(DateTime, nullable=False)
