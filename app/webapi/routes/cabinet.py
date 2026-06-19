@@ -318,7 +318,6 @@ async def auth_otp_request(
     from app.services import email_service
 
     _ensure_enabled()
-    await _ensure_captcha(payload.captcha_token, request)
     if not email_service.is_email_configured():
         logger.error("SendGrid не сконфигурирован — /cabinet/auth/otp/request недоступен")
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="Email delivery unavailable")
@@ -337,6 +336,10 @@ async def auth_otp_request(
                 detail="Code already sent",
                 headers={"Retry-After": str(retry_after)},
             )
+    else:
+        # Капча только на первый запрос кода: повторная отправка (active OTP уже есть,
+        # прошёл лишь cooldown) защищена rate-limit'ом выше и капчи не требует.
+        await _ensure_captcha(payload.captcha_token, request)
 
     code = otp_crud.generate_otp_code()
     await otp_crud.create_otp(db, email, code)
