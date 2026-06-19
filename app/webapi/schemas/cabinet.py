@@ -22,6 +22,21 @@ class RegisterOtpRequest(BaseModel):
     captcha_token: Optional[str] = Field(default=None, max_length=4096, description="hCaptcha token")
 
 
+class OtpRequestRequest(BaseModel):
+    """Passwordless login-or-register: запрос email-кода (шаг 1)."""
+
+    email: str = Field(..., max_length=255)
+    captcha_token: Optional[str] = Field(default=None, max_length=4096, description="hCaptcha token")
+
+
+class OtpVerifyRequest(BaseModel):
+    """Passwordless login-or-register: проверка кода + выдача JWT (шаг 2)."""
+
+    email: str = Field(..., max_length=255)
+    code: str = Field(..., max_length=12)
+    ref: Optional[str] = Field(default=None, description="Реф-код пригласившего (учитывается только для новых)")
+
+
 class LoginRequest(BaseModel):
     email: str = Field(..., max_length=255)
     password: str = Field(..., min_length=1, max_length=128)

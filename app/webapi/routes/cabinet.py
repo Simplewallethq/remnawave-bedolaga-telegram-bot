@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -51,6 +52,8 @@ from app.webapi.schemas.cabinet import (
     AutoRenewRequest,
     LoginCodeRequest,
     LoginRequest,
+    OtpRequestRequest,
+    OtpVerifyRequest,
     PurchaseRequest,
     RegisterOtpRequest,
     RegisterRequest,
@@ -295,6 +298,107 @@ async def login_telegram(
     user = await get_user_by_telegram_id(db, int(telegram_id))
     if not user:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+    return await _auth_response(db, user)
+
+
+# ── Passwordless login-or-register (email + код) ──────────────────────────
+
+@router.post("/auth/otp/request")
+async def auth_otp_request(
+    payload: OtpRequestRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """Шлёт email-код для passwordless-входа (login-or-register, шаг 1 из 2).
+
+    В отличие от deprecated /auth/register-otp — без 409 на существующем email
+    и без гейта CABINET_EMAIL_VERIFICATION: OTP здесь обязателен всегда.
+    """
+    from app.database.crud import cabinet_otp as otp_crud
+    from app.services import email_service
+
+    _ensure_enabled()
+    await _ensure_captcha(payload.captcha_token, request)
+    if not email_service.is_email_configured():
+        logger.error("SendGrid не сконфигурирован — /cabinet/auth/otp/request недоступен")
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="Email delivery unavailable")
+
+    email = payload.email.strip().lower()
+    if not validate_email(email):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid email")
+
+    active = await otp_crud.get_active_otp(db, email)
+    if active:
+        age = (datetime.utcnow() - active.created_at).total_seconds()
+        retry_after = int(settings.CABINET_OTP_RESEND_SECONDS - age)
+        if retry_after > 0:
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Code already sent",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+    code = otp_crud.generate_otp_code()
+    await otp_crud.create_otp(db, email, code)
+    try:
+        await email_service.send_otp_email(email, code)
+    except email_service.EmailDeliveryError:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="Failed to send email")
+
+    return {
+        "ok": True,
+        "ttlSeconds": settings.CABINET_OTP_TTL_MINUTES * 60,
+        "resendAfter": settings.CABINET_OTP_RESEND_SECONDS,
+    }
+
+
+@router.post("/auth/otp/verify")
+async def auth_otp_verify(
+    payload: OtpVerifyRequest,
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """Проверяет код и логинит-или-регистрирует пользователя, возвращает JWT (шаг 2)."""
+    _ensure_enabled()
+
+    email = payload.email.strip().lower()
+    if not validate_email(email):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid email")
+
+    # 400 invalid_code / 410 code_expired — единый контракт с /auth/register.
+    await _verify_registration_code(db, email, payload.code)
+
+    user = await get_user_by_email(db, email)
+    if user is None:
+        referred_by_id = None
+        if payload.ref:
+            referrer = await get_user_by_referral_code(db, payload.ref.strip())
+            if referrer:
+                referred_by_id = referrer.id
+
+        # Passwordless: задаём заведомо непригодный для входа пароль.
+        user = await create_web_user(
+            db,
+            email=email,
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+            referred_by_id=referred_by_id,
+        )
+        user.email_verified = True
+        await db.commit()
+
+        try:
+            subscription = await create_trial_subscription(db, user.id)
+        except Exception:
+            logger.exception("Не удалось создать триальную подписку для %s", email)
+            subscription = None
+        if subscription is not None:
+            await _provision_remnawave(db, subscription)
+    else:
+        # Существующий пользователь — ленивый до-провижн RemnaWave при отсутствии.
+        await ensure_remnawave_account(db, user)
+
+    if user.status == UserStatus.BLOCKED.value:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="User is blocked")
+
     return await _auth_response(db, user)
 
 
