@@ -34,3 +34,17 @@ class AppOtpVerifyResponse(BaseModel):
     remnawave_uuid: str = ""
     subscription_url: Optional[str] = None
     subscription_end_date: Optional[str] = None
+
+
+class AppCabinetTokenRequest(BaseModel):
+    """Запрос cabinet-токена для уже известного боту пользователя."""
+
+    user_id: int
+
+
+class AppCabinetTokenResponse(BaseModel):
+    """Cabinet-JWT, которым приложение открывает личный кабинет (/cabinet/*)."""
+
+    token: str
+    token_type: str = "cabinet"
+    expires_in: int

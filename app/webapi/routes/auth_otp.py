@@ -25,8 +25,12 @@ from app.database.crud.user import (
 from app.utils.passwords import hash_password
 from app.utils.validators import validate_email
 
+from app.services.cabinet_auth_service import cabinet_auth_service
+
 from ..dependencies import get_db_session, require_api_token
 from ..schemas.auth_otp import (
+    AppCabinetTokenRequest,
+    AppCabinetTokenResponse,
     AppOtpRequest,
     AppOtpRequestResponse,
     AppOtpVerifyRequest,
@@ -136,4 +140,27 @@ async def verify_otp(
             if subscription is not None and subscription.end_date is not None
             else None
         ),
+    )
+
+
+@router.post("/cabinet-token", response_model=AppCabinetTokenResponse)
+async def issue_cabinet_token(
+    payload: AppCabinetTokenRequest,
+    _=Security(require_api_token),
+    db: AsyncSession = Depends(get_db_session),
+) -> AppCabinetTokenResponse:
+    """Выдать cabinet-JWT для уже известного боту пользователя по его user_id.
+
+    teleVpn вызывает этот эндпоинт от имени уже авторизованного (своим JWT)
+    пользователя, чтобы открыть личный кабинет (/cabinet/*) без повторного
+    логина по email/паролю. Токен идентичен тому, что выдают /cabinet/auth/*.
+    """
+    user = await get_user_by_id(db, payload.user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    token = cabinet_auth_service.issue_token(user)
+    return AppCabinetTokenResponse(
+        token=token,
+        expires_in=settings.CABINET_JWT_TTL_HOURS * 3600,
     )
