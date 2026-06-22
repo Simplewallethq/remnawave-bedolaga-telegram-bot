@@ -18,6 +18,11 @@ class AppOtpRequest(BaseModel):
 class AppOtpVerifyRequest(BaseModel):
     email: str = Field(..., max_length=255)
     code: str = Field(..., max_length=16)
+    # Опционально: идентификатор устройства из приложения. Если передан и это
+    # устройство уже получало триал ранее — новый триал не выдаётся (анти-абуз
+    # по аналогии с device-deeplink флоу). Старые клиенты без device_id
+    # сохраняют прежнее поведение.
+    device_id: Optional[str] = Field(default=None, max_length=255)
 
 
 class AppOtpRequestResponse(BaseModel):

@@ -16,7 +16,11 @@ from fastapi import APIRouter, Depends, HTTPException, Security, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database.crud.subscription import create_trial_subscription
+from app.database.crud.device_link import create_device_link, get_device_link
+from app.database.crud.subscription import (
+    create_trial_denied_subscription,
+    create_trial_subscription,
+)
 from app.database.crud.user import (
     create_web_user,
     get_user_by_email,
@@ -101,6 +105,8 @@ async def verify_otp(
     if not validate_email(email):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid email")
 
+    device_id = (payload.device_id or "").strip() or None
+
     # 400 invalid_code / 410 code_expired — единый контракт с кабинетом.
     await _verify_registration_code(db, email, payload.code)
 
@@ -115,13 +121,40 @@ async def verify_otp(
         user.email_verified = True
         await db.commit()
 
-        try:
-            subscription = await create_trial_subscription(db, user.id)
-        except Exception:
-            logger.exception("Не удалось создать триальную подписку для %s", email)
-            subscription = None
-        if subscription is not None:
-            await _provision_remnawave(db, subscription)
+        # Анти-абуз по устройству: если device_id уже привязывался к какой-либо
+        # подписке ранее (таблица device_links не чистится), новый триал не
+        # выдаём — создаём disabled-заглушку с used_trial_failed=True и без
+        # аккаунта RemnaWave (VPN-доступа нет). Логика идентична device-deeplink
+        # флоу в handlers/start.py.
+        existing_link = await get_device_link(db, device_id) if device_id else None
+        if existing_link is not None:
+            logger.info(
+                "🚫 OTP: устройство %s уже использовалось (подписка %s) — "
+                "триал не выдаётся для %s",
+                device_id,
+                existing_link.subscription_id,
+                email,
+            )
+            await create_trial_denied_subscription(db, user.id)
+        else:
+            try:
+                subscription = await create_trial_subscription(db, user.id)
+            except Exception:
+                logger.exception("Не удалось создать триальную подписку для %s", email)
+                subscription = None
+            if subscription is not None:
+                await _provision_remnawave(db, subscription)
+                # Фиксируем устройство за выданной подпиской, чтобы повторная
+                # OTP-регистрация с этого же устройства уже получила отказ.
+                if device_id:
+                    try:
+                        await create_device_link(db, subscription.id, device_id)
+                    except Exception:
+                        logger.exception(
+                            "Не удалось привязать устройство %s к подписке %s",
+                            device_id,
+                            subscription.id,
+                        )
     else:
         # Существующий пользователь — ленивый до-провижн RemnaWave при отсутствии.
         await ensure_remnawave_account(db, user)
