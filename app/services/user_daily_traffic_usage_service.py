@@ -25,7 +25,7 @@ class UserDailyTrafficUsageService:
     def __init__(self, remnawave_service: Optional[RemnaWaveService] = None) -> None:
         self.remnawave_service = remnawave_service or RemnaWaveService()
 
-    async def collect_yesterday_once_after_deploy(self, db: AsyncSession) -> Dict[str, Any]:
+    async def collect_for_yesterday(self, db: AsyncSession) -> Dict[str, Any]:
         target_date = self._yesterday_moscow_date()
         last_snapshot_date = await self._get_last_snapshot_date(db)
 

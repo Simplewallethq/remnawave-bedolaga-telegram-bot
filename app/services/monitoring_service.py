@@ -1645,7 +1645,7 @@ class MonitoringService:
 
     async def _collect_user_daily_traffic_usage(self, db: AsyncSession):
         try:
-            result = await self.user_daily_traffic_usage_service.collect_yesterday_once_after_deploy(db)
+            result = await self.user_daily_traffic_usage_service.collect_for_yesterday(db)
 
             if result.get("skipped"):
                 reason = result.get("reason")
