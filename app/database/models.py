@@ -970,6 +970,24 @@ class DeviceBindingCode(Base):
     subscription = relationship("Subscription", back_populates="binding_codes")
 
 
+class UserDailyTrafficUsage(Base):
+    __tablename__ = "user_daily_traffic_usage"
+    __table_args__ = (
+        UniqueConstraint("user_id", "date", name="uq_user_daily_traffic_usage_user_date"),
+        Index("ix_user_daily_traffic_usage_user_id", "user_id"),
+        Index("ix_user_daily_traffic_usage_date", "date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    date = Column(Date, nullable=False)
+    traffic_bytes = Column(BigInteger, nullable=False, default=0)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+
+    user = relationship("User", backref="daily_traffic_usage")
+
+
 class CabinetOtp(Base):
     """Email-код подтверждения регистрации в веб-кабинете (хранится только HMAC)."""
 

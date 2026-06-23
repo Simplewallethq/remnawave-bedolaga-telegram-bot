@@ -56,6 +56,7 @@ from app.services.notification_settings_service import NotificationSettingsServi
 from app.services.payment_service import PaymentService
 from app.services.subscription_service import SubscriptionService
 from app.services.promo_offer_service import promo_offer_service
+from app.services.user_daily_traffic_usage_service import user_daily_traffic_usage_service
 from app.utils.pricing_utils import apply_percentage_discount
 from app.utils.miniapp_buttons import build_miniapp_or_callback_button
 
@@ -77,6 +78,7 @@ class MonitoringService:
         self.is_running = False
         self.subscription_service = SubscriptionService()
         self.payment_service = PaymentService()
+        self.user_daily_traffic_usage_service = user_daily_traffic_usage_service
         self.bot = bot
         self._notified_users: Set[str] = set()
         self._last_cleanup = datetime.utcnow()
@@ -191,6 +193,16 @@ class MonitoringService:
     async def _monitoring_cycle(self):
         async for db in get_db():
             try:
+                if settings.USER_DAILY_TRAFFIC_ONLY_MODE:
+                    await self._collect_user_daily_traffic_usage(db)
+                    await self._log_monitoring_event(
+                        db,
+                        "user_daily_traffic_only_cycle_completed",
+                        "Цикл мониторинга выполнен только для сбора дневного трафика",
+                        {"timestamp": datetime.utcnow().isoformat()},
+                    )
+                    return
+
                 await self._cleanup_notification_cache()
 
                 expired_offers = await deactivate_expired_offers(db)
@@ -218,6 +230,7 @@ class MonitoringService:
                     await self._process_autopayments(db)
                 await self._cleanup_inactive_users(db)
                 await self._sync_with_remnawave(db)
+                await self._collect_user_daily_traffic_usage(db)
                 
                 await self._log_monitoring_event(
                     db, "monitoring_cycle_completed", 
@@ -1629,7 +1642,46 @@ class MonitoringService:
                 {"error": str(e)},
                 is_success=False
             )
-    
+
+    async def _collect_user_daily_traffic_usage(self, db: AsyncSession):
+        try:
+            result = await self.user_daily_traffic_usage_service.collect_for_yesterday(db)
+
+            if result.get("skipped"):
+                reason = result.get("reason")
+                if reason == "already_collected":
+                    logger.debug(
+                        "Дневной трафик за %s уже собран, пропускаем",
+                        result.get("date"),
+                    )
+                    return
+
+                await self._log_monitoring_event(
+                    db,
+                    "user_daily_traffic_snapshot_skipped",
+                    f"Сбор дневного трафика пропущен: {reason}",
+                    result,
+                    is_success=False,
+                )
+                return
+
+            await self._log_monitoring_event(
+                db,
+                "user_daily_traffic_snapshot",
+                f"Собран дневной трафик за {result.get('date')}: обработано {result.get('processed')} пользователей",
+                result,
+                is_success=(result.get("failed", 0) == 0),
+            )
+        except Exception as e:
+            logger.error(f"Ошибка сбора дневного трафика пользователей: {e}")
+            await self._log_monitoring_event(
+                db,
+                "user_daily_traffic_snapshot_error",
+                f"Ошибка сбора дневного трафика пользователей: {str(e)}",
+                {"error": str(e)},
+                is_success=False,
+            )
+
     async def _check_ticket_sla(self, db: AsyncSession):
         try:
             # Quick guards
