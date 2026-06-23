@@ -4854,6 +4854,77 @@ async def create_device_binding_codes_table() -> bool:
         return False
 
 
+async def create_user_daily_traffic_usage_table() -> bool:
+    table_exists = await check_table_exists('user_daily_traffic_usage')
+    if table_exists:
+        logger.info("Таблица user_daily_traffic_usage уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE user_daily_traffic_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    date DATE NOT NULL,
+                    traffic_bytes BIGINT NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_user_daily_traffic_usage_user_date UNIQUE (user_id, date),
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX ix_user_daily_traffic_usage_user_id ON user_daily_traffic_usage(user_id);
+                CREATE INDEX ix_user_daily_traffic_usage_date ON user_daily_traffic_usage(date);
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS user_daily_traffic_usage (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    date DATE NOT NULL,
+                    traffic_bytes BIGINT NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_user_daily_traffic_usage_user_date UNIQUE (user_id, date)
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_user_daily_traffic_usage_user_id ON user_daily_traffic_usage(user_id);
+                CREATE INDEX IF NOT EXISTS ix_user_daily_traffic_usage_date ON user_daily_traffic_usage(date);
+                """
+            elif db_type == 'mysql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS user_daily_traffic_usage (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    date DATE NOT NULL,
+                    traffic_bytes BIGINT NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_user_daily_traffic_usage_user_date UNIQUE (user_id, date),
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX ix_user_daily_traffic_usage_user_id ON user_daily_traffic_usage(user_id);
+                CREATE INDEX ix_user_daily_traffic_usage_date ON user_daily_traffic_usage(date);
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица user_daily_traffic_usage успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы user_daily_traffic_usage: {e}")
+        return False
+
+
 async def add_subscription_is_partner_column() -> bool:
     """Adds Subscription.is_partner boolean + CHECK constraint enforcing
     that is_trial and is_partner are mutually exclusive.
@@ -6299,6 +6370,13 @@ async def run_universal_migration():
         else:
             logger.warning("⚠️ Проблемы с таблицей device_binding_codes")
 
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ USER_DAILY_TRAFFIC_USAGE ===")
+        daily_traffic_ready = await create_user_daily_traffic_usage_table()
+        if daily_traffic_ready:
+            logger.info("✅ Таблица user_daily_traffic_usage готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей user_daily_traffic_usage")
+
         logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ is_partner В SUBSCRIPTIONS ===")
         is_partner_ready = await add_subscription_is_partner_column()
         if is_partner_ready:
@@ -6474,6 +6552,7 @@ async def check_migration_status():
             "promo_offer_templates_active_discount_column": False,
             "promo_offer_logs_table": False,
             "subscription_temporary_access_table": False,
+            "user_daily_traffic_usage_table": False,
             "advertising_campaigns_table": False,
             "advertising_campaign_registrations_table": False,
             "users_raw_start_payload_column": False,
@@ -6511,6 +6590,7 @@ async def check_migration_status():
         status["promo_offer_templates_active_discount_column"] = await check_column_exists('promo_offer_templates', 'active_discount_hours')
         status["promo_offer_logs_table"] = await check_table_exists('promo_offer_logs')
         status["subscription_temporary_access_table"] = await check_table_exists('subscription_temporary_access')
+        status["user_daily_traffic_usage_table"] = await check_table_exists('user_daily_traffic_usage')
         status["advertising_campaigns_table"] = await check_table_exists('advertising_campaigns')
         status["advertising_campaign_registrations_table"] = await check_table_exists('advertising_campaign_registrations')
         status["users_raw_start_payload_column"] = await check_column_exists('users', 'raw_start_payload')
@@ -6618,6 +6698,7 @@ async def check_migration_status():
             "promo_offer_templates_active_discount_column": "Колонка active_discount_hours в promo_offer_templates",
             "promo_offer_logs_table": "Таблица promo_offer_logs",
             "subscription_temporary_access_table": "Таблица subscription_temporary_access",
+            "user_daily_traffic_usage_table": "Таблица дневного трафика пользователей",
             "advertising_campaigns_table": "Таблица advertising_campaigns",
             "advertising_campaign_registrations_table": "Таблица advertising_campaign_registrations",
             "users_raw_start_payload_column": "Колонка raw_start_payload у пользователей",
