@@ -26,6 +26,11 @@ from app.services.plan_pricing_service import (
     list_active_plans,
 )
 from app.services.remnawave_service import RemnaWaveService
+from app.utils.subscription_utils import (
+    convert_subscription_link_to_happ_scheme,
+    get_display_subscription_link,
+    get_happ_cryptolink_redirect_link,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +69,23 @@ def build_user_profile(user: User) -> Dict[str, Any]:
 
 # ── Подписка ─────────────────────────────────────────────────────────────
 
+def _happ_connect_link(sub: Subscription) -> Optional[str]:
+    """Happ-ссылка для кнопки «Подключиться» на сайте.
+
+    Повторяет логику дефолтной кнопки «Подключиться» Telegram-бота: берём
+    отображаемую ссылку подписки (крипто-ссылку панели в режиме happ_cryptolink,
+    иначе обычный subscription_url) и оборачиваем её в редирект Happ либо
+    конвертируем схему в happ://.
+    """
+    subscription_link = get_display_subscription_link(sub)
+    if not subscription_link:
+        return None
+
+    redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
+    happ_scheme_link = convert_subscription_link_to_happ_scheme(subscription_link)
+    return redirect_link or happ_scheme_link or subscription_link
+
+
 def build_subscription(user: User) -> Optional[Dict[str, Any]]:
     sub: Optional[Subscription] = user.subscription
     if not sub:
@@ -86,6 +108,7 @@ def build_subscription(user: User) -> Optional[Dict[str, Any]]:
         "trafficUsedGb": round(sub.traffic_used_gb or 0.0, 2),
         "autoRenew": bool(sub.autopay_enabled),
         "subscriptionUrl": sub.subscription_url,
+        "happLink": _happ_connect_link(sub),
     }
 
 
