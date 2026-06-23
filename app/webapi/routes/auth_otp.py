@@ -113,13 +113,22 @@ async def verify_otp(
     user = await get_user_by_email(db, email)
     if user is None:
         # Passwordless: задаём заведомо непригодный для входа пароль.
+        # auth_source="app" — пользователь пришёл из мобильного приложения teleVpn
+        # (а не из веб-кабинета), фиксируем источник регистрации.
         user = await create_web_user(
             db,
             email=email,
             password_hash=hash_password(secrets.token_urlsafe(32)),
+            auth_source="app",
         )
         user.email_verified = True
         await db.commit()
+        logger.info(
+            "📱 Новая регистрация из приложения: %s (user_id=%s, device_id=%s)",
+            email,
+            user.id,
+            device_id or "—",
+        )
 
         # Анти-абуз по устройству: если device_id уже привязывался к какой-либо
         # подписке ранее (таблица device_links не чистится), новый триал не

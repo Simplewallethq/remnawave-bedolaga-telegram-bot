@@ -363,10 +363,12 @@ async def create_web_user(
     referred_by_id: int = None,
     referral_code: str = None,
     first_name: str = None,
+    auth_source: str = "web",
 ) -> User:
     """
-    Создаёт пользователя личного кабинета без Telegram (email + пароль).
-    telegram_id остаётся NULL, auth_source = "web".
+    Создаёт пользователя без Telegram (email + пароль).
+    telegram_id остаётся NULL. auth_source фиксирует источник регистрации:
+    "web" — личный кабинет, "app" — мобильное приложение teleVpn (OTP-флоу).
     """
 
     if not referral_code:
@@ -381,7 +383,7 @@ async def create_web_user(
         telegram_id=None,
         email=normalized_email,
         password_hash=password_hash,
-        auth_source="web",
+        auth_source=auth_source,
         email_verified=False,
         first_name=sanitize_telegram_name(first_name),
         language=language,
@@ -399,7 +401,8 @@ async def create_web_user(
 
     user.promo_group = default_group
     logger.info(
-        f"✅ Создан веб-пользователь {normalized_email} с реферальным кодом {referral_code}"
+        f"✅ Создан пользователь {normalized_email} (источник: {auth_source}) "
+        f"с реферальным кодом {referral_code}"
     )
     return user
 
