@@ -57,6 +57,7 @@ from app.services.payment_service import PaymentService
 from app.services.subscription_service import SubscriptionService
 from app.services.promo_offer_service import promo_offer_service
 from app.services.user_daily_traffic_usage_service import user_daily_traffic_usage_service
+from app.services.android_rate_request_service import android_rate_request_service
 from app.utils.pricing_utils import apply_percentage_discount
 from app.utils.miniapp_buttons import build_miniapp_or_callback_button
 
@@ -194,7 +195,9 @@ class MonitoringService:
         async for db in get_db():
             try:
                 if settings.USER_DAILY_TRAFFIC_ONLY_MODE:
-                    await self._collect_user_daily_traffic_usage(db)
+                    logger.info("settings.USER_DAILY_TRAFFIC_ONLY_MODE=True")
+                    # await self._collect_user_daily_traffic_usage(db)
+                    await self._process_android_rate_requests(db)
                     await self._log_monitoring_event(
                         db,
                         "user_daily_traffic_only_cycle_completed",
@@ -231,6 +234,7 @@ class MonitoringService:
                 await self._cleanup_inactive_users(db)
                 await self._sync_with_remnawave(db)
                 await self._collect_user_daily_traffic_usage(db)
+                await self._process_android_rate_requests(db)
                 
                 await self._log_monitoring_event(
                     db, "monitoring_cycle_completed", 
@@ -1678,6 +1682,34 @@ class MonitoringService:
                 db,
                 "user_daily_traffic_snapshot_error",
                 f"Ошибка сбора дневного трафика пользователей: {str(e)}",
+                {"error": str(e)},
+                is_success=False,
+            )
+
+    async def _process_android_rate_requests(self, db: AsyncSession):
+        try:
+            result = await android_rate_request_service.process_due_requests(db, self.bot)
+            if result.get("skipped"):
+                logger.debug(
+                    "Android rate request processing skipped: %s",
+                    result.get("reason"),
+                )
+                return
+
+            if result.get("sent") or result.get("unreachable") or result.get("failed"):
+                await self._log_monitoring_event(
+                    db,
+                    "android_rate_requests_processed",
+                    "Обработаны запросы оценки Android-приложения",
+                    result,
+                    is_success=(result.get("failed", 0) == 0),
+                )
+        except Exception as e:
+            logger.error(f"Ошибка обработки запросов оценки Android-приложения: {e}")
+            await self._log_monitoring_event(
+                db,
+                "android_rate_requests_error",
+                f"Ошибка обработки запросов оценки Android-приложения: {str(e)}",
                 {"error": str(e)},
                 is_success=False,
             )

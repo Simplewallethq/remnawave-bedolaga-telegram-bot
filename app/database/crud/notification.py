@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 
 from app.database.models import SentNotification
 
@@ -41,6 +41,20 @@ async def record_notification(
     )
     db.add(notification)
     await db.commit()
+
+
+async def get_latest_notification_sent_at(
+    db: AsyncSession,
+    user_id: int,
+    notification_type: str,
+):
+    result = await db.execute(
+        select(func.max(SentNotification.created_at)).where(
+            SentNotification.user_id == user_id,
+            SentNotification.notification_type == notification_type,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def clear_notifications(db: AsyncSession, subscription_id: int) -> None:
