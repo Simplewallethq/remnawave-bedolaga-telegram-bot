@@ -4778,6 +4778,37 @@ async def add_user_has_connected_to_vpn_column() -> bool:
         return False
 
 
+async def add_user_has_used_mobile_app_column() -> bool:
+    """Добавляет колонку has_used_mobile_app в таблицу users."""
+    column_exists = await check_column_exists('users', 'has_used_mobile_app')
+    if column_exists:
+        logger.info("Колонка has_used_mobile_app уже существует в users")
+        return True
+
+    try:
+        db_type = await get_database_type()
+        async with engine.begin() as conn:
+            if db_type == 'sqlite':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN has_used_mobile_app BOOLEAN NOT NULL DEFAULT 0")
+                )
+            elif db_type == 'postgresql':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN has_used_mobile_app BOOLEAN NOT NULL DEFAULT FALSE")
+                )
+            elif db_type == 'mysql':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN has_used_mobile_app TINYINT(1) NOT NULL DEFAULT 0")
+                )
+
+        logger.info("✅ Добавлена колонка has_used_mobile_app в users")
+        return True
+
+    except Exception as error:
+        logger.error(f"❌ Ошибка добавления has_used_mobile_app в users: {error}")
+        return False
+
+
 async def create_device_binding_codes_table() -> bool:
     table_exists = await check_table_exists('device_binding_codes')
     if table_exists:
@@ -6362,6 +6393,13 @@ async def run_universal_migration():
             logger.info("✅ Колонка has_connected_to_vpn в users готова")
         else:
             logger.warning("⚠️ Проблемы с добавлением has_connected_to_vpn в users")
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ HAS_USED_MOBILE_APP В USERS ===")
+        mobile_app_column_ready = await add_user_has_used_mobile_app_column()
+        if mobile_app_column_ready:
+            logger.info("✅ Колонка has_used_mobile_app в users готова")
+        else:
+            logger.warning("⚠️ Проблемы с добавлением has_used_mobile_app в users")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ DEVICE_BINDING_CODES ===")
         device_binding_codes_ready = await create_device_binding_codes_table()

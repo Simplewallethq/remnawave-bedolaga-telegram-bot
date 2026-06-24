@@ -168,6 +168,11 @@ async def verify_otp(
         # Существующий пользователь — ленивый до-провижн RemnaWave при отсутствии.
         await ensure_remnawave_account(db, user)
 
+    # Отмечаем, что пользователь хоть раз авторизовался из мобильного приложения.
+    if not user.has_used_mobile_app:
+        user.has_used_mobile_app = True
+        await db.commit()
+
     # Перечитываем с eager-подпиской, чтобы вернуть свежие remnawave_uuid/URL.
     full = await get_user_by_id(db, user.id) or user
     subscription = getattr(full, "subscription", None)

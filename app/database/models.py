@@ -695,6 +695,7 @@ class User(Base):
     ss_password = Column(String(255), nullable=True)
     has_made_first_topup: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     has_connected_to_vpn: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    has_used_mobile_app: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     promo_group_id = Column(Integer, ForeignKey("promo_groups.id", ondelete="RESTRICT"), nullable=True, index=True)
     promo_group = relationship("PromoGroup", back_populates="users")
     user_promo_groups = relationship("UserPromoGroup", back_populates="user", cascade="all, delete-orphan")
