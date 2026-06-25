@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     REMNAWAVE_CADDY_TOKEN: Optional[str] = None
     REMNAWAVE_AUTH_TYPE: str = "api_key"  # api_key, basic, bearer, cookies, caddy
 
-    USER_DAILY_TRAFFIC_ONLY_MODE: bool = False
+    IS_ARTEM: bool = False
 
     REMNAWAVE_USER_DESCRIPTION_TEMPLATE: str = "Bot user: {full_name} {username}"
     REMNAWAVE_USER_USERNAME_TEMPLATE: str = "user_{telegram_id}"
