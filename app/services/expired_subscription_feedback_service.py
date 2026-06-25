@@ -66,12 +66,15 @@ EXPIRED_SUBSCRIPTION_FOLLOWUP_QUESTIONS = {
 
 EXPIRED_SUBSCRIPTION_FEEDBACK_CALLBACK_PREFIX = "feedback_expired"
 
+ENABLED = False
 
 class ExpiredSubscriptionFeedbackService:
     def __init__(self, *, now_provider: Optional[Callable[[], datetime]] = None) -> None:
         self._now_provider = now_provider
 
     async def process_due_feedbacks(self, db: AsyncSession, bot) -> dict:
+        if not ENABLED:
+            return {"skipped": True, "reason": "in development"}
         if not bot:
             return {"skipped": True, "reason": "bot_not_available"}
 
