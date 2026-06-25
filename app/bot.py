@@ -27,6 +27,7 @@ from app.handlers import (
     support,
     server_status,
     common,
+    feedback,
     tickets,
 )
 from app.handlers import polls as user_polls
@@ -216,6 +217,7 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     admin_trials.register_handlers(dp)
     admin_bulk_ban.register_bulk_ban_handlers(dp)
     admin_blacklist.register_blacklist_handlers(dp)
+    feedback.register_handlers(dp)
     common.register_handlers(dp)
     register_stars_handlers(dp)
     user_contests.register_handlers(dp)

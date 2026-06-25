@@ -58,6 +58,7 @@ from app.services.subscription_service import SubscriptionService
 from app.services.promo_offer_service import promo_offer_service
 from app.services.user_daily_traffic_usage_service import user_daily_traffic_usage_service
 from app.services.android_rate_request_service import android_rate_request_service
+from app.services.expired_subscription_feedback_service import expired_subscription_feedback_service
 from app.utils.pricing_utils import apply_percentage_discount
 from app.utils.miniapp_buttons import build_miniapp_or_callback_button
 
@@ -194,10 +195,11 @@ class MonitoringService:
     async def _monitoring_cycle(self):
         async for db in get_db():
             try:
-                if settings.USER_DAILY_TRAFFIC_ONLY_MODE:
-                    logger.info("settings.USER_DAILY_TRAFFIC_ONLY_MODE=True")
+                if settings.IS_ARTEM:
+                    logger.info("settings.IS_ARTEM=True")
                     # await self._collect_user_daily_traffic_usage(db)
-                    await self._process_android_rate_requests(db)
+                    # await self._process_android_rate_requests(db)
+                    await self._process_expired_subscription_feedbacks(db)
                     await self._log_monitoring_event(
                         db,
                         "user_daily_traffic_only_cycle_completed",
@@ -228,11 +230,12 @@ class MonitoringService:
                 await self._check_trial_expiring_soon(db)
                 await self._check_trial_inactivity_notifications(db)
                 await self._check_trial_channel_subscriptions(db)
+                await self._sync_with_remnawave(db)
                 await self._check_expired_subscription_followups(db)
+                await self._process_expired_subscription_feedbacks(db)
                 if settings.ENABLE_AUTOPAY:
                     await self._process_autopayments(db)
                 await self._cleanup_inactive_users(db)
-                await self._sync_with_remnawave(db)
                 await self._collect_user_daily_traffic_usage(db)
                 await self._process_android_rate_requests(db)
                 
@@ -1710,6 +1713,37 @@ class MonitoringService:
                 db,
                 "android_rate_requests_error",
                 f"Ошибка обработки запросов оценки Android-приложения: {str(e)}",
+                {"error": str(e)},
+                is_success=False,
+            )
+
+    async def _process_expired_subscription_feedbacks(self, db: AsyncSession):
+        try:
+            result = await expired_subscription_feedback_service.process_due_feedbacks(
+                db,
+                self.bot,
+            )
+            if result.get("skipped"):
+                logger.debug(
+                    "Expired subscription feedback processing skipped: %s",
+                    result.get("reason"),
+                )
+                return
+
+            if result.get("sent") or result.get("unreachable") or result.get("failed"):
+                await self._log_monitoring_event(
+                    db,
+                    "expired_subscription_feedbacks_processed",
+                    "Обработаны feedback-опросы по истекшим подпискам",
+                    result,
+                    is_success=(result.get("failed", 0) == 0),
+                )
+        except Exception as e:
+            logger.error(f"Ошибка обработки feedback-опросов по истекшим подпискам: {e}")
+            await self._log_monitoring_event(
+                db,
+                "expired_subscription_feedbacks_error",
+                f"Ошибка обработки feedback-опросов по истекшим подпискам: {str(e)}",
                 {"error": str(e)},
                 is_success=False,
             )

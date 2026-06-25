@@ -678,6 +678,7 @@ class User(Base):
     referral_earnings = relationship("ReferralEarning", foreign_keys="ReferralEarning.user_id", back_populates="user")
     discount_offers = relationship("DiscountOffer", back_populates="user")
     promo_offer_logs = relationship("PromoOfferLog", back_populates="user")
+    feedbacks = relationship("Feedback", back_populates="user")
     lifetime_used_traffic_bytes = Column(BigInteger, default=0)
     auto_promo_group_assigned = Column(Boolean, nullable=False, default=False)
     auto_promo_group_threshold_kopeks = Column(BigInteger, nullable=False, default=0)
@@ -1432,6 +1433,32 @@ class SentNotification(Base):
 
     user = relationship("User", backref="sent_notifications")
     subscription = relationship("Subscription", backref="sent_notifications")
+
+
+class Feedback(Base):
+    __tablename__ = "feedbacks"
+    __table_args__ = (
+        UniqueConstraint("event_key", name="uq_feedbacks_event_key"),
+        Index("ix_feedbacks_type", "type"),
+        Index("ix_feedbacks_user_id", "user_id"),
+        Index("ix_feedbacks_subscription_id", "subscription_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    type = Column(String(50), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    subscription_id = Column(Integer, ForeignKey("subscriptions.id", ondelete="SET NULL"), nullable=True)
+    event_key = Column(String(255), nullable=True)
+    status = Column(String(50), nullable=False, default="sent")
+    message_id = Column(Integer, nullable=True)
+    selected_option = Column(String(100), nullable=True)
+    answer = Column(Text, nullable=True)
+    context = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+
+    user = relationship("User", back_populates="feedbacks")
+    subscription = relationship("Subscription", backref="feedbacks")
 
 
 class SubscriptionEvent(Base):

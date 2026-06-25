@@ -207,6 +207,10 @@ class ContestStates(StatesGroup):
     waiting_for_answer = State()
 
 
+class ExpiredSubscriptionFeedbackStates(StatesGroup):
+    waiting_for_answer = State()
+
+
 class AdminSubmenuStates(StatesGroup):
     in_users_submenu = State()
     in_promo_submenu = State()

@@ -3785,6 +3785,102 @@ async def create_subscription_events_table():
         logger.error(f"Ошибка создания таблицы subscription_events: {e}")
         return False
 
+
+async def create_feedbacks_table() -> bool:
+    table_exists = await check_table_exists("feedbacks")
+    if table_exists:
+        logger.info("Таблица feedbacks уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == "sqlite":
+                create_sql = """
+                CREATE TABLE feedbacks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type VARCHAR(50) NOT NULL,
+                    user_id INTEGER NULL,
+                    subscription_id INTEGER NULL,
+                    event_key VARCHAR(255) NULL,
+                    status VARCHAR(50) NOT NULL DEFAULT 'sent',
+                    message_id INTEGER NULL,
+                    selected_option VARCHAR(100) NULL,
+                    answer TEXT NULL,
+                    context JSON NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL
+                );
+
+                CREATE UNIQUE INDEX uq_feedbacks_event_key ON feedbacks(event_key);
+                CREATE INDEX ix_feedbacks_type ON feedbacks(type);
+                CREATE INDEX ix_feedbacks_user_id ON feedbacks(user_id);
+                CREATE INDEX ix_feedbacks_subscription_id ON feedbacks(subscription_id);
+                """
+
+            elif db_type == "postgresql":
+                create_sql = """
+                CREATE TABLE feedbacks (
+                    id SERIAL PRIMARY KEY,
+                    type VARCHAR(50) NOT NULL,
+                    user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+                    subscription_id INTEGER NULL REFERENCES subscriptions(id) ON DELETE SET NULL,
+                    event_key VARCHAR(255) NULL,
+                    status VARCHAR(50) NOT NULL DEFAULT 'sent',
+                    message_id INTEGER NULL,
+                    selected_option VARCHAR(100) NULL,
+                    answer TEXT NULL,
+                    context JSON NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE UNIQUE INDEX uq_feedbacks_event_key ON feedbacks(event_key);
+                CREATE INDEX ix_feedbacks_type ON feedbacks(type);
+                CREATE INDEX ix_feedbacks_user_id ON feedbacks(user_id);
+                CREATE INDEX ix_feedbacks_subscription_id ON feedbacks(subscription_id);
+                """
+
+            elif db_type == "mysql":
+                create_sql = """
+                CREATE TABLE feedbacks (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    type VARCHAR(50) NOT NULL,
+                    user_id INT NULL,
+                    subscription_id INT NULL,
+                    event_key VARCHAR(255) NULL,
+                    status VARCHAR(50) NOT NULL DEFAULT 'sent',
+                    message_id INT NULL,
+                    selected_option VARCHAR(100) NULL,
+                    answer TEXT NULL,
+                    context JSON NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL
+                );
+
+                CREATE UNIQUE INDEX uq_feedbacks_event_key ON feedbacks(event_key);
+                CREATE INDEX ix_feedbacks_type ON feedbacks(type);
+                CREATE INDEX ix_feedbacks_user_id ON feedbacks(user_id);
+                CREATE INDEX ix_feedbacks_subscription_id ON feedbacks(subscription_id);
+                """
+            else:
+                logger.error(f"Неподдерживаемый тип БД для создания таблицы feedbacks: {db_type}")
+                return False
+
+            await conn.execute(text(create_sql))
+            logger.info("✅ Таблица feedbacks успешно создана")
+            return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы feedbacks: {e}")
+        return False
+
+
 async def fix_subscription_duplicates_universal():
     async with engine.begin() as conn:
         db_type = await get_database_type()
@@ -6389,6 +6485,13 @@ async def run_universal_migration():
             logger.info("✅ Таблица subscription_events готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей subscription_events")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ FEEDBACKS ===")
+        feedbacks_created = await create_feedbacks_table()
+        if feedbacks_created:
+            logger.info("✅ Таблица feedbacks готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей feedbacks")
 
         logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ HAS_CONNECTED_TO_VPN В USERS ===")
         vpn_column_ready = await add_user_has_connected_to_vpn_column()
