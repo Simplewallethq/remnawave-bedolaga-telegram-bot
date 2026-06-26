@@ -198,8 +198,8 @@ class MonitoringService:
                 if settings.IS_ARTEM:
                     logger.info("settings.IS_ARTEM=True")
                     # await self._collect_user_daily_traffic_usage(db)
-                    # await self._process_android_rate_requests(db)
-                    await self._process_expired_subscription_feedbacks(db)
+                    await self._process_android_rate_requests(db)
+                    # await self._process_expired_subscription_feedbacks(db)
                     await self._log_monitoring_event(
                         db,
                         "user_daily_traffic_only_cycle_completed",

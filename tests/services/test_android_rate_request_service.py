@@ -7,13 +7,13 @@ from app.services import android_rate_request_service as service_module
 from app.services.android_rate_request_service import (
     ANDROID_RATE_REQUEST_BATCH_SIZE,
     ANDROID_RATE_REQUEST_NOTIFICATION_TYPE,
-    ANDROID_RATE_REQUEST_TEST_TELEGRAM_ID,
     ANDROID_RATE_REQUEST_TRAFFIC_THRESHOLD_BYTES,
     AndroidRateRequestService,
 )
 
 
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+TELEGRAM_ID = 5708953214
 
 
 class _RowsResult:
@@ -91,7 +91,7 @@ async def test_process_due_requests_sends_and_records(monkeypatch):
     service = _service_at(now)
     db = SimpleNamespace(commit=AsyncMock())
     bot = SimpleNamespace(send_message=AsyncMock())
-    user = SimpleNamespace(id=1, telegram_id=ANDROID_RATE_REQUEST_TEST_TELEGRAM_ID)
+    user = SimpleNamespace(id=1, telegram_id=TELEGRAM_ID)
     subscription = SimpleNamespace(id=2, user=user)
 
     service._get_last_run_date = AsyncMock(return_value=None)
@@ -148,8 +148,8 @@ async def test_process_due_requests_processes_all_batches(monkeypatch):
     service = _service_at(now)
     db = SimpleNamespace(commit=AsyncMock())
     bot = SimpleNamespace(send_message=AsyncMock())
-    first_user = SimpleNamespace(id=1, telegram_id=ANDROID_RATE_REQUEST_TEST_TELEGRAM_ID)
-    second_user = SimpleNamespace(id=2, telegram_id=ANDROID_RATE_REQUEST_TEST_TELEGRAM_ID)
+    first_user = SimpleNamespace(id=1, telegram_id=TELEGRAM_ID)
+    second_user = SimpleNamespace(id=2, telegram_id=TELEGRAM_ID)
     first_subscription = SimpleNamespace(id=2, user=first_user)
     second_subscription = SimpleNamespace(id=3, user=second_user)
 
@@ -181,7 +181,7 @@ async def test_process_due_requests_does_not_record_unreachable(monkeypatch):
     service = _service_at(now)
     db = SimpleNamespace(commit=AsyncMock())
     bot = SimpleNamespace(send_message=AsyncMock())
-    user = SimpleNamespace(id=1, telegram_id=ANDROID_RATE_REQUEST_TEST_TELEGRAM_ID)
+    user = SimpleNamespace(id=1, telegram_id=TELEGRAM_ID)
     subscription = SimpleNamespace(id=2, user=user)
 
     service._get_last_run_date = AsyncMock(return_value=None)
@@ -203,7 +203,7 @@ async def test_process_due_requests_logs_record_error_and_continues(monkeypatch)
     service = _service_at(now)
     db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
     bot = SimpleNamespace(send_message=AsyncMock())
-    user = SimpleNamespace(id=1, telegram_id=ANDROID_RATE_REQUEST_TEST_TELEGRAM_ID)
+    user = SimpleNamespace(id=1, telegram_id=TELEGRAM_ID)
     subscription = SimpleNamespace(id=2, user=user)
 
     service._get_last_run_date = AsyncMock(return_value=None)
@@ -238,7 +238,7 @@ async def test_cooldown_uses_latest_sent_notification(monkeypatch):
     assert not await service._is_in_cooldown(SimpleNamespace(), 1, now)
 
 
-async def test_candidate_query_is_gated_to_test_user():
+async def test_candidate_query_requires_android_app_usage():
     now = datetime(2024, 1, 10, 21, 0, tzinfo=MOSCOW_TZ)
     service = _service_at(now)
     captured = {}
@@ -250,7 +250,8 @@ async def test_candidate_query_is_gated_to_test_user():
 
     await service._get_candidate_subscriptions(Db(), now, limit=123, after_user_id=456)
 
-    assert str(ANDROID_RATE_REQUEST_TEST_TELEGRAM_ID) in captured["sql"]
+    assert str(TELEGRAM_ID) not in captured["sql"]
+    assert "users.has_used_mobile_app = true" in captured["sql"].lower()
     assert "subscriptions.is_trial = false" in captured["sql"].lower()
     assert "user_daily_traffic_usage" in captured["sql"]
     assert "sent_notifications" in captured["sql"]
