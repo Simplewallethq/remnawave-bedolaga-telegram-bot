@@ -33,7 +33,6 @@ UTC_TZ = timezone.utc
 
 ANDROID_RATE_REQUEST_NOTIFICATION_TYPE = "android_rate_request"
 ANDROID_RATE_REQUEST_LAST_RUN_KEY = "android_rate_request_last_run_date"
-ANDROID_RATE_REQUEST_TEST_TELEGRAM_ID = 5708953214
 ANDROID_RATE_REQUEST_BATCH_SIZE = 500
 ANDROID_RATE_REQUEST_TRAFFIC_THRESHOLD_BYTES = 20 * 1024 * 1024
 ANDROID_RATE_REQUEST_REVIEW_URL = (
@@ -46,10 +45,8 @@ class AndroidRateRequestService:
         self,
         *,
         now_provider: Optional[Callable[[], datetime]] = None,
-        test_telegram_id: int = ANDROID_RATE_REQUEST_TEST_TELEGRAM_ID,
     ) -> None:
         self._now_provider = now_provider
-        self.test_telegram_id = test_telegram_id
 
     async def process_due_requests(self, db: AsyncSession, bot) -> dict:
         if not bot:
@@ -194,8 +191,8 @@ class AndroidRateRequestService:
             .options(selectinload(Subscription.user))
             .where(
                 and_(
-                    User.telegram_id == self.test_telegram_id,
                     User.telegram_id.isnot(None),
+                    User.has_used_mobile_app == True,  # noqa: E712
                     User.id > after_user_id,
                     User.status == ModelUserStatus.ACTIVE.value,
                     Subscription.status == SubscriptionStatus.ACTIVE.value,
