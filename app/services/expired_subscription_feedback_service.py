@@ -66,7 +66,7 @@ EXPIRED_SUBSCRIPTION_FOLLOWUP_QUESTIONS = {
 
 EXPIRED_SUBSCRIPTION_FEEDBACK_CALLBACK_PREFIX = "feedback_expired"
 
-ENABLED = False
+ENABLED = True
 
 class ExpiredSubscriptionFeedbackService:
     def __init__(self, *, now_provider: Optional[Callable[[], datetime]] = None) -> None:
