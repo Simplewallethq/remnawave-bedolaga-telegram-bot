@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
-from aiogram import Dispatcher, F, types
+from aiogram import Bot, Dispatcher, F, types
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -295,6 +295,7 @@ async def finalize_tariff_purchase(
     plan: SubscriptionPlan,
     period_days: int,
     price_kopeks: int,
+    bot: Bot = None,
 ) -> Optional[Tuple[Subscription, object, bool]]:
     """Charge price, create/replace the subscription with the tariff, activate in Remnawave.
 
@@ -386,6 +387,17 @@ async def finalize_tariff_purchase(
 
     await db.refresh(new_sub)
     await db.refresh(db_user)
+
+    # Лучи рефереру за квалифицирующую покупку реферала (≥3 мес). Best-effort:
+    # сбой начисления не должен ронять покупку. transaction.id — «payment_id»
+    # для идемпотентности.
+    try:
+        from app.services.rays_service import award_rays_for_referral_purchase
+        await award_rays_for_referral_purchase(
+            db, db_user, period_days, transaction.id, bot=bot,
+        )
+    except Exception as e:
+        logger.warning(f"Лучи не начислены за покупку {transaction.id}: {e}")
 
     try:
         await SubscriptionService().create_remnawave_user(db, new_sub)
@@ -675,7 +687,9 @@ async def start_tariff_purchase(
         await callback.answer()
         return
 
-    result = await finalize_tariff_purchase(db, db_user, plan, period_days, price_kopeks)
+    result = await finalize_tariff_purchase(
+        db, db_user, plan, period_days, price_kopeks, bot=callback.bot,
+    )
     if result is None:
         await callback.answer(
             texts.t("BALANCE_DEDUCTION_FAILED", "Не удалось списать средства."),

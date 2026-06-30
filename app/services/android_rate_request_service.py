@@ -36,7 +36,7 @@ ANDROID_RATE_REQUEST_LAST_RUN_KEY = "android_rate_request_last_run_date"
 ANDROID_RATE_REQUEST_BATCH_SIZE = 500
 ANDROID_RATE_REQUEST_TRAFFIC_THRESHOLD_BYTES = 20 * 1024 * 1024
 ANDROID_RATE_REQUEST_REVIEW_URL = (
-    "https://play.google.com/store/apps/details?id=com.leto.split"
+    "https://play.google.com/store/apps/details?id=com.leto.split&utm_source=letovpnbot"
 )
 
 

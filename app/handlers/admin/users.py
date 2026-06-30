@@ -2887,6 +2887,10 @@ async def show_user_statistics(
     text += f"• Дней с регистрации: {profile['registration_days']}\n"
     text += f"• Баланс: {settings.format_price(user.balance_kopeks)}\n"
     text += f"• Транзакций: {profile['transactions_count']}\n"
+    text += (
+        f"• ✨ Лучи: {user.rays_balance or 0} "
+        f"(всего заработано: {user.rays_lifetime_earned or 0})\n"
+    )
     text += f"• Язык: {user.language}\n\n"
     
     text += f"<b>Подписка:</b>\n"

@@ -69,6 +69,12 @@ class TransactionType(Enum):
     POLL_REWARD = "poll_reward"
 
 
+class RayTransactionType(Enum):
+    REFERRAL_PURCHASE = "referral_purchase"  # начисление за квалифицирующую покупку реферала
+    SPEND = "spend"                          # списание (призы) — задел на будущее
+    ADJUSTMENT = "adjustment"                # ручная корректировка админом
+
+
 class PromoCodeType(Enum):
     BALANCE = "balance"
     SUBSCRIPTION_DAYS = "subscription_days"
@@ -687,6 +693,13 @@ class User(Base):
     referral_total_topup_kopeks = Column(BigInteger, nullable=False, default=0)
     # Счётчик рефералов партнёра, внёсших суммарно более 1000₽
     qualified_referrals_count = Column(Integer, nullable=False, default=0)
+    # Лучи (реферальные баллы). Кошелёк rays_balance можно тратить (в будущем),
+    # rays_lifetime_earned — неубывающий счётчик под статусы/ачивки/рейтинг.
+    rays_balance = Column(Integer, nullable=False, default=0, server_default="0")
+    rays_lifetime_earned = Column(Integer, nullable=False, default=0, server_default="0")
+    # Флаг на реферале: начислены ли уже лучи рефереру за этого пользователя.
+    # Смысловой только при referred_by_id IS NOT NULL.
+    rays_credited = Column(Boolean, nullable=False, default=False, server_default="false")
     promo_offer_discount_percent = Column(Integer, nullable=False, default=0)
     promo_offer_discount_source = Column(String(100), nullable=True)
     promo_offer_discount_expires_at = Column(DateTime, nullable=True)
@@ -1075,6 +1088,31 @@ class Transaction(Base):
     @property
     def amount_rubles(self) -> float:
         return self.amount_kopeks / 100
+
+
+class RayTransaction(Base):
+    """Append-only журнал лучей. Источник правды; User.rays_* — кэш баланса."""
+    __tablename__ = "ray_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Владелец кошелька (реферер, которому начислены лучи).
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # Знаковая сумма: +N — начисление, −N — списание (списания пока не используются).
+    amount = Column(Integer, nullable=False)
+    type = Column(String(50), nullable=False)  # значения RayTransactionType
+    # Реферал (друг), за покупку которого начислены лучи.
+    referral_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # «payment_id» источника начисления (Transaction.id покупки) — идемпотентность.
+    source_transaction_id = Column(
+        Integer, ForeignKey("transactions.id"), nullable=True, unique=True
+    )
+    period_days = Column(Integer, nullable=True)  # период покупки на момент начисления
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+    user = relationship("User", foreign_keys=[user_id])
+    referral = relationship("User", foreign_keys=[referral_id])
+
 
 class SubscriptionConversion(Base):
     __tablename__ = "subscription_conversions"

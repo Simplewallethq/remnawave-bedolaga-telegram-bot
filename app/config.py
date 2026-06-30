@@ -165,6 +165,17 @@ class Settings(BaseSettings):
     REFERRAL_NOTIFICATIONS_ENABLED: bool = True
     REFERRAL_NOTIFICATION_RETRY_ATTEMPTS: int = 3
 
+    # Лучи (реферальные баллы) — начисляются рефереру за реферала, купившего
+    # подписку на длительный срок. Тиры по порогам периода (в днях): берётся
+    # высший тир, которому период удовлетворяет. Значения можно менять.
+    RAYS_PROGRAM_ENABLED: bool = True
+    RAYS_TIER_1_MIN_DAYS: int = 90
+    RAYS_TIER_1_AMOUNT: int = 1
+    RAYS_TIER_2_MIN_DAYS: int = 360
+    RAYS_TIER_2_AMOUNT: int = 3
+    RAYS_TIER_3_MIN_DAYS: int = 720
+    RAYS_TIER_3_AMOUNT: int = 5
+
     # Конкурсы (глобальный флаг, будет расширяться под разные типы)
     CONTESTS_ENABLED: bool = False
     CONTESTS_BUTTON_VISIBLE: bool = False
@@ -1552,7 +1563,24 @@ class Settings(BaseSettings):
     
     def is_referral_notifications_enabled(self) -> bool:
         return self.REFERRAL_NOTIFICATIONS_ENABLED
-    
+
+    def is_rays_program_enabled(self) -> bool:
+        return bool(self.RAYS_PROGRAM_ENABLED)
+
+    def get_rays_for_period(self, period_days: int) -> int:
+        """Сколько лучей даёт покупка на period_days. Высший тир, которому период
+        удовлетворяет. Период < минимального тира → 0 (не квалифицирует)."""
+        tiers = sorted([
+            (self.RAYS_TIER_1_MIN_DAYS, self.RAYS_TIER_1_AMOUNT),
+            (self.RAYS_TIER_2_MIN_DAYS, self.RAYS_TIER_2_AMOUNT),
+            (self.RAYS_TIER_3_MIN_DAYS, self.RAYS_TIER_3_AMOUNT),
+        ])
+        rays = 0
+        for min_days, amount in tiers:
+            if period_days >= min_days:
+                rays = amount
+        return rays
+
     def get_traffic_packages(self) -> List[Dict]:
         import logging
         logger = logging.getLogger(__name__)

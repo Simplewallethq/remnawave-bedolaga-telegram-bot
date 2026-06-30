@@ -6018,6 +6018,123 @@ async def create_ad_campaign_visits_table() -> bool:
         return False
 
 
+async def add_rays_columns() -> bool:
+    """Добавляет колонки лучей в users: rays_balance, rays_lifetime_earned, rays_credited."""
+    try:
+        balance_exists = await check_column_exists('users', 'rays_balance')
+        lifetime_exists = await check_column_exists('users', 'rays_lifetime_earned')
+        credited_exists = await check_column_exists('users', 'rays_credited')
+
+        if balance_exists and lifetime_exists and credited_exists:
+            logger.info("ℹ️ Колонки лучей уже существуют")
+            return True
+
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+            int_def = "INTEGER NOT NULL DEFAULT 0" if db_type != 'mysql' else "INT NOT NULL DEFAULT 0"
+            if db_type == 'sqlite':
+                bool_def = "BOOLEAN NOT NULL DEFAULT 0"
+            elif db_type == 'mysql':
+                bool_def = "TINYINT(1) NOT NULL DEFAULT 0"
+            else:
+                bool_def = "BOOLEAN NOT NULL DEFAULT FALSE"
+
+            if not balance_exists:
+                await conn.execute(text(f"ALTER TABLE users ADD COLUMN rays_balance {int_def}"))
+                logger.info("✅ Добавлена колонка users.rays_balance")
+            if not lifetime_exists:
+                await conn.execute(text(f"ALTER TABLE users ADD COLUMN rays_lifetime_earned {int_def}"))
+                logger.info("✅ Добавлена колонка users.rays_lifetime_earned")
+            if not credited_exists:
+                await conn.execute(text(f"ALTER TABLE users ADD COLUMN rays_credited {bool_def}"))
+                logger.info("✅ Добавлена колонка users.rays_credited")
+
+        return True
+
+    except Exception as error:
+        logger.error(f"Ошибка добавления колонок лучей: {error}")
+        return False
+
+
+async def create_ray_transactions_table() -> bool:
+    """Создаёт append-only журнал лучей ray_transactions."""
+    table_exists = await check_table_exists('ray_transactions')
+    if table_exists:
+        logger.info("Таблица ray_transactions уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE ray_transactions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL,
+                    type VARCHAR(50) NOT NULL,
+                    referral_id INTEGER NULL,
+                    source_transaction_id INTEGER NULL,
+                    period_days INTEGER NULL,
+                    description TEXT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_ray_transactions_source_transaction_id UNIQUE (source_transaction_id),
+                    FOREIGN KEY(user_id) REFERENCES users(id),
+                    FOREIGN KEY(referral_id) REFERENCES users(id),
+                    FOREIGN KEY(source_transaction_id) REFERENCES transactions(id)
+                );
+                CREATE INDEX ix_ray_transactions_user_id ON ray_transactions(user_id);
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS ray_transactions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    amount INTEGER NOT NULL,
+                    type VARCHAR(50) NOT NULL,
+                    referral_id INTEGER NULL REFERENCES users(id),
+                    source_transaction_id INTEGER NULL REFERENCES transactions(id),
+                    period_days INTEGER NULL,
+                    description TEXT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    CONSTRAINT uq_ray_transactions_source_transaction_id UNIQUE (source_transaction_id)
+                );
+                CREATE INDEX IF NOT EXISTS ix_ray_transactions_user_id ON ray_transactions(user_id);
+                """
+            elif db_type == 'mysql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS ray_transactions (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    amount INT NOT NULL,
+                    type VARCHAR(50) NOT NULL,
+                    referral_id INT NULL,
+                    source_transaction_id INT NULL,
+                    period_days INT NULL,
+                    description TEXT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_ray_transactions_source_transaction_id UNIQUE (source_transaction_id),
+                    FOREIGN KEY(user_id) REFERENCES users(id),
+                    FOREIGN KEY(referral_id) REFERENCES users(id),
+                    FOREIGN KEY(source_transaction_id) REFERENCES transactions(id)
+                );
+                CREATE INDEX ix_ray_transactions_user_id ON ray_transactions(user_id);
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица ray_transactions успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы ray_transactions: {e}")
+        return False
+
+
 async def run_universal_migration():
     logger.info("=== НАЧАЛО УНИВЕРСАЛЬНОЙ МИГРАЦИИ ===")
     
@@ -6598,6 +6715,20 @@ async def run_universal_migration():
             logger.info("✅ Таблица ad_campaign_visits готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей ad_campaign_visits")
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНОК ЛУЧЕЙ В USERS ===")
+        rays_columns_ready = await add_rays_columns()
+        if rays_columns_ready:
+            logger.info("✅ Колонки лучей в users готовы")
+        else:
+            logger.warning("⚠️ Проблемы с колонками лучей в users")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ RAY_TRANSACTIONS ===")
+        ray_transactions_ready = await create_ray_transactions_table()
+        if ray_transactions_ready:
+            logger.info("✅ Таблица ray_transactions готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей ray_transactions")
 
         async with engine.begin() as conn:
             total_subs = await conn.execute(text("SELECT COUNT(*) FROM subscriptions"))

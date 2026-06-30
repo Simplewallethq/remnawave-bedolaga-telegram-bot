@@ -785,7 +785,7 @@ async def _auto_tariff_purchase(
             price = await get_plan_price(db, plan.id, period_days, cohort=cohort)
             if price is None or user.balance_kopeks < price:
                 return False
-            result = await finalize_tariff_purchase(db, user, plan, period_days, price)
+            result = await finalize_tariff_purchase(db, user, plan, period_days, price, bot=bot)
             if result is None:
                 return False
             subscription, transaction, was_trial_conversion = result
