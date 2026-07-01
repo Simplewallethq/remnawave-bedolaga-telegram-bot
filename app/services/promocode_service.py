@@ -9,6 +9,10 @@ from app.database.crud.promocode import (
 )
 from app.database.crud.user import add_user_balance, get_user_by_id
 from app.database.crud.subscription import extend_subscription, get_subscription_by_user_id
+from app.database.crud.subscription_event import (
+    record_subscription_purchase_event,
+    record_subscription_renewal_event,
+)
 from app.database.crud.user_promo_group import (
     has_user_promo_group, add_user_to_promo_group
 )
@@ -153,8 +157,19 @@ class PromoCodeService:
             subscription = await get_subscription_by_user_id(db, user.id)
             
             if subscription:
+                old_end_date = subscription.end_date
                 await extend_subscription(db, subscription, promocode.subscription_days)
-                
+                await record_subscription_renewal_event(
+                    db,
+                    user_id=user.id,
+                    subscription_id=subscription.id,
+                    amount_kopeks=0,
+                    period_days=promocode.subscription_days,
+                    previous_end_date=old_end_date,
+                    new_end_date=subscription.end_date,
+                    source="promocode",
+                )
+
                 await self.subscription_service.update_remnawave_user(db, subscription)
                 
                 effects.append(f"⏰ Подписка продлена на {promocode.subscription_days} дней")
@@ -196,7 +211,18 @@ class PromoCodeService:
                 )
                 
                 await self.subscription_service.create_remnawave_user(db, new_subscription)
-                
+                await record_subscription_purchase_event(
+                    db,
+                    user_id=user.id,
+                    subscription_id=new_subscription.id,
+                    amount_kopeks=0,
+                    period_days=promocode.subscription_days,
+                    was_trial_conversion=False,
+                    source="promocode",
+                    starts_at=new_subscription.start_date,
+                    ends_at=new_subscription.end_date,
+                )
+
                 effects.append(f"🎉 Получена подписка на {promocode.subscription_days} дней")
                 logger.info(f"✅ Создана новая подписка для пользователя {user.telegram_id} на {promocode.subscription_days} дней с триал сквадом {trial_squads}")
         

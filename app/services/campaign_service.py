@@ -10,6 +10,7 @@ from app.database.crud.subscription import (
     create_paid_subscription,
     get_subscription_by_user_id,
 )
+from app.database.crud.subscription_event import record_subscription_purchase_event
 from app.database.crud.user import add_user_balance
 from app.database.models import AdvertisingCampaign, User
 from app.services.subscription_service import SubscriptionService
@@ -157,6 +158,18 @@ class AdvertisingCampaignService:
                 campaign.id,
                 error,
             )
+
+        await record_subscription_purchase_event(
+            db,
+            user_id=user.id,
+            subscription_id=new_subscription.id,
+            amount_kopeks=0,
+            period_days=duration_days,
+            was_trial_conversion=False,
+            source="campaign",
+            starts_at=new_subscription.start_date,
+            ends_at=new_subscription.end_date,
+        )
 
         await record_campaign_registration(
             db,

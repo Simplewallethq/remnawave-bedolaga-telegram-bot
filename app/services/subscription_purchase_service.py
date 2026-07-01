@@ -20,6 +20,10 @@ from app.database.crud.subscription import (
 from app.database.crud.subscription_conversion import (
     create_subscription_conversion,
 )
+from app.database.crud.subscription_event import (
+    record_subscription_purchase_event,
+    record_subscription_renewal_event,
+)
 from app.database.crud.transaction import create_transaction
 from app.database.crud.user import subtract_user_balance
 from app.database.models import ServerSquad, Subscription, SubscriptionStatus, TransactionType, User
@@ -1087,6 +1091,8 @@ class MiniAppSubscriptionPurchaseService:
 
         was_trial_conversion = False
         now = datetime.utcnow()
+        had_existing_subscription = subscription is not None
+        previous_end_date = subscription.end_date if subscription else None
 
         if subscription:
             bonus_period = timedelta()
@@ -1178,6 +1184,37 @@ class MiniAppSubscriptionPurchaseService:
             amount_kopeks=pricing.final_total,
             description=f"Подписка на {pricing.selection.period.days} дней ({pricing.months} мес)",
         )
+
+        if had_existing_subscription and not was_trial_conversion:
+            await record_subscription_renewal_event(
+                db,
+                user_id=user.id,
+                subscription_id=subscription.id,
+                transaction_id=transaction.id,
+                amount_kopeks=pricing.final_total,
+                occurred_at=transaction.completed_at or transaction.created_at,
+                period_days=pricing.selection.period.days,
+                previous_end_date=previous_end_date,
+                new_end_date=subscription.end_date,
+                payment_method=transaction.payment_method,
+                balance_after=user.balance_kopeks,
+                source="miniapp_purchase",
+            )
+        else:
+            await record_subscription_purchase_event(
+                db,
+                user_id=user.id,
+                subscription_id=subscription.id,
+                transaction_id=transaction.id,
+                amount_kopeks=pricing.final_total,
+                occurred_at=transaction.completed_at or transaction.created_at,
+                period_days=pricing.selection.period.days,
+                was_trial_conversion=was_trial_conversion,
+                payment_method=transaction.payment_method,
+                source="miniapp_purchase",
+                starts_at=subscription.start_date,
+                ends_at=subscription.end_date,
+            )
 
         await db.refresh(user)
         await db.refresh(subscription)

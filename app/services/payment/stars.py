@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database.crud.transaction import create_transaction
+from app.database.crud.subscription_event import record_subscription_purchase_event
 from app.database.crud.user import get_user_by_id
 from app.database.models import PaymentMethod, TransactionType
 from app.external.telegram_stars import TelegramStarsService
@@ -322,6 +323,21 @@ class TelegramStarsMixin:
         if not period_display:
             period_display = settings.SIMPLE_SUBSCRIPTION_PERIOD_DAYS
 
+        await record_subscription_purchase_event(
+            db,
+            user_id=user.id,
+            subscription_id=subscription.id,
+            transaction_id=transaction.id,
+            amount_kopeks=amount_kopeks,
+            occurred_at=transaction.completed_at or transaction.created_at,
+            period_days=period_display,
+            was_trial_conversion=False,
+            payment_method=transaction.payment_method,
+            source="stars_simple_subscription",
+            starts_at=subscription.start_date,
+            ends_at=subscription.end_date,
+        )
+
         if getattr(self, "bot", None):
             try:
                 from aiogram import types
@@ -388,6 +404,7 @@ class TelegramStarsMixin:
                     transaction,
                     period_display,
                     was_trial_conversion=False,
+                    record_event=False,
                 )
             except Exception as admin_error:  # pragma: no cover - диагностический лог
                 logger.error(

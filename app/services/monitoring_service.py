@@ -31,6 +31,7 @@ from app.database.crud.subscription import (
     get_expiring_subscriptions,
     get_subscriptions_for_autopay,
 )
+from app.database.crud.subscription_event import record_subscription_renewal_event
 from app.database.crud.user import (
     delete_user,
     get_inactive_users,
@@ -994,7 +995,19 @@ class MonitoringService:
                     )
 
                     if success:
+                        old_end_date = subscription.end_date
                         await extend_subscription(db, subscription, 30)
+                        await record_subscription_renewal_event(
+                            db,
+                            user_id=user.id,
+                            subscription_id=subscription.id,
+                            amount_kopeks=charge_amount,
+                            period_days=30,
+                            previous_end_date=old_end_date,
+                            new_end_date=subscription.end_date,
+                            balance_after=user.balance_kopeks,
+                            source="autopay",
+                        )
                         await self.subscription_service.update_remnawave_user(
                             db,
                             subscription,

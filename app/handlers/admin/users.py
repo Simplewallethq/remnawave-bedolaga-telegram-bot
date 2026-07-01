@@ -17,6 +17,10 @@ from app.database.crud.user import (
     get_user_by_username,
     get_referrals,
 )
+from app.database.crud.subscription_event import (
+    record_subscription_purchase_event,
+    record_subscription_renewal_event,
+)
 from app.database.crud.campaign import (
     get_campaign_registration_by_user,
     get_campaign_statistics,
@@ -4119,9 +4123,21 @@ async def _extend_subscription_by_days(db: AsyncSession, user_id: int, days: int
         if not subscription:
             logger.error(f"Подписка не найдена для пользователя {user_id}")
             return False
-        
+
+        old_end_date = subscription.end_date
         await extend_subscription(db, subscription, days)
-        
+        if days > 0:
+            await record_subscription_renewal_event(
+                db,
+                user_id=user_id,
+                subscription_id=subscription.id,
+                amount_kopeks=0,
+                period_days=days,
+                previous_end_date=old_end_date,
+                new_end_date=subscription.end_date,
+                source="admin_manual",
+            )
+
         subscription_service = SubscriptionService()
         await subscription_service.update_remnawave_user(db, subscription)
         
@@ -4293,7 +4309,18 @@ async def _grant_paid_subscription(db: AsyncSession, user_id: int, days: int, ad
             connected_squads=trial_squads,
             update_server_counters=True,
         )
-        
+        await record_subscription_purchase_event(
+            db,
+            user_id=user_id,
+            subscription_id=subscription.id,
+            amount_kopeks=0,
+            period_days=days,
+            was_trial_conversion=False,
+            source="admin_manual",
+            starts_at=subscription.start_date,
+            ends_at=subscription.end_date,
+        )
+
         subscription_service = SubscriptionService()
         await subscription_service.create_remnawave_user(db, subscription)
         

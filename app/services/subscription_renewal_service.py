@@ -18,6 +18,7 @@ from app.database.crud.subscription import (
     calculate_subscription_total_cost,
     extend_subscription,
 )
+from app.database.crud.subscription_event import record_subscription_renewal_event
 from app.database.crud.transaction import create_transaction
 from app.database.crud.user import subtract_user_balance
 from app.database.models import PaymentMethod, Subscription, SubscriptionStatus, Transaction, TransactionType, User
@@ -509,6 +510,20 @@ class SubscriptionRenewalService:
         await db.refresh(subscription_after)
 
         if transaction and old_end_date and subscription_after.end_date:
+            await record_subscription_renewal_event(
+                db,
+                user_id=user.id,
+                subscription_id=subscription_after.id,
+                transaction_id=transaction.id,
+                amount_kopeks=transaction.amount_kopeks,
+                occurred_at=transaction.completed_at or transaction.created_at,
+                period_days=period_days,
+                previous_end_date=old_end_date,
+                new_end_date=subscription_after.end_date,
+                payment_method=transaction.payment_method,
+                balance_after=user.balance_kopeks,
+                source="subscription_renewal_service",
+            )
             await with_admin_notification_service(
                 lambda service: service.send_subscription_extension_notification(
                     db,
@@ -519,6 +534,7 @@ class SubscriptionRenewalService:
                     old_end_date,
                     new_end_date=subscription_after.end_date,
                     balance_after=user.balance_kopeks,
+                    record_event=False,
                 )
             )
 
@@ -570,4 +586,3 @@ def calculate_missing_amount(balance_kopeks: int, total_kopeks: int) -> int:
     if balance_kopeks <= 0:
         return total_kopeks
     return max(0, total_kopeks - min(balance_kopeks, total_kopeks))
-

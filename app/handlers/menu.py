@@ -1201,7 +1201,20 @@ async def handle_activate_button(
         # Списать деньги
         db_user.balance_kopeks -= best_price
         await db.commit()
-        
+        from app.database.crud.subscription_event import record_subscription_purchase_event
+
+        await record_subscription_purchase_event(
+            db,
+            user_id=db_user.id,
+            subscription_id=new_subscription.id,
+            amount_kopeks=best_price,
+            period_days=best_period,
+            was_trial_conversion=False,
+            source="menu_activation",
+            starts_at=new_subscription.start_date,
+            ends_at=new_subscription.end_date,
+        )
+
         await callback.answer(
             texts.t("ACTIVATION_SUCCESS", f"✅ Подписка активирована на {best_period} дней за {best_price//100} руб!"),
             show_alert=True,

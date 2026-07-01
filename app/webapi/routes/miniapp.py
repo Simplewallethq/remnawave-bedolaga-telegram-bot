@@ -5217,6 +5217,7 @@ async def subscription_purchase_endpoint(
                 transaction,
                 period_days,
                 was_trial_conversion=was_trial_conversion,
+                record_event=False,
             )
         )
 

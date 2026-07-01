@@ -317,25 +317,27 @@ class AdminNotificationService:
         period_days: int,
         was_trial_conversion: bool = False,
         amount_kopeks: Optional[int] = None,
+        record_event: bool = True,
     ) -> bool:
         try:
             total_amount = amount_kopeks if amount_kopeks is not None else (transaction.amount_kopeks if transaction else 0)
 
-            await self._record_subscription_event(
-                db,
-                event_type="purchase",
-                user=user,
-                subscription=subscription,
-                transaction=transaction,
-                amount_kopeks=total_amount,
-                message="Subscription purchase",
-                occurred_at=(transaction.completed_at or transaction.created_at) if transaction else datetime.utcnow(),
-                extra={
-                    "period_days": period_days,
-                    "was_trial_conversion": was_trial_conversion,
-                    "payment_method": self._get_payment_method_display(transaction.payment_method) if transaction else "Баланс",
-                },
-            )
+            if record_event:
+                await self._record_subscription_event(
+                    db,
+                    event_type="purchase",
+                    user=user,
+                    subscription=subscription,
+                    transaction=transaction,
+                    amount_kopeks=total_amount,
+                    message="Subscription purchase",
+                    occurred_at=(transaction.completed_at or transaction.created_at) if transaction else datetime.utcnow(),
+                    extra={
+                        "period_days": period_days,
+                        "was_trial_conversion": was_trial_conversion,
+                        "payment_method": self._get_payment_method_display(transaction.payment_method) if transaction else "Баланс",
+                    },
+                )
 
             if not self._is_enabled():
                 return False
@@ -673,28 +675,30 @@ class AdminNotificationService:
         *,
         new_end_date: datetime | None = None,
         balance_after: int | None = None,
+        record_event: bool = True,
     ) -> bool:
         try:
             current_end_date = new_end_date or subscription.end_date
             current_balance = balance_after if balance_after is not None else user.balance_kopeks
 
-            await self._record_subscription_event(
-                db,
-                event_type="renewal",
-                user=user,
-                subscription=subscription,
-                transaction=transaction,
-                amount_kopeks=transaction.amount_kopeks,
-                message="Subscription renewed",
-                occurred_at=transaction.completed_at or transaction.created_at,
-                extra={
-                    "extended_days": extended_days,
-                    "previous_end_date": old_end_date.isoformat(),
-                    "new_end_date": current_end_date.isoformat(),
-                    "payment_method": transaction.payment_method,
-                    "balance_after": current_balance,
-                },
-            )
+            if record_event:
+                await self._record_subscription_event(
+                    db,
+                    event_type="renewal",
+                    user=user,
+                    subscription=subscription,
+                    transaction=transaction,
+                    amount_kopeks=transaction.amount_kopeks,
+                    message="Subscription renewed",
+                    occurred_at=transaction.completed_at or transaction.created_at,
+                    extra={
+                        "extended_days": extended_days,
+                        "previous_end_date": old_end_date.isoformat(),
+                        "new_end_date": current_end_date.isoformat(),
+                        "payment_method": transaction.payment_method,
+                        "balance_after": current_balance,
+                    },
+                )
 
             if not self._is_enabled():
                 return False

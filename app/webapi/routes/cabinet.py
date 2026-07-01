@@ -20,6 +20,7 @@ from app.database.crud.subscription import (
     extend_subscription,
     update_subscription_autopay,
 )
+from app.database.crud.subscription_event import record_subscription_renewal_event
 from app.database.crud.device_binding_code import get_or_create_binding_code
 from app.database.crud.transaction import create_transaction
 from app.database.crud.user import (
@@ -476,9 +477,11 @@ async def purchase(
     if not subscription:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="No subscription to upgrade")
 
+    old_end_date = subscription.end_date
+
     # Списываем с баланса
     user.subtract_balance(price_kopeks)
-    await create_transaction(
+    transaction = await create_transaction(
         db=db,
         user_id=user.id,
         type=TransactionType.SUBSCRIPTION_PAYMENT,
@@ -494,6 +497,20 @@ async def purchase(
     subscription.traffic_limit_gb = plan.traffic_limit_gb
     subscription.is_trial = False
     await extend_subscription(db, subscription, period_days)
+    await record_subscription_renewal_event(
+        db,
+        user_id=user.id,
+        subscription_id=subscription.id,
+        transaction_id=transaction.id,
+        amount_kopeks=price_kopeks,
+        occurred_at=transaction.completed_at or transaction.created_at,
+        period_days=period_days,
+        previous_end_date=old_end_date,
+        new_end_date=subscription.end_date,
+        payment_method=transaction.payment_method,
+        balance_after=user.balance_kopeks,
+        source="cabinet",
+    )
 
     user.has_had_paid_subscription = True
     await db.commit()
