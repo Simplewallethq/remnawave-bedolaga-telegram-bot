@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database.crud.subscription_event import record_subscription_purchase_event
 from app.database.models import PaymentMethod, TransactionType
 from app.services.subscription_auto_purchase_service import (
     auto_purchase_saved_cart_after_topup,
@@ -859,6 +860,21 @@ class YooKassaPaymentMixin:
                                     parse_mode="HTML"
                                 )
 
+                            await record_subscription_purchase_event(
+                                db,
+                                user_id=user.id,
+                                subscription_id=subscription.id,
+                                transaction_id=transaction.id,
+                                amount_kopeks=payment.amount_kopeks,
+                                occurred_at=transaction.completed_at or transaction.created_at,
+                                period_days=subscription_period,
+                                was_trial_conversion=False,
+                                payment_method=transaction.payment_method,
+                                source="yookassa_simple_subscription",
+                                starts_at=subscription.start_date,
+                                ends_at=subscription.end_date,
+                            )
+
                             if getattr(self, "bot", None):
                                 try:
                                     from app.services.admin_notification_service import (
@@ -887,14 +903,16 @@ class YooKassaPaymentMixin:
                                         .where(SubscriptionModel.user_id == user.id)
                                     )
                                     subscription_db = subscription_result.scalar_one_or_none()
-                                    
+
+                                    event_subscription = subscription_db or subscription
                                     await notification_service.send_subscription_purchase_notification(
                                         db,
                                         full_user or user,
-                                        subscription_db or subscription,
+                                        event_subscription,
                                         transaction,
                                         subscription_period,
                                         was_trial_conversion=False,
+                                        record_event=False,
                                     )
                                 except Exception as admin_error:
                                     logger.error(

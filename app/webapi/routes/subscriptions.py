@@ -23,6 +23,10 @@ from app.database.crud.subscription import (
     replace_subscription,
     remove_subscription_squad,
 )
+from app.database.crud.subscription_event import (
+    record_subscription_purchase_event,
+    record_subscription_renewal_event,
+)
 from app.database.models import Subscription, SubscriptionStatus
 
 from ..dependencies import get_db_session, require_api_token
@@ -203,6 +207,17 @@ async def create_subscription(
                     is_trial=False,
                     update_server_counters=True,
                 )
+                await record_subscription_purchase_event(
+                    db,
+                    user_id=payload.user_id,
+                    subscription_id=subscription.id,
+                    amount_kopeks=0,
+                    period_days=payload.duration_days,
+                    was_trial_conversion=bool(existing.is_trial),
+                    source="subscriptions_api",
+                    starts_at=subscription.start_date,
+                    ends_at=subscription.end_date,
+                )
             else:
                 subscription = await create_paid_subscription(
                     db,
@@ -212,6 +227,17 @@ async def create_subscription(
                     device_limit=device_limit,
                     connected_squads=payload.connected_squads or [],
                     update_server_counters=True,
+                )
+                await record_subscription_purchase_event(
+                    db,
+                    user_id=payload.user_id,
+                    subscription_id=subscription.id,
+                    amount_kopeks=0,
+                    period_days=payload.duration_days,
+                    was_trial_conversion=False,
+                    source="subscriptions_api",
+                    starts_at=subscription.start_date,
+                    ends_at=subscription.end_date,
                 )
 
         subscription_service = SubscriptionService()
@@ -246,7 +272,19 @@ async def extend_subscription_endpoint(
     db: AsyncSession = Depends(get_db_session),
 ) -> SubscriptionResponse:
     subscription = await _get_subscription(db, subscription_id)
+    old_end_date = subscription.end_date
     subscription = await extend_subscription(db, subscription, payload.days)
+    if payload.days > 0:
+        await record_subscription_renewal_event(
+            db,
+            user_id=subscription.user_id,
+            subscription_id=subscription.id,
+            amount_kopeks=0,
+            period_days=payload.days,
+            previous_end_date=old_end_date,
+            new_end_date=subscription.end_date,
+            source="subscriptions_api",
+        )
     subscription = await _get_subscription(db, subscription.id)
     return _serialize_subscription(subscription)
 

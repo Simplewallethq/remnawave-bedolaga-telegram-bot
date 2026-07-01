@@ -12,6 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database.crud.subscription import extend_subscription
+from app.database.crud.subscription_event import (
+    record_subscription_purchase_event,
+    record_subscription_renewal_event,
+)
 from app.database.crud.transaction import create_transaction
 from app.database.crud.user import subtract_user_balance
 from app.database.models import Subscription, TransactionType, User
@@ -337,6 +341,21 @@ async def _auto_extend_subscription(
             exc_info=True,
         )
 
+    await record_subscription_renewal_event(
+        db,
+        user_id=user.id,
+        subscription_id=updated_subscription.id,
+        transaction_id=getattr(transaction, "id", None),
+        amount_kopeks=prepared.price_kopeks,
+        occurred_at=(transaction.completed_at or transaction.created_at) if transaction else None,
+        period_days=prepared.period_days,
+        previous_end_date=old_end_date,
+        new_end_date=updated_subscription.end_date,
+        payment_method=getattr(transaction, "payment_method", None),
+        balance_after=user.balance_kopeks,
+        source="auto_extend",
+    )
+
     subscription_service = SubscriptionService()
     try:
         await subscription_service.update_remnawave_user(
@@ -375,6 +394,7 @@ async def _auto_extend_subscription(
                 old_end_date,
                 new_end_date=new_end_date,
                 balance_after=user.balance_kopeks,
+                record_event=False,
             )
         except Exception as error:  # pragma: no cover - defensive logging
             logger.error(
@@ -719,6 +739,9 @@ async def _auto_tariff_purchase(
         return False
 
     subscription = None
+    transaction = None
+    old_end_date = None
+    was_trial_conversion = False
     try:
         if tariff_op == "upgrade":
             active_sub = await _resolve_active_subscription(user)
@@ -756,7 +779,7 @@ async def _auto_tariff_purchase(
             result = await finalize_tariff_renewal(db, user, active_sub, plan, period_days, price)
             if result is None:
                 return False
-            subscription = result[0]
+            subscription, transaction, old_end_date = result
 
         else:  # purchase
             price = await get_plan_price(db, plan.id, period_days, cohort=cohort)
@@ -765,7 +788,7 @@ async def _auto_tariff_purchase(
             result = await finalize_tariff_purchase(db, user, plan, period_days, price)
             if result is None:
                 return False
-            subscription = result[0]
+            subscription, transaction, was_trial_conversion = result
     except Exception as error:  # pragma: no cover - defensive logging
         logger.error(
             "❌ Автопокупка тарифа: ошибка оформления для пользователя %s: %s",
@@ -774,6 +797,38 @@ async def _auto_tariff_purchase(
             exc_info=True,
         )
         return False
+
+    if subscription is not None and transaction is not None:
+        if tariff_op == "renew":
+            await record_subscription_renewal_event(
+                db,
+                user_id=user.id,
+                subscription_id=subscription.id,
+                transaction_id=transaction.id,
+                amount_kopeks=transaction.amount_kopeks,
+                occurred_at=transaction.completed_at or transaction.created_at,
+                period_days=period_days,
+                previous_end_date=old_end_date,
+                new_end_date=subscription.end_date,
+                payment_method=transaction.payment_method,
+                balance_after=user.balance_kopeks,
+                source="auto_tariff",
+            )
+        elif tariff_op == "purchase":
+            await record_subscription_purchase_event(
+                db,
+                user_id=user.id,
+                subscription_id=subscription.id,
+                transaction_id=transaction.id,
+                amount_kopeks=transaction.amount_kopeks,
+                occurred_at=transaction.completed_at or transaction.created_at,
+                period_days=period_days,
+                was_trial_conversion=was_trial_conversion,
+                payment_method=transaction.payment_method,
+                source="auto_tariff",
+                starts_at=subscription.start_date,
+                ends_at=subscription.end_date,
+            )
 
     await user_cart_service.delete_user_cart(user.id)
     await clear_subscription_checkout_draft(user.id)
@@ -916,6 +971,7 @@ async def auto_purchase_saved_cart_after_topup(
                 transaction,
                 selection.period.days,
                 was_trial_conversion,
+                record_event=False,
             )
         except Exception as error:  # pragma: no cover - defensive logging
             logger.error(

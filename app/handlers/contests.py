@@ -28,6 +28,7 @@ from app.services.contest_rotation_service import (
 )
 from app.database.crud.subscription import get_subscription_by_user_id
 from app.database.crud.subscription import extend_subscription
+from app.database.crud.subscription_event import record_subscription_renewal_event
 from app.utils.decorators import auth_required, error_handler
 from app.keyboards.inline import get_back_keyboard
 from app.states import ContestStates
@@ -52,7 +53,18 @@ async def _award_prize(db: AsyncSession, user_id: int, prize_days: int, language
     subscription = await get_subscription_by_user_id(db, user_id)
     if not subscription:
         return ""
+    old_end_date = subscription.end_date
     await extend_subscription(db, subscription, prize_days)
+    await record_subscription_renewal_event(
+        db,
+        user_id=user_id,
+        subscription_id=subscription.id,
+        amount_kopeks=0,
+        period_days=prize_days,
+        previous_end_date=old_end_date,
+        new_end_date=subscription.end_date,
+        source="contest",
+    )
     texts = get_texts(language)
     return texts.t("CONTEST_PRIZE_GRANTED", "Бонус {days} дней зачислен!").format(days=prize_days)
 
