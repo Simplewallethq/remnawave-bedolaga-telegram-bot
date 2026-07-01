@@ -1768,6 +1768,7 @@ async def complete_registration_from_callback(
         existing_user.first_name = callback.from_user.first_name
         existing_user.last_name = callback.from_user.last_name
         existing_user.language = language
+        existing_user.language_code = callback.from_user.language_code
         existing_user.referred_by_id = referrer_id
         existing_user.status = UserStatus.ACTIVE.value
         existing_user.balance_kopeks = 0
@@ -1795,6 +1796,7 @@ async def complete_registration_from_callback(
             first_name=callback.from_user.first_name,
             last_name=callback.from_user.last_name,
             language=language,
+            language_code=callback.from_user.language_code,
             referred_by_id=referrer_id,
             referral_code=referral_code,
             bot_id=callback.bot.id if callback.bot else None,
@@ -2054,6 +2056,7 @@ async def complete_registration(
         existing_user.first_name = message.from_user.first_name
         existing_user.last_name = message.from_user.last_name
         existing_user.language = language
+        existing_user.language_code = message.from_user.language_code
         existing_user.referred_by_id = referrer_id
         existing_user.status = UserStatus.ACTIVE.value
         existing_user.balance_kopeks = 0
@@ -2081,6 +2084,7 @@ async def complete_registration(
             first_name=message.from_user.first_name,
             last_name=message.from_user.last_name,
             language=language,
+            language_code=message.from_user.language_code,
             referred_by_id=referrer_id,
             referral_code=referral_code,
             bot_id=message.bot.id if message.bot else None,
@@ -2459,6 +2463,7 @@ async def required_sub_channel_check(
                         first_name=query.from_user.first_name,
                         last_name=query.from_user.last_name,
                         language=language,
+                        language_code=query.from_user.language_code,
                         referral_code=referral_code,
                         bot_id=query.bot.id if query.bot else None,
                     )

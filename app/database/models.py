@@ -668,6 +668,7 @@ class User(Base):
     auth_source = Column(String(20), default="telegram", nullable=False)
     status = Column(String(20), default=UserStatus.ACTIVE.value)
     language = Column(String(5), default="ru")
+    language_code = Column(String(10), nullable=True)  # язык интерфейса Telegram-клиента (from_user.language_code), трекинг
     balance_kopeks = Column(Integer, default=0)
     used_promocodes = Column(Integer, default=0) 
     has_had_paid_subscription = Column(Boolean, default=False, nullable=False)

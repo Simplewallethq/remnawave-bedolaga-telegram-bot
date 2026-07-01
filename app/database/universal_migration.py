@@ -5947,6 +5947,23 @@ async def add_ad_attribution_columns() -> bool:
         return False
 
 
+async def add_user_language_code_column() -> bool:
+    if await check_column_exists('users', 'language_code'):
+        logger.info("ℹ️ Колонка users.language_code уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN language_code VARCHAR(10) NULL"))
+
+        logger.info("✅ Колонка language_code добавлена в users")
+        return True
+
+    except Exception as error:
+        logger.error(f"❌ Ошибка добавления колонки language_code в users: {error}")
+        return False
+
+
 async def create_ad_campaign_visits_table() -> bool:
     if await check_table_exists('ad_campaign_visits'):
         logger.info("ℹ️ Таблица ad_campaign_visits уже существует")
@@ -6708,6 +6725,13 @@ async def run_universal_migration():
             logger.info("✅ Колонки ad attribution в users готовы")
         else:
             logger.warning("⚠️ Проблемы с колонками ad attribution в users")
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ LANGUAGE_CODE В USERS ===")
+        language_code_ready = await add_user_language_code_column()
+        if language_code_ready:
+            logger.info("✅ Колонка language_code в users готова")
+        else:
+            logger.warning("⚠️ Проблемы с колонкой language_code в users")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ AD_CAMPAIGN_VISITS ===")
         ad_visits_ready = await create_ad_campaign_visits_table()
