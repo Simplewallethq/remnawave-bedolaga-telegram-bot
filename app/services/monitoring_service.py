@@ -1216,7 +1216,7 @@ class MonitoringService:
 Переходите на полную подписку!
 
 🔥 <b>Специальное предложение:</b>
-• 30 дней всего за {settings.format_price(min_total_price)}
+• Лучшие цены на рынке
 • Безлимитный трафик
 • Все серверы доступны
 • Скорость до 1ГБит/сек
@@ -1228,7 +1228,6 @@ class MonitoringService:
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [build_miniapp_or_callback_button(text="💎 Купить подписку", callback_data="menu_buy")],
-                [build_miniapp_or_callback_button(text="💰 Пополнить баланс", callback_data="balance_topup")],
             ])
 
             await self._send_message_with_logo(
