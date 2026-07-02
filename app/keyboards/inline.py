@@ -1161,7 +1161,7 @@ def get_tariff_periods_keyboard(
     texts = get_texts(language)
     rows: List[List[InlineKeyboardButton]] = []
 
-    for period_days in (30, 90, 180, 360, 720):
+    for period_days in (30, 90, 360, 720):
         price_kopeks = period_prices.get(period_days)
         if price_kopeks is None:
             continue
@@ -1227,7 +1227,7 @@ def get_renew_periods_keyboard(
     texts = get_texts(language)
     rows: List[List[InlineKeyboardButton]] = []
 
-    for period_days in (30, 90, 180, 360, 720):
+    for period_days in (30, 90, 360, 720):
         price_kopeks = period_prices.get(period_days)
         if price_kopeks is None:
             continue

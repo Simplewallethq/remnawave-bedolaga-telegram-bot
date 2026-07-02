@@ -18,7 +18,7 @@ from app.database.models import Subscription, SubscriptionPlan, SubscriptionPlan
 logger = logging.getLogger(__name__)
 
 
-SUPPORTED_PERIOD_DAYS: List[int] = [30, 90, 180, 360, 720]
+SUPPORTED_PERIOD_DAYS: List[int] = [30, 90, 360, 720]
 
 
 def resolve_pricing_cohort(db_user) -> str:
