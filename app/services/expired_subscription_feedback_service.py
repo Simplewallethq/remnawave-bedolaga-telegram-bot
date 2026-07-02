@@ -37,6 +37,7 @@ UTC_TZ = timezone.utc
 EXPIRED_SUBSCRIPTION_FEEDBACK_TYPE = "expired_subscription"
 EXPIRED_SUBSCRIPTION_FEEDBACK_LAST_RUN_KEY = "expired_subscription_feedback_last_run_date"
 EXPIRED_SUBSCRIPTION_FEEDBACK_BATCH_SIZE = 500
+EXPIRED_SUBSCRIPTION_FEEDBACK_EXPIRED_DAYS_AGO = 8
 
 FEEDBACK_STATUS_SENT = "sent"
 FEEDBACK_STATUS_WAITING_FOR_ANSWER = "waiting_for_answer"
@@ -186,7 +187,10 @@ class ExpiredSubscriptionFeedbackService:
         limit: int,
         after_user_id: int,
     ) -> list[Subscription]:
-        start_utc_naive, end_utc_naive = self._previous_two_msk_days_range(now_moscow)
+        start_utc_naive, end_utc_naive = self._expired_days_ago_msk_range(
+            now_moscow,
+            EXPIRED_SUBSCRIPTION_FEEDBACK_EXPIRED_DAYS_AGO,
+        )
 
         result = await db.execute(
             select(Subscription)
@@ -289,6 +293,8 @@ class ExpiredSubscriptionFeedbackService:
 
     def _format_ended_phrase(self, ended_on_msk) -> str:
         today_msk = self._now_moscow().date()
+        if ended_on_msk == today_msk - timedelta(days=EXPIRED_SUBSCRIPTION_FEEDBACK_EXPIRED_DAYS_AGO):
+            return "8 дней назад"
         if ended_on_msk == today_msk - timedelta(days=1):
             return "вчера"
         if ended_on_msk == today_msk - timedelta(days=2):
@@ -317,12 +323,16 @@ class ExpiredSubscriptionFeedbackService:
         return time(20, 0) <= current_time < time(22, 0)
 
     @staticmethod
-    def _previous_two_msk_days_range(value: datetime) -> tuple[datetime, datetime]:
+    def _expired_days_ago_msk_range(
+        value: datetime,
+        days_ago: int,
+    ) -> tuple[datetime, datetime]:
         today_start_msk = datetime.combine(value.date(), time.min, tzinfo=MOSCOW_TZ)
-        start_msk = today_start_msk - timedelta(days=2)
+        start_msk = today_start_msk - timedelta(days=days_ago)
+        end_msk = start_msk + timedelta(days=1)
         return (
             start_msk.astimezone(UTC_TZ).replace(tzinfo=None),
-            today_start_msk.astimezone(UTC_TZ).replace(tzinfo=None),
+            end_msk.astimezone(UTC_TZ).replace(tzinfo=None),
         )
 
     @staticmethod
