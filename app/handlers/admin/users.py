@@ -41,9 +41,17 @@ from app.services.remnawave_service import RemnaWaveService
 from app.external.remnawave_api import TrafficLimitStrategy
 from app.database.crud.server_squad import (
     get_all_server_squads,
+    get_active_server_squads,
     get_server_squad_by_uuid,
     get_server_squad_by_id,
     get_server_ids_by_uuids,
+)
+from app.services.plan_pricing_service import (
+    SUPPORTED_PERIOD_DAYS,
+    get_plan_by_id,
+    get_plan_price,
+    list_active_plans,
+    resolve_pricing_cohort,
 )
 from app.services.subscription_service import SubscriptionService
 from app.utils.subscription_utils import (
@@ -51,6 +59,14 @@ from app.utils.subscription_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+_TARIFF_PERIOD_LABELS = {30: "1 мес", 90: "3 мес", 180: "6 мес", 360: "1 год", 720: "2 года"}
+
+
+def _tariff_period_label(period_days: Optional[int]) -> str:
+    if not period_days:
+        return "—"
+    return _TARIFF_PERIOD_LABELS.get(period_days, f"{period_days} дн.")
 
 
 @admin_required
@@ -1177,6 +1193,10 @@ async def _render_user_subscription_overview(
 
         text += f"<b>Статус:</b> {status_emoji} {'Активна' if subscription.is_active else 'Неактивна'}\n"
         text += f"<b>Тип:</b> {type_emoji} {'Триал' if subscription.is_trial else 'Платная'}\n"
+        if subscription.plan_id and subscription.plan:
+            text += f"<b>Тариф:</b> 🧾 {subscription.plan.display_name} · {_tariff_period_label(subscription.plan_period_days)}\n"
+        else:
+            text += "<b>Тариф:</b> — (legacy / ручные параметры)\n"
         text += f"<b>Начало:</b> {format_datetime(subscription.start_date)}\n"
         text += f"<b>Окончание:</b> {format_datetime(subscription.end_date)}\n"
         text += f"<b>Трафик:</b> {traffic_display}\n"
@@ -1242,6 +1262,12 @@ async def _render_user_subscription_overview(
                     text="🔄 Сбросить устройства",
                     callback_data=f"admin_user_reset_devices_{user_id}"
                 )
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text="🧾 Тариф",
+                    callback_data=f"admin_sub_tariff_menu_{user_id}"
+                )
             ]
         ]
 
@@ -1272,6 +1298,12 @@ async def _render_user_subscription_overview(
                 types.InlineKeyboardButton(
                     text="💎 Выдать подписку",
                     callback_data=f"admin_sub_grant_{user_id}"
+                )
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text="🧾 Выдать тариф",
+                    callback_data=f"admin_sub_tariff_assign_{user_id}"
                 )
             ]
         ]
@@ -4330,9 +4362,154 @@ async def _grant_paid_subscription(db: AsyncSession, user_id: int, days: int, ad
         
         logger.info(f"Админ {admin_id} выдал платную подписку на {days} дней пользователю {user_id}")
         return True
-        
+
     except Exception as e:
         logger.error(f"Ошибка выдачи платной подписки: {e}")
+        return False
+
+
+async def _admin_assign_tariff(
+    db: AsyncSession,
+    user_id: int,
+    plan_id: int,
+    period_days: int,
+    admin_id: int,
+) -> bool:
+    try:
+        from app.database.crud.subscription import get_subscription_by_user_id
+
+        plan = await get_plan_by_id(db, plan_id)
+        if not plan or not plan.is_active:
+            logger.error(f"Тариф {plan_id} не найден или неактивен")
+            return False
+
+        squads = [s.squad_uuid for s in await get_active_server_squads(db) if s.squad_uuid]
+        now = datetime.utcnow()
+        end_date = now + timedelta(days=period_days)
+
+        subscription = await get_subscription_by_user_id(db, user_id)
+        was_trial_conversion = bool(subscription and subscription.is_trial)
+
+        if subscription is not None:
+            subscription.status = SubscriptionStatus.ACTIVE.value
+            subscription.is_trial = False
+            subscription.start_date = now
+            subscription.end_date = end_date
+            subscription.traffic_limit_gb = plan.traffic_limit_gb
+            subscription.device_limit = plan.device_limit
+            subscription.connected_squads = squads
+            subscription.plan_id = plan.id
+            subscription.plan_period_days = period_days
+        else:
+            subscription = Subscription(
+                user_id=user_id,
+                status=SubscriptionStatus.ACTIVE.value,
+                is_trial=False,
+                start_date=now,
+                end_date=end_date,
+                traffic_limit_gb=plan.traffic_limit_gb,
+                device_limit=plan.device_limit,
+                connected_squads=squads,
+                autopay_enabled=False,
+                autopay_days_before=3,
+                plan_id=plan.id,
+                plan_period_days=period_days,
+            )
+            db.add(subscription)
+
+        await db.commit()
+        await db.refresh(subscription)
+
+        await record_subscription_purchase_event(
+            db,
+            user_id=user_id,
+            subscription_id=subscription.id,
+            amount_kopeks=0,
+            period_days=period_days,
+            was_trial_conversion=was_trial_conversion,
+            source="admin_tariff",
+            starts_at=subscription.start_date,
+            ends_at=subscription.end_date,
+            extra={"plan_id": plan.id, "plan_code": plan.code},
+        )
+
+        try:
+            await SubscriptionService().create_remnawave_user(db, subscription)
+        except Exception as e:
+            logger.warning(f"Не удалось синхронизировать подписку {subscription.id} с панелью: {e}")
+
+        logger.info(
+            f"Админ {admin_id} назначил тариф {plan.code} на {period_days} дней пользователю {user_id}"
+        )
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка назначения тарифа: {e}")
+        await db.rollback()
+        return False
+
+
+async def _admin_renew_tariff(db: AsyncSession, user_id: int, period_days: int, admin_id: int) -> bool:
+    try:
+        from app.database.crud.subscription import get_subscription_by_user_id, extend_subscription
+
+        subscription = await get_subscription_by_user_id(db, user_id)
+        if not subscription:
+            logger.error(f"Подписка не найдена для пользователя {user_id}")
+            return False
+        if subscription.plan_id is None:
+            logger.error(f"У пользователя {user_id} нет тарифа — продление по тарифу невозможно")
+            return False
+
+        old_end_date = subscription.end_date
+        await extend_subscription(db, subscription, period_days)
+        subscription.plan_period_days = period_days
+        await db.commit()
+
+        await record_subscription_renewal_event(
+            db,
+            user_id=user_id,
+            subscription_id=subscription.id,
+            amount_kopeks=0,
+            period_days=period_days,
+            previous_end_date=old_end_date,
+            new_end_date=subscription.end_date,
+            source="admin_tariff",
+        )
+
+        await SubscriptionService().update_remnawave_user(db, subscription)
+
+        logger.info(f"Админ {admin_id} продлил тариф пользователя {user_id} на {period_days} дней")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка продления тарифа: {e}")
+        return False
+
+
+async def _admin_remove_tariff(db: AsyncSession, user_id: int, admin_id: int) -> bool:
+    try:
+        from app.database.crud.subscription import get_subscription_by_user_id
+
+        subscription = await get_subscription_by_user_id(db, user_id)
+        if not subscription:
+            logger.error(f"Подписка не найдена для пользователя {user_id}")
+            return False
+        if subscription.plan_id is None:
+            logger.error(f"У пользователя {user_id} и так нет тарифа")
+            return False
+
+        plan_code = subscription.plan.code if subscription.plan else subscription.plan_id
+        subscription.plan_id = None
+        subscription.plan_period_days = None
+        await db.commit()
+
+        logger.info(f"Админ {admin_id} снял тариф {plan_code} с пользователя {user_id} (подписка стала legacy)")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка снятия тарифа: {e}")
+        await db.rollback()
         return False
 
 
@@ -4948,6 +5125,374 @@ async def _change_subscription_type(db: AsyncSession, user_id: int, new_type: st
         return False
 
 
+@admin_required
+@error_handler
+async def show_user_tariff_menu(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    from app.database.crud.subscription import get_subscription_by_user_id
+
+    user_id = int(callback.data.split('_')[-1])
+    subscription = await get_subscription_by_user_id(db, user_id)
+
+    text = "🧾 <b>Тариф пользователя</b>\n\n"
+    keyboard = [
+        [types.InlineKeyboardButton(
+            text="📋 Назначить / сменить тариф",
+            callback_data=f"admin_sub_tariff_assign_{user_id}"
+        )]
+    ]
+
+    if subscription and subscription.plan_id and subscription.plan:
+        plan = subscription.plan
+        traffic_text = "♾️" if plan.traffic_limit_gb == 0 else f"{plan.traffic_limit_gb} ГБ"
+        text += f"<b>Тариф:</b> {plan.display_name}\n"
+        text += f"<b>Период:</b> {_tariff_period_label(subscription.plan_period_days)}\n"
+        text += f"<b>Трафик по тарифу:</b> {traffic_text}\n"
+        text += f"<b>Устройства по тарифу:</b> {plan.device_limit}\n"
+        text += f"<b>Окончание подписки:</b> {format_datetime(subscription.end_date)}\n"
+        keyboard.append([types.InlineKeyboardButton(
+            text="⏰ Продлить по тарифу",
+            callback_data=f"admin_sub_tariff_renew_{user_id}"
+        )])
+        keyboard.append([types.InlineKeyboardButton(
+            text="🗑 Убрать тариф (в legacy)",
+            callback_data=f"admin_sub_tariff_remove_{user_id}"
+        )])
+    else:
+        text += "Тариф не назначен (legacy / ручные параметры)."
+
+    keyboard.append([types.InlineKeyboardButton(
+        text="⬅️ Назад",
+        callback_data=f"admin_user_subscription_{user_id}"
+    )])
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await callback.answer()
+
+
+@admin_required
+@error_handler
+async def show_tariff_assign_plans(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    from app.database.crud.subscription import get_subscription_by_user_id
+
+    user_id = int(callback.data.split('_')[-1])
+
+    plans = await list_active_plans(db)
+    if not plans:
+        await callback.answer("❌ Нет активных тарифов", show_alert=True)
+        return
+
+    subscription = await get_subscription_by_user_id(db, user_id)
+    current_plan_id = subscription.plan_id if subscription else None
+
+    keyboard = []
+    for plan in plans:
+        traffic_text = "♾️" if plan.traffic_limit_gb == 0 else f"{plan.traffic_limit_gb} ГБ"
+        marker = "✅ " if plan.id == current_plan_id else ""
+        keyboard.append([types.InlineKeyboardButton(
+            text=f"{marker}{plan.display_name} · {traffic_text} · {plan.device_limit} устр.",
+            callback_data=f"admin_sub_tariff_plan_{user_id}_{plan.id}"
+        )])
+
+    keyboard.append([types.InlineKeyboardButton(
+        text="⬅️ Назад",
+        callback_data=f"admin_sub_tariff_menu_{user_id}"
+    )])
+
+    await callback.message.edit_text(
+        "🧾 <b>Назначение тарифа</b>\n\nВыберите тариф:",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await callback.answer()
+
+
+@admin_required
+@error_handler
+async def show_tariff_assign_periods(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    parts = callback.data.split('_')
+    user_id = int(parts[-2])
+    plan_id = int(parts[-1])
+
+    plan = await get_plan_by_id(db, plan_id)
+    if not plan or not plan.is_active:
+        await callback.answer("❌ Тариф не найден или неактивен", show_alert=True)
+        return
+
+    target_user = await get_user_by_id(db, user_id)
+    cohort = resolve_pricing_cohort(target_user)
+
+    keyboard = []
+    for days in SUPPORTED_PERIOD_DAYS:
+        price = await get_plan_price(db, plan_id, days, cohort=cohort)
+        price_text = settings.format_price(price) if price is not None else "цена не задана"
+        keyboard.append([types.InlineKeyboardButton(
+            text=f"{_tariff_period_label(days)} — {price_text}",
+            callback_data=f"admin_sub_tariff_apply_{user_id}_{plan_id}_{days}"
+        )])
+
+    keyboard.append([types.InlineKeyboardButton(
+        text="⬅️ Назад",
+        callback_data=f"admin_sub_tariff_assign_{user_id}"
+    )])
+
+    await callback.message.edit_text(
+        f"🧾 <b>Тариф {plan.display_name}</b>\n\n"
+        "Выберите период. Цена указана справочно — назначение бесплатное, баланс не списывается.",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await callback.answer()
+
+
+@admin_required
+@error_handler
+async def confirm_tariff_assign(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    from app.database.crud.subscription import get_subscription_by_user_id
+
+    parts = callback.data.split('_')
+    user_id = int(parts[-3])
+    plan_id = int(parts[-2])
+    days = int(parts[-1])
+
+    plan = await get_plan_by_id(db, plan_id)
+    if not plan or not plan.is_active:
+        await callback.answer("❌ Тариф не найден или неактивен", show_alert=True)
+        return
+
+    subscription = await get_subscription_by_user_id(db, user_id)
+    traffic_text = "♾️" if plan.traffic_limit_gb == 0 else f"{plan.traffic_limit_gb} ГБ"
+    end_date = datetime.utcnow() + timedelta(days=days)
+
+    text = (
+        "🧾 <b>Подтверждение назначения тарифа</b>\n\n"
+        f"<b>Тариф:</b> {plan.display_name}\n"
+        f"<b>Период:</b> {_tariff_period_label(days)}\n"
+        f"<b>Трафик:</b> {traffic_text}\n"
+        f"<b>Устройства:</b> {plan.device_limit}\n\n"
+        "⚠️ Подписка будет перезапущена: начало — сейчас, "
+        f"окончание — {format_datetime(end_date)}.\n"
+        "⚠️ Текущие лимиты и серверы будут заменены значениями тарифа.\n"
+    )
+    if subscription and subscription.is_trial:
+        text += "⚠️ Триальная подписка будет конвертирована в платную.\n"
+    text += "\n💰 Бесплатно — баланс пользователя не списывается."
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(
+                text="✅ Подтвердить",
+                callback_data=f"admin_sub_tariff_apply_confirm_{user_id}_{plan_id}_{days}"
+            )],
+            [types.InlineKeyboardButton(
+                text="❌ Отмена",
+                callback_data=f"admin_sub_tariff_menu_{user_id}"
+            )]
+        ])
+    )
+    await callback.answer()
+
+
+@admin_required
+@error_handler
+async def execute_tariff_assign(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    parts = callback.data.split('_')
+    user_id = int(parts[-3])
+    plan_id = int(parts[-2])
+    days = int(parts[-1])
+
+    if days not in SUPPORTED_PERIOD_DAYS:
+        await callback.answer("❌ Недопустимый период", show_alert=True)
+        return
+
+    plan = await get_plan_by_id(db, plan_id)
+    success = await _admin_assign_tariff(db, user_id, plan_id, days, db_user.id)
+
+    back_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📱 К подписке", callback_data=f"admin_user_subscription_{user_id}")]
+    ])
+
+    if success:
+        plan_name = plan.display_name if plan else str(plan_id)
+        await callback.message.edit_text(
+            f"✅ Тариф {plan_name} назначен на {_tariff_period_label(days)}",
+            reply_markup=back_keyboard
+        )
+    else:
+        await callback.message.edit_text(
+            "❌ Ошибка назначения тарифа",
+            reply_markup=back_keyboard
+        )
+    await callback.answer()
+
+
+@admin_required
+@error_handler
+async def show_tariff_renew_periods(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    from app.database.crud.subscription import get_subscription_by_user_id
+
+    user_id = int(callback.data.split('_')[-1])
+
+    subscription = await get_subscription_by_user_id(db, user_id)
+    if not subscription or subscription.plan_id is None:
+        await callback.answer("❌ У пользователя нет тарифа", show_alert=True)
+        return
+
+    keyboard = []
+    current_period = subscription.plan_period_days
+    if current_period in SUPPORTED_PERIOD_DAYS:
+        keyboard.append([types.InlineKeyboardButton(
+            text=f"По тарифу: {_tariff_period_label(current_period)}",
+            callback_data=f"admin_sub_tariff_renew_go_{user_id}_{current_period}"
+        )])
+    for days in SUPPORTED_PERIOD_DAYS:
+        if days == current_period:
+            continue
+        keyboard.append([types.InlineKeyboardButton(
+            text=_tariff_period_label(days),
+            callback_data=f"admin_sub_tariff_renew_go_{user_id}_{days}"
+        )])
+
+    keyboard.append([types.InlineKeyboardButton(
+        text="⬅️ Назад",
+        callback_data=f"admin_sub_tariff_menu_{user_id}"
+    )])
+
+    plan_name = subscription.plan.display_name if subscription.plan else "—"
+    await callback.message.edit_text(
+        f"⏰ <b>Продление по тарифу {plan_name}</b>\n\n"
+        f"Текущее окончание: {format_datetime(subscription.end_date)}\n"
+        "Выберите период продления (бесплатно):",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await callback.answer()
+
+
+@admin_required
+@error_handler
+async def execute_tariff_renew(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    parts = callback.data.split('_')
+    user_id = int(parts[-2])
+    days = int(parts[-1])
+
+    if days not in SUPPORTED_PERIOD_DAYS:
+        await callback.answer("❌ Недопустимый период", show_alert=True)
+        return
+
+    success = await _admin_renew_tariff(db, user_id, days, db_user.id)
+
+    back_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📱 К подписке", callback_data=f"admin_user_subscription_{user_id}")]
+    ])
+
+    if success:
+        await callback.message.edit_text(
+            f"✅ Подписка продлена по тарифу на {_tariff_period_label(days)}",
+            reply_markup=back_keyboard
+        )
+    else:
+        await callback.message.edit_text(
+            "❌ Ошибка продления по тарифу",
+            reply_markup=back_keyboard
+        )
+    await callback.answer()
+
+
+@admin_required
+@error_handler
+async def confirm_tariff_remove(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    from app.database.crud.subscription import get_subscription_by_user_id
+
+    user_id = int(callback.data.split('_')[-1])
+
+    subscription = await get_subscription_by_user_id(db, user_id)
+    if not subscription or subscription.plan_id is None:
+        await callback.answer("❌ У пользователя нет тарифа", show_alert=True)
+        return
+
+    traffic_text = "♾️" if subscription.traffic_limit_gb == 0 else f"{subscription.traffic_limit_gb} ГБ"
+    plan_name = subscription.plan.display_name if subscription.plan else "—"
+
+    await callback.message.edit_text(
+        "🗑 <b>Снятие тарифа</b>\n\n"
+        f"Тариф <b>{plan_name}</b> будет отвязан — подписка станет legacy.\n"
+        f"Текущие лимиты ({traffic_text} / {subscription.device_limit} устр.) "
+        "и срок действия сохраняются.",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(
+                text="✅ Подтвердить",
+                callback_data=f"admin_sub_tariff_remove_confirm_{user_id}"
+            )],
+            [types.InlineKeyboardButton(
+                text="❌ Отмена",
+                callback_data=f"admin_sub_tariff_menu_{user_id}"
+            )]
+        ])
+    )
+    await callback.answer()
+
+
+@admin_required
+@error_handler
+async def execute_tariff_remove(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    user_id = int(callback.data.split('_')[-1])
+
+    success = await _admin_remove_tariff(db, user_id, db_user.id)
+
+    back_keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📱 К подписке", callback_data=f"admin_user_subscription_{user_id}")]
+    ])
+
+    if success:
+        await callback.message.edit_text(
+            "✅ Тариф снят — подписка переведена в legacy",
+            reply_markup=back_keyboard
+        )
+    else:
+        await callback.message.edit_text(
+            "❌ Ошибка снятия тарифа",
+            reply_markup=back_keyboard
+        )
+    await callback.answer()
+
+
 def register_handlers(dp: Dispatcher):
     
     dp.callback_query.register(
@@ -5202,6 +5747,51 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(
         process_subscription_grant_text,
         AdminStates.granting_subscription
+    )
+
+    dp.callback_query.register(
+        show_user_tariff_menu,
+        F.data.startswith("admin_sub_tariff_menu_")
+    )
+
+    dp.callback_query.register(
+        show_tariff_assign_plans,
+        F.data.startswith("admin_sub_tariff_assign_")
+    )
+
+    dp.callback_query.register(
+        show_tariff_assign_periods,
+        F.data.startswith("admin_sub_tariff_plan_")
+    )
+
+    dp.callback_query.register(
+        execute_tariff_assign,
+        F.data.startswith("admin_sub_tariff_apply_confirm_")
+    )
+
+    dp.callback_query.register(
+        confirm_tariff_assign,
+        F.data.startswith("admin_sub_tariff_apply_") & ~F.data.contains("confirm")
+    )
+
+    dp.callback_query.register(
+        execute_tariff_renew,
+        F.data.startswith("admin_sub_tariff_renew_go_")
+    )
+
+    dp.callback_query.register(
+        show_tariff_renew_periods,
+        F.data.startswith("admin_sub_tariff_renew_") & ~F.data.contains("_go_")
+    )
+
+    dp.callback_query.register(
+        execute_tariff_remove,
+        F.data.startswith("admin_sub_tariff_remove_confirm_")
+    )
+
+    dp.callback_query.register(
+        confirm_tariff_remove,
+        F.data.startswith("admin_sub_tariff_remove_") & ~F.data.contains("confirm")
     )
 
     dp.callback_query.register(
