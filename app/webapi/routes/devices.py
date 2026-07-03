@@ -21,6 +21,14 @@ from app.database.crud.device_link import (
     get_subscription_by_device_id,
     rebind_device_link,
 )
+from app.database.crud.share_token import (
+    ACTIVATE_DEAD,
+    ACTIVATE_LIMIT,
+    ACTIVATE_NOT_FOUND,
+    ACTIVATE_OK,
+    ACTIVATE_SUB_INACTIVE,
+    activate_share_code,
+)
 
 from app.database.models import Subscription
 
@@ -162,7 +170,9 @@ async def bind_device_by_code(
     )
 
     if consume_status == CONSUME_NOT_FOUND:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code not found")
+        # Не личный код привязки — пробуем share-код страницы «Поделиться доступом»
+        # (тот же формат, многоразовый, со счётчиком активаций).
+        return await _bind_via_share_code(db, payload)
     if consume_status == CONSUME_EXPIRED:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code expired")
     if consume_status == CONSUME_USED:
@@ -207,6 +217,50 @@ async def bind_device_by_code(
         await rebind_device_link(db, existing_link, subscription.id)
     else:
         await create_device_link(db, subscription.id, payload.device_id)
+
+    response = _serialize_subscription(subscription)
+    response.connected_devices = await count_device_links(db, subscription.id)
+    return response
+
+
+async def _bind_via_share_code(
+    db: AsyncSession, payload: BindByCodeRequest
+) -> SubscriptionResponse:
+    """Привязка устройства по share-коду страницы «Поделиться доступом».
+
+    Отличия от личного кода: код многоразовый (до max_activations), на лимите
+    устройств активация НЕ расходуется, повторная привязка того же устройства
+    идемпотентна. Ошибки отдаём в тех же формулировках, что личный код, —
+    приложение их уже понимает.
+    """
+    subscription, share_status, extra = await activate_share_code(
+        db, payload.code, payload.device_id
+    )
+
+    if share_status in (ACTIVATE_NOT_FOUND, ACTIVATE_DEAD):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code not found")
+    if share_status == ACTIVATE_SUB_INACTIVE:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code expired")
+    if share_status == ACTIVATE_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Device limit exceeded ({extra['count']}/{extra['limit']})",
+        )
+    if share_status != ACTIVATE_OK or subscription is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code not found")
+
+    # Перечитываем подписку с прогретым user для сериализации.
+    sub_result = await db.execute(
+        select(Subscription)
+        .options(selectinload(Subscription.user))
+        .where(Subscription.id == subscription.id)
+    )
+    subscription = sub_result.scalar_one_or_none()
+    if subscription is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subscription not found",
+        )
 
     response = _serialize_subscription(subscription)
     response.connected_devices = await count_device_links(db, subscription.id)

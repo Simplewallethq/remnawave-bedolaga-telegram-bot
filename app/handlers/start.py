@@ -55,7 +55,6 @@ from app.services.trial_activation_service import (
     charge_trial_activation_if_required,
     preview_trial_activation_charge,
 )
-from app.utils.subscription_utils import get_display_subscription_link
 from app.handlers.menu import get_main_menu_text
 from app.localization.loader import DEFAULT_LANGUAGE
 from app.localization.texts import get_texts, get_rules, get_privacy_policy
@@ -345,32 +344,17 @@ async def _auto_activate_partner_and_show_device_selection(
 
     lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
     texts = get_texts(lang)
-    base_text = texts.t(
+    # Ключ на этом экране не показываем — он есть внутри платформенных инструкций.
+    device_selection_text = texts.t(
         "ONBOARDING_DEVICE_SELECTION_TEXT",
-        "Выбери устройство для подключения:",
+        "Для подключения основного или дополнительного устройства выбери платформу:",
     )
-
-    subscription_link = None
-    if getattr(user, "subscription", None):
-        subscription_link = get_display_subscription_link(user.subscription)
-
-    if subscription_link:
-        manual_intro = texts.t(
-            "ONBOARDING_MANUAL_LINK_TEXT",
-            "Для ручного подключения скопируй ключ и добавь его в Happ\n\n",
-        ).rstrip()
-        device_selection_text = (
-            f"{base_text}\n\n{manual_intro}\n"
-            f"<blockquote expandable><code>{subscription_link}</code></blockquote>"
-        )
-    else:
-        device_selection_text = base_text
 
     image_path = os.path.join("images", "device_selection_screen.png")
     if not os.path.exists(image_path):
         image_path = None
 
-    keyboard = get_onboarding_device_selection_keyboard(lang, share_link=subscription_link)
+    keyboard = get_onboarding_device_selection_keyboard(lang)
 
     if is_callback:
         await edit_or_answer_photo(
@@ -418,32 +402,17 @@ async def _auto_activate_trial_and_show_device_selection(
     # Show device selection directly (Screen 2)
     lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
     texts = get_texts(lang)
-    base_text = texts.t(
+    # Ключ на этом экране не показываем — он есть внутри платформенных инструкций.
+    device_selection_text = texts.t(
         "ONBOARDING_DEVICE_SELECTION_TEXT",
-        "Выбери устройство для подключения:",
+        "Для подключения основного или дополнительного устройства выбери платформу:",
     )
-
-    subscription_link = None
-    if getattr(user, "subscription", None):
-        subscription_link = get_display_subscription_link(user.subscription)
-
-    if subscription_link:
-        manual_intro = texts.t(
-            "ONBOARDING_MANUAL_LINK_TEXT",
-            "Для ручного подключения скопируй ключ и добавь его в Happ\n\n",
-        ).rstrip()
-        device_selection_text = (
-            f"{base_text}\n\n{manual_intro}\n"
-            f"<blockquote expandable><code>{subscription_link}</code></blockquote>"
-        )
-    else:
-        device_selection_text = base_text
 
     image_path = os.path.join("images", "device_selection_screen.png")
     if not os.path.exists(image_path):
         image_path = None
 
-    keyboard = get_onboarding_device_selection_keyboard(lang, share_link=subscription_link)
+    keyboard = get_onboarding_device_selection_keyboard(lang)
 
     if is_callback:
         await edit_or_answer_photo(

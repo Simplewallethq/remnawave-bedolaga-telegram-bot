@@ -821,6 +821,7 @@ class Subscription(Base):
     temporary_accesses = relationship("SubscriptionTemporaryAccess", back_populates="subscription")
     device_links = relationship("DeviceLink", back_populates="subscription", cascade="all, delete-orphan")
     binding_codes = relationship("DeviceBindingCode", back_populates="subscription", cascade="all, delete-orphan")
+    share_tokens = relationship("ShareToken", back_populates="subscription", cascade="all, delete-orphan")
     plan = relationship("SubscriptionPlan", lazy="joined", foreign_keys=[plan_id])
 
     @property
@@ -984,6 +985,33 @@ class DeviceBindingCode(Base):
     used_device_id = Column(String(255), nullable=True)
 
     subscription = relationship("Subscription", back_populates="binding_codes")
+
+
+class ShareToken(Base):
+    """Токен страницы «Поделиться доступом» (/s/{token}) + многоразовый share-код.
+
+    Share-код отделён от личных кодов привязки владельца: его ревок не трогает
+    device_links, т.е. не разлогинивает ни владельца, ни уже подключённых друзей.
+    """
+
+    __tablename__ = "share_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscription_id = Column(
+        Integer, ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token = Column(String(64), nullable=False, unique=True, index=True)
+    share_code = Column(String(16), nullable=False, unique=True, index=True)
+    activations_count = Column(Integer, nullable=False, default=0)
+    max_activations = Column(Integer, nullable=False, default=10)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    subscription = relationship("Subscription", back_populates="share_tokens")
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None and self.activations_count < self.max_activations
 
 
 class UserDailyTrafficUsage(Base):

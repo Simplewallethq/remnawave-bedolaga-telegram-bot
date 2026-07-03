@@ -425,6 +425,20 @@ class Settings(BaseSettings):
     HAPP_DOWNLOAD_LINK_WINDOWS: Optional[str] = None
     HAPP_DOWNLOAD_LINK_PC: Optional[str] = None
     LETO_APP_DOWNLOAD_LINK_ANDROID: Optional[str] = None
+    LETO_APP_DOWNLOAD_LINK_ANDROID_APK: Optional[str] = None
+    LETO_APP_DOWNLOAD_LINK_IOS: Optional[str] = None
+    LETO_APP_DOWNLOAD_LINK_WINDOWS: Optional[str] = None
+    LETO_APP_DOWNLOAD_LINK_MACOS: Optional[str] = None
+
+    # Страница «Поделиться доступом» (/s/{token} на сайте)
+    SHARE_SITE_BASE_URL: str = ""  # напр. https://info.letovpn.com
+    SHARE_MAX_ACTIVATIONS: int = 10
+    # Метод подключения на share-странице по платформам: "leto_code" | "happ_link".
+    # Релиз нашего приложения на платформе = флип значения, без изменений кода.
+    SHARE_PLATFORM_ANDROID: str = "leto_code"
+    SHARE_PLATFORM_IOS: str = "happ_link"
+    SHARE_PLATFORM_WINDOWS: str = "happ_link"
+    SHARE_PLATFORM_MACOS: str = "happ_link"
     HIDE_SUBSCRIPTION_LINK: bool = False
     ENABLE_LOGO_MODE: bool = True
     LOGO_FILE: str = "vpn_logo.png"
@@ -1390,6 +1404,70 @@ class Settings(BaseSettings):
         }
         link = links.get(platform_key)
         return link if link else None
+
+    def get_share_platform_map(self) -> dict:
+        """Платформенная карта share-страницы: ОС -> метод + ссылки магазинов.
+
+        Отдаётся эндпоинтом /api/share/resolve как есть; сайт только детектит
+        платформу по User-Agent и рендерит. Дефолты повторяют захардкоженные
+        ссылки онбординга (get_onboarding_connection_keyboard).
+        """
+
+        def _clean(value: Optional[str]) -> Optional[str]:
+            value = (value or "").strip()
+            return value or None
+
+        happ_defaults = {
+            "ios": [
+                {"kind": "app_store_ru", "url": "https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"},
+                {"kind": "app_store", "url": "https://apps.apple.com/app/happ-proxy-utility/id6504287215"},
+            ],
+            "android": [
+                {"kind": "google_play", "url": "https://play.google.com/store/apps/details?id=com.happproxy&hl=ru"},
+            ],
+            "windows": [
+                {"kind": "direct", "url": "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"},
+            ],
+            "macos": [
+                {"kind": "app_store_ru", "url": "https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"},
+                {"kind": "app_store", "url": "https://apps.apple.com/app/happ-proxy-utility/id6504287215"},
+            ],
+        }
+        leto_links = {
+            "ios": [{"kind": "app_store", "url": _clean(self.LETO_APP_DOWNLOAD_LINK_IOS)}],
+            "android": [
+                {"kind": "google_play", "url": _clean(self.LETO_APP_DOWNLOAD_LINK_ANDROID)},
+                {"kind": "apk", "url": _clean(self.LETO_APP_DOWNLOAD_LINK_ANDROID_APK)},
+            ],
+            "windows": [{"kind": "direct", "url": _clean(self.LETO_APP_DOWNLOAD_LINK_WINDOWS)}],
+            "macos": [{"kind": "app_store", "url": _clean(self.LETO_APP_DOWNLOAD_LINK_MACOS)}],
+        }
+        methods = {
+            "ios": self.SHARE_PLATFORM_IOS,
+            "android": self.SHARE_PLATFORM_ANDROID,
+            "windows": self.SHARE_PLATFORM_WINDOWS,
+            "macos": self.SHARE_PLATFORM_MACOS,
+        }
+
+        result = {}
+        for platform, method in methods.items():
+            method = (method or "").strip().lower()
+            if method == "leto_code":
+                store = [entry for entry in leto_links[platform] if entry["url"]]
+            else:
+                method = "happ_link"
+                happ_link = self.get_happ_download_link(platform)
+                store = (
+                    [{"kind": "custom", "url": happ_link}]
+                    if happ_link
+                    else happ_defaults[platform]
+                )
+            result[platform] = {"method": method, "store": store}
+        return result
+
+    def get_share_site_base_url(self) -> Optional[str]:
+        base = (self.SHARE_SITE_BASE_URL or "").strip().rstrip("/")
+        return base or None
 
     def is_maintenance_mode(self) -> bool:
         return self.MAINTENANCE_MODE

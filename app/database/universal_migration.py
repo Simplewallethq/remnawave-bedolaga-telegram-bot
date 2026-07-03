@@ -5062,6 +5062,88 @@ async def create_device_binding_codes_table() -> bool:
         return False
 
 
+async def create_share_tokens_table() -> bool:
+    table_exists = await check_table_exists('share_tokens')
+    if table_exists:
+        logger.info("Таблица share_tokens уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE share_tokens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    subscription_id INTEGER NOT NULL,
+                    token VARCHAR(64) NOT NULL,
+                    share_code VARCHAR(16) NOT NULL,
+                    activations_count INTEGER NOT NULL DEFAULT 0,
+                    max_activations INTEGER NOT NULL DEFAULT 10,
+                    revoked_at DATETIME NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_share_tokens_token UNIQUE (token),
+                    CONSTRAINT uq_share_tokens_share_code UNIQUE (share_code),
+                    FOREIGN KEY(subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX ix_share_tokens_subscription_id ON share_tokens(subscription_id);
+                CREATE INDEX ix_share_tokens_token ON share_tokens(token);
+                CREATE INDEX ix_share_tokens_share_code ON share_tokens(share_code);
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS share_tokens (
+                    id SERIAL PRIMARY KEY,
+                    subscription_id INTEGER NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+                    token VARCHAR(64) NOT NULL,
+                    share_code VARCHAR(16) NOT NULL,
+                    activations_count INTEGER NOT NULL DEFAULT 0,
+                    max_activations INTEGER NOT NULL DEFAULT 10,
+                    revoked_at TIMESTAMP NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_share_tokens_token UNIQUE (token),
+                    CONSTRAINT uq_share_tokens_share_code UNIQUE (share_code)
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_share_tokens_subscription_id ON share_tokens(subscription_id);
+                CREATE INDEX IF NOT EXISTS ix_share_tokens_token ON share_tokens(token);
+                CREATE INDEX IF NOT EXISTS ix_share_tokens_share_code ON share_tokens(share_code);
+                """
+            elif db_type == 'mysql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS share_tokens (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    subscription_id INT NOT NULL,
+                    token VARCHAR(64) NOT NULL,
+                    share_code VARCHAR(16) NOT NULL,
+                    activations_count INT NOT NULL DEFAULT 0,
+                    max_activations INT NOT NULL DEFAULT 10,
+                    revoked_at DATETIME NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_share_tokens_token UNIQUE (token),
+                    CONSTRAINT uq_share_tokens_share_code UNIQUE (share_code),
+                    FOREIGN KEY(subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX ix_share_tokens_subscription_id ON share_tokens(subscription_id);
+                CREATE INDEX ix_share_tokens_token ON share_tokens(token);
+                CREATE INDEX ix_share_tokens_share_code ON share_tokens(share_code);
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            await conn.execute(text(create_sql))
+
+        logger.info("✅ Таблица share_tokens успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы share_tokens: {e}")
+        return False
+
+
 async def create_user_daily_traffic_usage_table() -> bool:
     table_exists = await check_table_exists('user_daily_traffic_usage')
     if table_exists:
@@ -6735,6 +6817,13 @@ async def run_universal_migration():
             logger.info("✅ Таблица device_binding_codes готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей device_binding_codes")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ SHARE_TOKENS ===")
+        share_tokens_ready = await create_share_tokens_table()
+        if share_tokens_ready:
+            logger.info("✅ Таблица share_tokens готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей share_tokens")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ USER_DAILY_TRAFFIC_USAGE ===")
         daily_traffic_ready = await create_user_daily_traffic_usage_table()

@@ -2797,6 +2797,90 @@ async def handle_bind_device(
     await callback.answer()
 
 
+async def handle_share_access(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    """«🔗 Поделиться доступом»: выдать владельцу ссылку на share-страницу.
+
+    Перевыпуск ленивый: get_or_create_share_token молча заменяет исчерпанный
+    или отозванный токен новым — без уведомлений и счётчиков.
+    """
+    from app.database.crud.share_token import get_or_create_share_token
+
+    texts = get_texts(db_user.language)
+    subscription = db_user.subscription
+
+    error_text = texts.t(
+        "SHARE_ACCESS_ERROR",
+        "Не удалось создать ссылку. Попробуйте позже.",
+    )
+
+    if not subscription:
+        await callback.answer(
+            texts.t("SHARE_ACCESS_NO_SUBSCRIPTION", "Сначала оформите подписку."),
+            show_alert=True,
+        )
+        return
+
+    site_base_url = settings.get_share_site_base_url()
+    if not site_base_url:
+        logger.error("SHARE_SITE_BASE_URL is not configured; share_access unavailable")
+        await callback.answer(error_text, show_alert=True)
+        return
+
+    try:
+        record = await get_or_create_share_token(
+            db, subscription.id, max_activations=settings.SHARE_MAX_ACTIVATIONS
+        )
+    except Exception as e:
+        logger.error("Failed to issue share token: %s", e)
+        await callback.answer(error_text, show_alert=True)
+        return
+
+    link = f"{site_base_url}/s/{record.token}"
+
+    text = texts.t(
+        "SHARE_ACCESS_MESSAGE",
+        (
+            "Держи ссылку для доступа друзьям к твоей подписке Leto VPN 👉\n"
+            "{link}\n"
+            "Пусть откроют ссылку на своём устройстве — дальше всё само, займёт минуту 🙂"
+        ),
+    ).format(link=link)
+
+    # t.me/share/url сам добавляет url после text — ссылку в text не дублируем.
+    friend_message = texts.t(
+        "SHARE_ACCESS_FRIEND_MESSAGE",
+        (
+            "Привет! Делюсь с тобой своим Leto VPN ☀️\n\n"
+            "Открой ссылку на своём устройстве — дальше всё само, займёт минуту:"
+        ),
+    )
+    share_url = f"https://t.me/share/url?url={quote(link, safe='')}&text={quote(friend_message, safe='')}"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=texts.t("SHARE_ACCESS_SEND_BUTTON", "📤 Отправить"),
+            url=share_url,
+        )],
+        [InlineKeyboardButton(
+            text=texts.t("BACK_BUTTON", "⬅️Назад"),
+            callback_data="subscription",
+        )],
+    ])
+
+    try:
+        await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
+    except TelegramBadRequest:
+        try:
+            await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
+        except TelegramBadRequest:
+            await callback.message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
 async def handle_sub_add_days(
     callback: types.CallbackQuery,
     db_user: User,
@@ -3743,6 +3827,11 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         handle_bind_device,
         F.data == "bind_device"
+    )
+
+    dp.callback_query.register(
+        handle_share_access,
+        F.data == "share_access"
     )
 
     dp.callback_query.register(

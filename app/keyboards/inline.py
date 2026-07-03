@@ -3091,29 +3091,15 @@ def get_onboarding_welcome_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineK
 
 def get_onboarding_device_selection_keyboard(
     language: str = DEFAULT_LANGUAGE,
-    share_link: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """
-    Onboarding Screen 2: Device selection (4 buttons) with optional share-access button on top.
+    Onboarding Screen 2: Device selection (4 buttons).
+
+    Шаринг доступа переехал в «Управление подпиской» (share_access) —
+    здесь только выбор платформы.
     """
     texts = get_texts(language)
     buttons: List[List[InlineKeyboardButton]] = []
-    if share_link:
-        share_invite_text = texts.t(
-            "SUB_SHARE_ACCESS_INVITE_TEXT",
-            "Привет, держи доступ к моей подписке в Leto VPN. "
-            "Установи их приложение (через бота @letovpnbot) и потом кликай на ссылку.",
-        )
-        share_url = (
-            f"tg://msg_url?url={quote(share_link, safe='')}"
-            f"&text={quote(share_invite_text, safe='')}"
-        )
-        buttons.append([
-            InlineKeyboardButton(
-                text=texts.t("SUB_SHARE_ACCESS_BUTTON", "🔗 Поделиться доступом"),
-                url=share_url,
-            )
-        ])
     buttons.extend([
         [InlineKeyboardButton(text="🍎 iPhone/MacOS", callback_data="onboarding_device_iphone")],
         [InlineKeyboardButton(text="🤖 Android", callback_data="onboarding_device_android")],
@@ -3313,10 +3299,11 @@ def get_subscription_menu_keyboard(
         action_row,
     ]
 
+    # «Привязать устройство» закрыто флоу «Подключиться»; на его месте — шаринг.
     buttons.append([
         InlineKeyboardButton(
-            text=texts.t("BIND_DEVICE_BUTTON", "🔗 Привязать устройство"),
-            callback_data="bind_device",
+            text=texts.t("SUB_SHARE_ACCESS_BUTTON", "🔗 Поделиться доступом"),
+            callback_data="share_access",
         )
     ])
 

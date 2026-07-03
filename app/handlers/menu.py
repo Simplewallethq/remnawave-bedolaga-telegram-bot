@@ -1227,31 +1227,17 @@ async def handle_activate_button(
 
 
 
-def _build_onboarding_device_selection_view(user) -> tuple[str, str | None]:
-    """Build (caption, share_link) for the device-selection screen."""
+def _build_onboarding_device_selection_view(user) -> str:
+    """Caption для экрана выбора платформы.
+
+    Ключ подписки здесь не показываем — он доступен внутри платформенных
+    инструкций (ручное подключение).
+    """
     texts = get_texts(user.language)
-    base_text = texts.t(
+    return texts.t(
         "ONBOARDING_DEVICE_SELECTION_TEXT",
-        "Выбери устройство для подключения:",
+        "Для подключения основного или дополнительного устройства выбери платформу:",
     )
-
-    subscription_link = None
-    if user.subscription:
-        subscription_link = get_display_subscription_link(user.subscription)
-
-    if subscription_link:
-        manual_intro = texts.t(
-            "ONBOARDING_MANUAL_LINK_TEXT",
-            "Для ручного подключения скопируй ключ и добавь его в Happ\n\n",
-        ).rstrip()
-        caption = (
-            f"{base_text}\n\n{manual_intro}\n"
-            f"<blockquote expandable><code>{subscription_link}</code></blockquote>"
-        )
-    else:
-        caption = base_text
-
-    return caption, subscription_link
 
 
 async def handle_howto(
@@ -1265,7 +1251,7 @@ async def handle_howto(
     if not user:
         return
 
-    caption, share_link = _build_onboarding_device_selection_view(user)
+    caption = _build_onboarding_device_selection_view(user)
 
     image_path = os.path.join("images", "device_selection_screen.png")
     if not os.path.exists(image_path):
@@ -1274,7 +1260,7 @@ async def handle_howto(
     await edit_or_answer_photo(
         callback,
         caption,
-        get_onboarding_device_selection_keyboard(user.language, share_link=share_link),
+        get_onboarding_device_selection_keyboard(user.language),
         parse_mode="HTML",
         photo_path=image_path,
     )
@@ -1291,7 +1277,7 @@ async def handle_onboarding_connect_free(
     if not user:
         return
 
-    caption, share_link = _build_onboarding_device_selection_view(user)
+    caption = _build_onboarding_device_selection_view(user)
 
     image_path = os.path.join("images", "device_selection_screen.png")
     if not os.path.exists(image_path):
@@ -1300,7 +1286,7 @@ async def handle_onboarding_connect_free(
     await edit_or_answer_photo(
         callback,
         caption,
-        get_onboarding_device_selection_keyboard(user.language, share_link=share_link),
+        get_onboarding_device_selection_keyboard(user.language),
         parse_mode="HTML",
         photo_path=image_path,
     )

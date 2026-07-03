@@ -35,6 +35,7 @@ from .routes import (
     remnawave,
     contests,
     servers,
+    share,
     support_settings,
     subscription_events,
     stats,
@@ -262,6 +263,9 @@ def create_web_api_app() -> FastAPI:
         tags=["notifications"],
     )
     app.include_router(devices.router, prefix="/api/devices", tags=["devices"])
+    # Публичный (без API-токена): резолв share-страницы «Поделиться доступом».
+    # Под /cabinet — наружу у cabinetapi проксируется только /cabinet/*.
+    app.include_router(share.router, prefix="/cabinet/share", tags=["share"])
     app.include_router(app_users.router, prefix="/api/users", tags=["app-users"])
     app.include_router(plans.router, prefix="/api/plans", tags=["plans"])
     app.include_router(auth_otp.router, prefix="/api/auth", tags=["auth-otp"])
