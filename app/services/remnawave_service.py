@@ -1140,7 +1140,7 @@ class RemnaWaveService:
 
     async def sync_users_from_panel(self, db: AsyncSession, sync_type: str = "all") -> Dict[str, int]:
         try:
-            stats = {"created": 0, "updated": 0, "errors": 0, "deleted": 0}
+            stats = {"created": 0, "updated": 0, "errors": 0, "deleted": 0, "skipped": 0}
             
             logger.info(f"🔄 Начинаем синхронизацию типа: {sync_type}")
             
@@ -1225,6 +1225,15 @@ class RemnaWaveService:
                 )
 
             panel_telegram_ids = set(unique_panel_users_map.keys())
+
+            # UUID всех пользователей панели, включая веб-кабинетных без telegramId.
+            # Нужен, чтобы не деактивировать локальные подписки, которые фактически
+            # присутствуют в панели, но не сопоставились по telegram_id.
+            panel_uuids = {
+                str(user.get('uuid'))
+                for user in panel_users
+                if user.get('uuid')
+            }
 
             # Для ускорения - подготовим данные о подписках
             # Соберем все существующие подписки за один запрос
@@ -1381,7 +1390,14 @@ class RemnaWaveService:
                 users_to_deactivate = [
                     (telegram_id, db_user)
                     for telegram_id, db_user in bot_users_by_telegram_id.items()
-                    if telegram_id not in panel_telegram_ids
+                    # Пользователей веб-кабинета/приложения (telegram_id IS NULL)
+                    # нельзя сопоставлять с панелью по telegram_id — их подписки
+                    # не трогаем в этой фазе, иначе теряем оплаченных клиентов.
+                    if telegram_id is not None
+                    and telegram_id not in panel_telegram_ids
+                    # Подписка фактически есть в панели по UUID — не деактивируем
+                    # (защита от рассинхрона telegram_id и от гонки «куплено во время синка»).
+                    and str(getattr(db_user, "remnawave_uuid", None)) not in panel_uuids
                     and hasattr(db_user, 'subscription')
                     and db_user.subscription
                 ]
@@ -1405,6 +1421,32 @@ class RemnaWaveService:
                             logger.info(f"🗑️ Деактивация подписки пользователя {telegram_id} (нет в панели)")
 
                             subscription = db_user.subscription
+
+                            # Живая перепроверка против панели: снапшот panel_users мог
+                            # устареть за время синка (пользователь мог купить подписку
+                            # уже после выборки). Если панель не отвечает — безопаснее
+                            # пропустить деактивацию, чем стереть оплаченную подписку.
+                            if hwid_api_client:
+                                try:
+                                    still_absent = not await hwid_api_client.get_user_by_telegram_id(telegram_id)
+                                    if still_absent and db_user.remnawave_uuid:
+                                        if await hwid_api_client.get_user_by_uuid(db_user.remnawave_uuid):
+                                            still_absent = False
+                                except Exception as recheck_error:
+                                    logger.warning(
+                                        f"⚠️ Не удалось перепроверить {telegram_id} в панели, пропускаем деактивацию: {recheck_error}"
+                                    )
+                                    stats["skipped"] += 1
+                                    processed_count += 1
+                                    continue
+
+                                if not still_absent:
+                                    logger.info(
+                                        f"⏭️ Пропуск деактивации {telegram_id}: пользователь найден в панели при повторной проверке"
+                                    )
+                                    stats["skipped"] += 1
+                                    processed_count += 1
+                                    continue
 
                             if db_user.remnawave_uuid and hwid_api_client:
                                 try:
@@ -1506,7 +1548,7 @@ class RemnaWaveService:
                         except Exception:
                             pass
 
-            logger.info(f"🎯 Синхронизация завершена: создано {stats['created']}, обновлено {stats['updated']}, деактивировано {stats['deleted']}, ошибок {stats['errors']}")
+            logger.info(f"🎯 Синхронизация завершена: создано {stats['created']}, обновлено {stats['updated']}, деактивировано {stats['deleted']}, пропущено {stats.get('skipped', 0)}, ошибок {stats['errors']}")
             return stats
         
         except Exception as e:
