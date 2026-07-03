@@ -76,6 +76,7 @@ logger = logging.getLogger(__name__)
 
 
 class MonitoringService:
+    SEND_AUTOPAY_USER_NOTIFICATIONS = False
     
     def __init__(self, bot=None):
         self.is_running = False
@@ -1018,7 +1019,7 @@ class MonitoringService:
                         if promo_discount_value > 0:
                             await self._consume_user_promo_offer_discount(db, user)
 
-                        if self.bot:
+                        if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
                             await self._send_autopay_success_notification(user, charge_amount, 30)
 
                         processed_count += 1
@@ -1031,12 +1032,12 @@ class MonitoringService:
                         )
                     else:
                         failed_count += 1
-                        if self.bot:
+                        if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
                             await self._send_autopay_failed_notification(user, user.balance_kopeks, charge_amount)
                         logger.warning(f"💳 Ошибка списания средств для автопродления пользователя {user.telegram_id}")
                 else:
                     failed_count += 1
-                    if self.bot:
+                    if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
                         await self._send_autopay_failed_notification(user, user.balance_kopeks, charge_amount)
                     logger.warning(f"💳 Недостаточно средств для автопродления у пользователя {user.telegram_id}")
             
