@@ -60,6 +60,13 @@ async def get_device_subscription(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Device not found",
         )
+    # Этот эндпоинт вызывает только teleVpn при поллинге статуса устройства,
+    # поэтому успешный ответ означает вход в приложение через Telegram
+    # (deep-link или код привязки). Email-логин ставит флаг в auth_otp.py.
+    user = subscription.user
+    if user is not None and not user.has_used_mobile_app:
+        user.has_used_mobile_app = True
+        await db.commit()
     response = _serialize_subscription(subscription)
     response.connected_devices = await count_device_links(db, subscription.id)
     return response
