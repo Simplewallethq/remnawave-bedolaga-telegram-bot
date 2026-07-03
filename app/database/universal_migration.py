@@ -3881,6 +3881,87 @@ async def create_feedbacks_table() -> bool:
         return False
 
 
+async def create_interactive_notification_logs_table() -> bool:
+    table_exists = await check_table_exists("interactive_notification_logs")
+    if table_exists:
+        logger.info("Таблица interactive_notification_logs уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == "sqlite":
+                create_sql = """
+                CREATE TABLE interactive_notification_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    slot_key VARCHAR(50) NOT NULL,
+                    user_id INTEGER NULL,
+                    telegram_id BIGINT NULL,
+                    message_id INTEGER NULL,
+                    status VARCHAR(50) NOT NULL,
+                    error TEXT NULL,
+                    payload JSON NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                );
+
+                CREATE INDEX ix_interactive_notification_logs_slot_key ON interactive_notification_logs(slot_key);
+                CREATE INDEX ix_interactive_notification_logs_user_id ON interactive_notification_logs(user_id);
+                CREATE INDEX ix_interactive_notification_logs_status ON interactive_notification_logs(status);
+                """
+            elif db_type == "postgresql":
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS interactive_notification_logs (
+                    id SERIAL PRIMARY KEY,
+                    slot_key VARCHAR(50) NOT NULL,
+                    user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+                    telegram_id BIGINT NULL,
+                    message_id INTEGER NULL,
+                    status VARCHAR(50) NOT NULL,
+                    error TEXT NULL,
+                    payload JSON NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_interactive_notification_logs_slot_key ON interactive_notification_logs(slot_key);
+                CREATE INDEX IF NOT EXISTS ix_interactive_notification_logs_user_id ON interactive_notification_logs(user_id);
+                CREATE INDEX IF NOT EXISTS ix_interactive_notification_logs_status ON interactive_notification_logs(status);
+                """
+            elif db_type == "mysql":
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS interactive_notification_logs (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    slot_key VARCHAR(50) NOT NULL,
+                    user_id INT NULL,
+                    telegram_id BIGINT NULL,
+                    message_id INT NULL,
+                    status VARCHAR(50) NOT NULL,
+                    error TEXT NULL,
+                    payload JSON NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                );
+
+                CREATE INDEX ix_interactive_notification_logs_slot_key ON interactive_notification_logs(slot_key);
+                CREATE INDEX ix_interactive_notification_logs_user_id ON interactive_notification_logs(user_id);
+                CREATE INDEX ix_interactive_notification_logs_status ON interactive_notification_logs(status);
+                """
+            else:
+                logger.error(f"Неподдерживаемый тип БД для создания interactive_notification_logs: {db_type}")
+                return False
+
+            for statement in [s.strip() for s in create_sql.split(";") if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица interactive_notification_logs успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы interactive_notification_logs: {e}")
+        return False
+
+
 async def fix_subscription_duplicates_universal():
     async with engine.begin() as conn:
         db_type = await get_database_type()
@@ -6627,6 +6708,13 @@ async def run_universal_migration():
         else:
             logger.warning("⚠️ Проблемы с таблицей feedbacks")
 
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ INTERACTIVE_NOTIFICATION_LOGS ===")
+        interactive_logs_created = await create_interactive_notification_logs_table()
+        if interactive_logs_created:
+            logger.info("✅ Таблица interactive_notification_logs готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей interactive_notification_logs")
+
         logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ HAS_CONNECTED_TO_VPN В USERS ===")
         vpn_column_ready = await add_user_has_connected_to_vpn_column()
         if vpn_column_ready:
@@ -6820,6 +6908,7 @@ async def check_migration_status():
             "subscription_duplicates": False,
             "subscription_conversions_table": False,
             "subscription_events_table": False,
+            "interactive_notification_logs_table": False,
             "promo_groups_table": False,
             "server_promo_groups_table": False,
             "server_squads_trial_column": False,
@@ -6870,6 +6959,7 @@ async def check_migration_status():
         status["public_offers_table"] = await check_table_exists('public_offers')
         status["subscription_conversions_table"] = await check_table_exists('subscription_conversions')
         status["subscription_events_table"] = await check_table_exists('subscription_events')
+        status["interactive_notification_logs_table"] = await check_table_exists('interactive_notification_logs')
         status["promo_groups_table"] = await check_table_exists('promo_groups')
         status["server_promo_groups_table"] = await check_table_exists('server_squad_promo_groups')
         status["server_squads_trial_column"] = await check_column_exists('server_squads', 'is_trial_eligible')

@@ -27,6 +27,7 @@ from app.webserver.unified_app import create_unified_app
 from app.database.universal_migration import run_universal_migration
 from app.services.backup_service import backup_service
 from app.services.reporting_service import reporting_service
+from app.services.interactive_notification_service import interactive_notification_service
 from app.services.remnawave_sync_service import remnawave_sync_service
 from app.localization.loader import ensure_locale_templates
 from app.services.system_settings_service import bot_configuration_service
@@ -166,6 +167,7 @@ async def main():
         monitoring_service.bot = bot
         maintenance_service.set_bot(bot)
         broadcast_service.set_bot(bot)
+        interactive_notification_service.set_bot(bot)
 
         from app.services.admin_notification_service import AdminNotificationService
 
@@ -214,6 +216,30 @@ async def main():
             except Exception as e:
                 stage.warning(f"Ошибка запуска сервиса отчетов: {e}")
                 logger.error(f"❌ Ошибка запуска сервиса отчетов: {e}")
+
+        interactive_notifications_active = False
+        async with timeline.stage(
+            "Интерактивные уведомления",
+            "🔔",
+            success_message="Сервис интерактивных уведомлений готов",
+        ) as stage:
+            try:
+                await interactive_notification_service.start()
+                interactive_notifications_active = interactive_notification_service.is_running()
+                next_run = interactive_notification_service.get_next_run()
+                if next_run:
+                    next_run_msk = next_run.astimezone(
+                        interactive_notification_service.MSK_TZ
+                    )
+                    stage.log(
+                        "Ближайший запуск "
+                        f"{next_run_msk.strftime('%d.%m.%Y %H:%M')} МСК"
+                    )
+                else:
+                    stage.log("Ждем слота")
+            except Exception as e:
+                stage.warning(f"Ошибка запуска сервиса интерактивных уведомлений: {e}")
+                logger.error(f"❌ Ошибка запуска сервиса интерактивных уведомлений: {e}")
 
         async with timeline.stage(
             "Реферальные конкурсы",
@@ -536,6 +562,12 @@ async def main():
             f"Техработы: {'Включен' if maintenance_task else 'Отключен'}",
             f"Проверка версий: {'Включен' if version_check_task else 'Отключен'}",
             f"Отчеты: {'Включен' if reporting_service.is_running() else 'Отключен'}",
+            "Интерактивные уведомления: "
+            + (
+                "Включены"
+                if interactive_notification_service.is_running()
+                else "Отключены"
+            ),
         ]
         services_lines.append(
             "Проверка пополнений: "
@@ -584,6 +616,16 @@ async def main():
                     )
                     await auto_payment_verification_service.start()
                     auto_verification_active = auto_payment_verification_service.is_running()
+
+                if (
+                    interactive_notifications_active
+                    and not interactive_notification_service.is_running()
+                ):
+                    logger.warning(
+                        "Сервис интерактивных уведомлений остановился, пробуем перезапустить..."
+                    )
+                    await interactive_notification_service.start()
+                    interactive_notifications_active = interactive_notification_service.is_running()
 
                 if polling_task and polling_task.done():
                     exception = polling_task.exception()
@@ -643,6 +685,12 @@ async def main():
             await reporting_service.stop()
         except Exception as e:
             logger.error(f"Ошибка остановки сервиса отчетов: {e}")
+
+        logger.info("ℹ️ Остановка сервиса интерактивных уведомлений...")
+        try:
+            await interactive_notification_service.stop()
+        except Exception as e:
+            logger.error(f"Ошибка остановки сервиса интерактивных уведомлений: {e}")
 
         logger.info("ℹ️ Остановка сервиса конкурсов...")
         try:

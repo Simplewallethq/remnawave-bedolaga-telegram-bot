@@ -1474,6 +1474,31 @@ class SentNotification(Base):
     subscription = relationship("Subscription", backref="sent_notifications")
 
 
+class InteractiveNotificationLog(Base):
+    __tablename__ = "interactive_notification_logs"
+    __table_args__ = (
+        Index("ix_interactive_notification_logs_slot_key", "slot_key"),
+        Index("ix_interactive_notification_logs_user_id", "user_id"),
+        Index("ix_interactive_notification_logs_status", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    slot_key = Column(String(50), nullable=False)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    telegram_id = Column(BigInteger, nullable=True)
+    message_id = Column(Integer, nullable=True)
+    status = Column(String(50), nullable=False)
+    error = Column(Text, nullable=True)
+    payload = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    user = relationship("User", backref="interactive_notification_logs")
+
+
 class Feedback(Base):
     __tablename__ = "feedbacks"
     __table_args__ = (
