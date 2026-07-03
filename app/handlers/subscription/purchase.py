@@ -2850,15 +2850,17 @@ async def handle_share_access(
         ),
     ).format(link=link)
 
-    # t.me/share/url сам добавляет url после text — ссылку в text не дублируем.
+    # Клиенты Telegram всегда ставят url перед text, поэтому всё сообщение
+    # (с ссылкой посередине) передаём одним параметром url.
     friend_message = texts.t(
         "SHARE_ACCESS_FRIEND_MESSAGE",
         (
             "Привет! Делюсь с тобой своим Leto VPN ☀️\n\n"
-            "Открой ссылку на своём устройстве — дальше всё само, займёт минуту:"
+            "{link}\n\n"
+            "Открой ссылку на своём устройстве — дальше всё само, займёт минуту."
         ),
-    )
-    share_url = f"https://t.me/share/url?url={quote(link, safe='')}&text={quote(friend_message, safe='')}"
+    ).format(link=link)
+    share_url = f"https://t.me/share/url?url={quote(friend_message, safe='')}"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(

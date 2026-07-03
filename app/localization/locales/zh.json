@@ -1880,7 +1880,7 @@
     "SUB_SHARE_ACCESS_BUTTON": "🔗 分享访问",
     "SHARE_ACCESS_MESSAGE": "这是与朋友分享您的 Leto VPN 订阅的链接 👉\n{link}\n让他们在自己的设备上打开链接——一切自动完成，只需一分钟 🙂",
     "SHARE_ACCESS_SEND_BUTTON": "📤 发送",
-    "SHARE_ACCESS_FRIEND_MESSAGE": "你好！与你分享我的 Leto VPN ☀️\n\n在你的设备上打开链接——一切自动完成，只需一分钟：",
+    "SHARE_ACCESS_FRIEND_MESSAGE": "你好！与你分享我的 Leto VPN ☀️\n\n{link}\n\n在你的设备上打开链接——一切自动完成，只需一分钟。",
     "SHARE_ACCESS_ERROR": "无法创建链接，请稍后再试。",
     "SHARE_ACCESS_NO_SUBSCRIPTION": "请先购买订阅。",
     "ONBOARDING_CONNECTION_TEXT": "请点击下方按钮安装 Happ 应用。\n\n安装完成后点击「连接」——一切将自动配置。",

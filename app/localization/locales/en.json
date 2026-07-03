@@ -1682,7 +1682,7 @@
   "SUB_SHARE_ACCESS_BUTTON": "🔗 Share access",
   "SHARE_ACCESS_MESSAGE": "Here's a link to share your Leto VPN subscription with friends 👉\n{link}\nHave them open it on their device — everything happens automatically, takes a minute 🙂",
   "SHARE_ACCESS_SEND_BUTTON": "📤 Send",
-  "SHARE_ACCESS_FRIEND_MESSAGE": "Hi! Sharing my Leto VPN with you ☀️\n\nOpen the link on your device — everything happens automatically, takes a minute:",
+  "SHARE_ACCESS_FRIEND_MESSAGE": "Hi! Sharing my Leto VPN with you ☀️\n\n{link}\n\nOpen the link on your device — everything happens automatically, takes a minute.",
   "SHARE_ACCESS_ERROR": "Failed to create the link. Please try again later.",
   "SHARE_ACCESS_NO_SUBSCRIPTION": "You need a subscription first.",
   "SUB_DEVICES_MENU_TITLE": "📱 <b>Devices</b>\n\nChoose an action:",

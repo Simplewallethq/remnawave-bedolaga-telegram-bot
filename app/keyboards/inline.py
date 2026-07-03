@@ -3056,8 +3056,8 @@ def get_activation_keyboard(happ_link_shown: bool = False, language: str = DEFAU
     texts = get_texts(language)
     buttons = [
         [
-            InlineKeyboardButton(text="🍎 iOS (RU)", url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"),
-            InlineKeyboardButton(text="🍎 iOS (WORLD)", url="https://apps.apple.com/app/happ-proxy-utility/id6504287215")
+            InlineKeyboardButton(text="🍎 iOS (RU)", url="https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643"),
+            InlineKeyboardButton(text="🍎 iOS (WORLD)", url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215")
         ],
         [
             InlineKeyboardButton(text="🤖 Android", url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru"),
@@ -3121,13 +3121,13 @@ def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT
         buttons.append([
             InlineKeyboardButton(
                 text=texts.t("ONBOARDING_DOWNLOAD_HAPP_IOS_RU", "🍎 Скачать Happ (Apple ID Россия)"),
-                url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973",
+                url="https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643",
             ),
         ])
         buttons.append([
             InlineKeyboardButton(
                 text=texts.t("ONBOARDING_DOWNLOAD_HAPP_IOS_WORLD", "🍎 Скачать Happ (Apple ID International)"),
-                url="https://apps.apple.com/app/happ-proxy-utility/id6504287215",
+                url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
             ),
         ])
     elif device_type == "android":
@@ -3156,13 +3156,13 @@ def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT
         buttons.append([
             InlineKeyboardButton(
                 text=texts.t("ONBOARDING_DOWNLOAD_HAPP_IOS_RU", "🍎 Скачать Happ (Apple ID Россия)"),
-                url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973",
+                url="https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643",
             ),
         ])
         buttons.append([
             InlineKeyboardButton(
                 text=texts.t("ONBOARDING_DOWNLOAD_HAPP_IOS_WORLD", "🍎 Скачать Happ (Apple ID International)"),
-                url="https://apps.apple.com/app/happ-proxy-utility/id6504287215",
+                url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
             ),
         ])
 
@@ -3227,8 +3227,8 @@ def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: boo
     # App download buttons (OS names stay as-is, no translation needed)
     buttons.extend([
         [
-            InlineKeyboardButton(text="🍎 iOS (RU)", url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"),
-            InlineKeyboardButton(text="🍎 iOS (WORLD)", url="https://apps.apple.com/app/happ-proxy-utility/id6504287215")
+            InlineKeyboardButton(text="🍎 iOS (RU)", url="https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643"),
+            InlineKeyboardButton(text="🍎 iOS (WORLD)", url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215")
         ],
         [
             InlineKeyboardButton(text="🤖 Android", url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru"),

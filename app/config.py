@@ -1419,8 +1419,8 @@ class Settings(BaseSettings):
 
         happ_defaults = {
             "ios": [
-                {"kind": "app_store_ru", "url": "https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"},
-                {"kind": "app_store", "url": "https://apps.apple.com/app/happ-proxy-utility/id6504287215"},
+                {"kind": "app_store_ru", "url": "https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643"},
+                {"kind": "app_store", "url": "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"},
             ],
             "android": [
                 {"kind": "google_play", "url": "https://play.google.com/store/apps/details?id=com.happproxy&hl=ru"},
@@ -1429,8 +1429,8 @@ class Settings(BaseSettings):
                 {"kind": "direct", "url": "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"},
             ],
             "macos": [
-                {"kind": "app_store_ru", "url": "https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"},
-                {"kind": "app_store", "url": "https://apps.apple.com/app/happ-proxy-utility/id6504287215"},
+                {"kind": "app_store_ru", "url": "https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643"},
+                {"kind": "app_store", "url": "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"},
             ],
         }
         leto_links = {
@@ -1457,11 +1457,14 @@ class Settings(BaseSettings):
             else:
                 method = "happ_link"
                 happ_link = self.get_happ_download_link(platform)
-                store = (
-                    [{"kind": "custom", "url": happ_link}]
-                    if happ_link
-                    else happ_defaults[platform]
-                )
+                if platform in ("ios", "macos"):
+                    # Всегда две кнопки App Store (RU + International) —
+                    # как в онбординге бота; HAPP_DOWNLOAD_LINK_* их не заменяет.
+                    store = happ_defaults[platform]
+                elif happ_link:
+                    store = [{"kind": "custom", "url": happ_link}]
+                else:
+                    store = happ_defaults[platform]
             result[platform] = {"method": method, "store": store}
         return result
 
