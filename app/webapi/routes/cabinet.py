@@ -43,6 +43,7 @@ from app.services.plan_pricing_service import (
     get_plan_price,
     resolve_pricing_cohort,
 )
+from app.services.cold_solo_offer_service import cold_solo_offer_service
 from app.services.subscription_service import SubscriptionService
 from app.utils.passwords import hash_password
 from app.utils.telegram_webapp import parse_webapp_init_data
@@ -430,7 +431,7 @@ async def get_plans(
     db: AsyncSession = Depends(get_db_session),
     user: User = Depends(get_current_cabinet_user),
 ) -> Dict[str, Any]:
-    return {"plans": await cabinet_service.build_plans(db, cohort=resolve_pricing_cohort(user))}
+    return {"plans": await cabinet_service.build_plans(db, cohort=resolve_pricing_cohort(user), user=user)}
 
 
 @router.post("/subscription/autorenew")
@@ -469,6 +470,16 @@ async def purchase(
             status.HTTP_400_BAD_REQUEST,
             detail="Price for this plan/period is not configured",
         )
+
+    fixed_offer = None
+    offer_price, fixed_offer = await cold_solo_offer_service.get_price_override(
+        db,
+        user.id,
+        plan_code=plan.code,
+        period_days=period_days,
+    )
+    if offer_price is not None:
+        price_kopeks = offer_price
 
     if user.balance_kopeks < price_kopeks:
         raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient balance")
@@ -514,6 +525,7 @@ async def purchase(
 
     user.has_had_paid_subscription = True
     await db.commit()
+    await cold_solo_offer_service.mark_claimed_after_purchase(db, fixed_offer)
 
     # Синхронизация с панелью (is_configured — @property, без скобок!)
     try:

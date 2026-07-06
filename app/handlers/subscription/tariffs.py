@@ -25,6 +25,7 @@ from app.handlers.subscription.notifications import (
     send_purchase_notification,
 )
 from app.keyboards.inline import (
+    get_payment_methods_keyboard,
     get_insufficient_balance_keyboard,
     get_renew_periods_keyboard,
     get_tariff_periods_keyboard,
@@ -44,6 +45,7 @@ from app.services.plan_pricing_service import (
     resolve_pricing_cohort,
     select_prices_for_cohort,
 )
+from app.services.cold_solo_offer_service import cold_solo_offer_service
 from app.services.subscription_service import SubscriptionService
 
 logger = logging.getLogger(__name__)
@@ -86,6 +88,9 @@ async def _save_tariff_intent_cart(
     plan: SubscriptionPlan,
     period_days: int,
     total_price: int,
+    offer_id: Optional[int] = None,
+    price_override_kopeks: Optional[int] = None,
+    offer_type: Optional[str] = None,
 ) -> None:
     """Persist an intent cart so the tariff purchase auto-completes after a balance top-up.
 
@@ -104,6 +109,14 @@ async def _save_tariff_intent_cart(
         "total_price": total_price,
         "intent": True,
     }
+    if offer_id is not None and price_override_kopeks is not None:
+        cart_data.update(
+            {
+                "offer_id": offer_id,
+                "offer_type": offer_type or cold_solo_offer_service.NOTIFICATION_TYPE,
+                "price_override_kopeks": price_override_kopeks,
+            }
+        )
     try:
         await user_cart_service.save_user_cart(db_user.id, cart_data, ttl=3600)
         logger.info(
@@ -206,6 +219,14 @@ async def show_tariff_periods(
         return
 
     period_prices = select_prices_for_cohort(plan, resolve_pricing_cohort(db_user))
+    offer_price, _ = await cold_solo_offer_service.get_price_override(
+        db,
+        db_user.id,
+        plan_code=plan.code,
+        period_days=cold_solo_offer_service.PERIOD_DAYS,
+    )
+    if offer_price is not None:
+        period_prices[cold_solo_offer_service.PERIOD_DAYS] = offer_price
     if not period_prices:
         await callback.answer(
             texts.t("TARIFFS_PRICES_MISSING", "Цены для этого тарифа не настроены."),
@@ -649,6 +670,15 @@ async def start_tariff_purchase(
         )
         return
 
+    offer_price, offer = await cold_solo_offer_service.get_price_override(
+        db,
+        db_user.id,
+        plan_code=plan.code,
+        period_days=period_days,
+    )
+    if offer_price is not None:
+        price_kopeks = offer_price
+
     active_sub = await _resolve_active_subscription(db_user)
     if active_sub and active_sub.plan_id == plan.id:
         # Buying current tier from the tariffs page == renewal at current tier.
@@ -667,6 +697,9 @@ async def start_tariff_purchase(
             plan=plan,
             period_days=period_days,
             total_price=price_kopeks,
+            offer_id=getattr(offer, "id", None),
+            price_override_kopeks=offer_price,
+            offer_type=cold_solo_offer_service.NOTIFICATION_TYPE if offer else None,
         )
         await callback.message.edit_text(
             texts.t(
@@ -697,6 +730,7 @@ async def start_tariff_purchase(
         )
         return
     new_sub, transaction, was_trial_conversion = result
+    await cold_solo_offer_service.mark_claimed_after_purchase(db, offer)
 
     try:
         await send_purchase_notification(
@@ -710,6 +744,142 @@ async def start_tariff_purchase(
         texts.t("TARIFF_PURCHASE_DONE", "Подписка активирована ✅"),
         show_alert=False,
     )
+    from app.handlers.subscription.purchase import show_subscription_info
+    callback.data = "menu_subscription"
+    await show_subscription_info(callback, db_user, db)
+
+
+async def claim_cold_solo_offer(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    texts = get_texts(db_user.language)
+    parts = (callback.data or "").split(":")
+    try:
+        offer_id = int(parts[2]) if len(parts) > 2 else 0
+    except (TypeError, ValueError):
+        offer_id = 0
+
+    offer = await cold_solo_offer_service.get_active_offer(db, db_user.id)
+    if not offer or (offer_id and offer.id != offer_id):
+        await callback.answer("Предложение недоступно или истекло", show_alert=True)
+        return
+
+    if await cold_solo_offer_service.has_successful_subscription_purchase(db, db_user):
+        await callback.answer("У вас уже есть оплаченная подписка", show_alert=True)
+        return
+
+    plan = await get_plan_by_code(db, cold_solo_offer_service.PLAN_CODE)
+    if not plan or not plan.is_active:
+        await callback.answer("Тариф Solo временно недоступен", show_alert=True)
+        return
+
+    if not cold_solo_offer_service.validate_offer_for_plan(
+        offer,
+        plan_code=plan.code,
+        period_days=cold_solo_offer_service.PERIOD_DAYS,
+    ):
+        await callback.answer("Предложение недоступно или истекло", show_alert=True)
+        return
+
+    price_kopeks = cold_solo_offer_service.PRICE_KOPEKS
+    missing = max(0, price_kopeks - db_user.balance_kopeks)
+
+    await _save_tariff_intent_cart(
+        db_user,
+        tariff_op="purchase",
+        plan=plan,
+        period_days=cold_solo_offer_service.PERIOD_DAYS,
+        total_price=price_kopeks,
+        offer_id=offer.id,
+        price_override_kopeks=price_kopeks,
+        offer_type=cold_solo_offer_service.NOTIFICATION_TYPE,
+    )
+
+    if missing == 0:
+        keyboard = types.InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    types.InlineKeyboardButton(
+                        text="Оплатить с баланса 990₽",
+                        callback_data=f"cold_solo_offer:balance:{offer.id}",
+                    )
+                ],
+                [types.InlineKeyboardButton(text=texts.BACK, callback_data="subscription_tariffs")],
+            ]
+        )
+    else:
+        keyboard = get_payment_methods_keyboard(missing, db_user.language)
+
+    message = (
+        "🔥 <b>Solo на 1 год за 990₽</b>\n\n"
+        "Обычная цена: <s>1560₽</s>\n"
+        "Цена предложения: <b>990₽</b>\n"
+        "Действует до: <b>22:00 MSK</b>\n\n"
+    )
+    if missing:
+        message += (
+            f"На балансе: {texts.format_price(db_user.balance_kopeks)}\n"
+            f"К оплате сейчас: {texts.format_price(missing)}"
+        )
+    else:
+        message += "Средств на балансе достаточно для активации."
+
+    try:
+        await callback.message.edit_text(message, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(message, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+async def pay_cold_solo_offer_from_balance(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    parts = (callback.data or "").split(":")
+    try:
+        offer_id = int(parts[2]) if len(parts) > 2 else 0
+    except (TypeError, ValueError):
+        offer_id = 0
+
+    offer = await cold_solo_offer_service.get_active_offer(db, db_user.id)
+    if not offer or not offer_id or offer.id != offer_id:
+        await callback.answer("Предложение недоступно или истекло", show_alert=True)
+        return
+
+    if await cold_solo_offer_service.has_successful_subscription_purchase(db, db_user):
+        await callback.answer("У вас уже есть оплаченная подписка", show_alert=True)
+        return
+
+    plan = await get_plan_by_code(db, cold_solo_offer_service.PLAN_CODE)
+    if not plan or not cold_solo_offer_service.validate_offer_for_plan(
+        offer,
+        plan_code=getattr(plan, "code", None),
+        period_days=cold_solo_offer_service.PERIOD_DAYS,
+    ):
+        await callback.answer("Предложение недоступно", show_alert=True)
+        return
+
+    if db_user.balance_kopeks < cold_solo_offer_service.PRICE_KOPEKS:
+        await callback.answer("Недостаточно средств на балансе", show_alert=True)
+        return
+
+    result = await finalize_tariff_purchase(
+        db,
+        db_user,
+        plan,
+        cold_solo_offer_service.PERIOD_DAYS,
+        cold_solo_offer_service.PRICE_KOPEKS,
+        bot=callback.bot,
+    )
+    if result is None:
+        await callback.answer("Не удалось списать средства", show_alert=True)
+        return
+
+    await cold_solo_offer_service.mark_claimed_after_purchase(db, offer)
+    await callback.answer("Подписка активирована ✅", show_alert=False)
     from app.handlers.subscription.purchase import show_subscription_info
     callback.data = "menu_subscription"
     await show_subscription_info(callback, db_user, db)
@@ -875,6 +1045,14 @@ async def _all_active_server_uuids(db: AsyncSession) -> list:
 
 
 def register_handlers(dp: Dispatcher):
+    dp.callback_query.register(
+        claim_cold_solo_offer,
+        F.data.startswith("cold_solo_offer:claim:"),
+    )
+    dp.callback_query.register(
+        pay_cold_solo_offer_from_balance,
+        F.data.startswith("cold_solo_offer:balance:"),
+    )
     dp.callback_query.register(
         show_tariffs_page,
         F.data == "subscription_tariffs",

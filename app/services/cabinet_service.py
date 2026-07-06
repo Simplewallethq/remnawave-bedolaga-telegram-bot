@@ -25,6 +25,7 @@ from app.services.plan_pricing_service import (
     get_lowest_monthly_price,
     list_active_plans,
 )
+from app.services.cold_solo_offer_service import cold_solo_offer_service
 from app.services.remnawave_service import RemnaWaveService
 from app.utils.subscription_utils import (
     convert_subscription_link_to_happ_scheme,
@@ -126,10 +127,15 @@ def _plan_features(plan) -> List[Dict[str, Any]]:
     return features
 
 
-def _serialize_plan(plan, cohort: str = "new") -> Dict[str, Any]:
+async def _serialize_plan(
+    db: AsyncSession,
+    plan,
+    cohort: str = "new",
+    user: Optional[User] = None,
+) -> Dict[str, Any]:
     monthly_kopeks = get_lowest_monthly_price(plan, cohort)
     traffic_gb = plan.traffic_limit_gb or 0
-    return {
+    payload = {
         "id": plan.code,
         "name": plan.display_name,
         "price": round(monthly_kopeks / 100) if monthly_kopeks else 0,
@@ -140,10 +146,36 @@ def _serialize_plan(plan, cohort: str = "new") -> Dict[str, Any]:
         "features": _plan_features(plan),
     }
 
+    if user is not None:
+        offer_price, offer = await cold_solo_offer_service.get_price_override(
+            db,
+            user.id,
+            plan_code=plan.code,
+            period_days=cold_solo_offer_service.PERIOD_DAYS,
+        )
+        if offer_price is not None and offer is not None:
+            payload["activeOffer"] = {
+                "type": cold_solo_offer_service.NOTIFICATION_TYPE,
+                "periodDays": cold_solo_offer_service.PERIOD_DAYS,
+                "priceKopeks": offer_price,
+                "priceRub": round(offer_price / 100),
+                "originalPriceKopeks": cold_solo_offer_service.ORIGINAL_PRICE_KOPEKS,
+                "originalPriceRub": round(cold_solo_offer_service.ORIGINAL_PRICE_KOPEKS / 100),
+                "expiresAt": offer.expires_at.isoformat() if offer.expires_at else None,
+            }
+            payload["yearPriceKopeks"] = offer_price
+            payload["yearPriceRub"] = round(offer_price / 100)
 
-async def build_plans(db: AsyncSession, cohort: str = "new") -> List[Dict[str, Any]]:
+    return payload
+
+
+async def build_plans(
+    db: AsyncSession,
+    cohort: str = "new",
+    user: Optional[User] = None,
+) -> List[Dict[str, Any]]:
     plans = await list_active_plans(db)
-    return [_serialize_plan(plan, cohort) for plan in plans]
+    return [await _serialize_plan(db, plan, cohort, user=user) for plan in plans]
 
 
 # ── Транзакции ───────────────────────────────────────────────────────────
