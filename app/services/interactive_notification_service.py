@@ -6,10 +6,13 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
-from app.database.crud.user import get_user_by_username
 from app.database.database import AsyncSessionLocal
-from app.database.models import InteractiveNotificationLog
+from app.database.models import InteractiveNotificationLog, Subscription, User
+from app.services.cold_solo_offer_service import cold_solo_offer_service
 
 
 logger = logging.getLogger(__name__)
@@ -34,12 +37,14 @@ class InteractiveNotificationResult:
 class InteractiveNotificationService:
     MSK_TZ = ZoneInfo("Europe/Moscow")
     SLOTS = (
-        InteractiveNotificationSlot("a_1", datetime_time(hour=10, minute=0)),
-        InteractiveNotificationSlot("test", datetime_time(hour=12, minute=30)),
-        InteractiveNotificationSlot("a_2", datetime_time(hour=20, minute=0)),
+        InteractiveNotificationSlot(cold_solo_offer_service.FIRST_SLOT_KEY, datetime_time(hour=10, minute=0)),
+        InteractiveNotificationSlot(cold_solo_offer_service.SECOND_SLOT_KEY, datetime_time(hour=20, minute=0)),
+
+        # TEST
+        InteractiveNotificationSlot(cold_solo_offer_service.FIRST_SLOT_KEY, datetime_time(hour=10, minute=30)),
+        InteractiveNotificationSlot(cold_solo_offer_service.SECOND_SLOT_KEY, datetime_time(hour=10, minute=40)),
     )
-    TEST_USERNAME = "cheechgodx"
-    TEST_MESSAGE = "This is test message"
+    BATCH_LIMIT = 500
 
     def __init__(self) -> None:
         self.bot: Optional[Bot] = None
@@ -149,67 +154,233 @@ class InteractiveNotificationService:
             slot.time.strftime("%H:%M"),
         )
 
-        if slot.key == "test":
-            return await self._send_test_message()
+        if slot.key == cold_solo_offer_service.FIRST_SLOT_KEY:
+            return await self._send_cold_solo_first_touch(slot)
+
+        if slot.key == cold_solo_offer_service.SECOND_SLOT_KEY:
+            return await self._send_cold_solo_second_touch(slot)
 
         return InteractiveNotificationResult(status="processed")
 
-    async def _send_test_message(self) -> InteractiveNotificationResult:
+    async def _send_cold_solo_first_touch(
+        self,
+        slot: InteractiveNotificationSlot,
+    ) -> InteractiveNotificationResult:
         if not self.bot:
             return InteractiveNotificationResult(
                 status="skipped",
                 error="Bot instance is not available",
-                payload={"target_username": self.TEST_USERNAME},
             )
+
+        sent = 0
+        failed = 0
+        skipped = 0
+        now = datetime.utcnow()
+        cutoff = now - timedelta(hours=10)
 
         async with AsyncSessionLocal() as db:
-            user = await get_user_by_username(db, self.TEST_USERNAME)
+            last_user_id = 0
+            while True:
+                result = await db.execute(
+                    select(User)
+                    .join(Subscription, Subscription.user_id == User.id)
+                    .options(selectinload(User.subscription))
+                    .where(
+                        User.id > last_user_id,
+                        User.telegram_id.isnot(None),
+                        Subscription.is_trial.is_(True),
+                        Subscription.end_date <= cutoff,
+                    )
+                    .order_by(User.id.asc())
+                    .limit(self.BATCH_LIMIT)
+                )
+                users = list(result.scalars().all())
+                if not users:
+                    break
 
-        if not user:
+                last_user_id = max(user.id for user in users)
+
+                for user in users:
+                    if not await cold_solo_offer_service.is_initially_eligible(db, user, now_utc=now):
+                        skipped += 1
+                        continue
+
+                    offer = await cold_solo_offer_service.ensure_offer(db, user, now_utc=now)
+                    message_id = await self._send_cold_solo_message(
+                        user.telegram_id,
+                        first_touch=True,
+                        offer_id=offer.id,
+                    )
+                    if message_id:
+                        sent += 1
+                        await self._record_log(
+                            slot,
+                            status="sent",
+                            user_id=user.id,
+                            telegram_id=user.telegram_id,
+                            message_id=message_id,
+                            payload={"offer_id": offer.id},
+                        )
+                    else:
+                        failed += 1
+                        await self._record_log(
+                            slot,
+                            status="failed",
+                            user_id=user.id,
+                            telegram_id=user.telegram_id,
+                            error="send_message_failed",
+                            payload={"offer_id": offer.id},
+                        )
+
+        return InteractiveNotificationResult(
+            status="processed",
+            payload={"sent": sent, "failed": failed, "skipped": skipped},
+        )
+
+    async def _send_cold_solo_second_touch(
+        self,
+        slot: InteractiveNotificationSlot,
+    ) -> InteractiveNotificationResult:
+        if not self.bot:
             return InteractiveNotificationResult(
                 status="skipped",
-                error=f"User @{self.TEST_USERNAME} not found",
-                payload={"target_username": self.TEST_USERNAME},
+                error="Bot instance is not available",
             )
 
-        if not user.telegram_id:
-            return InteractiveNotificationResult(
-                status="skipped",
-                user_id=user.id,
-                error=f"User @{self.TEST_USERNAME} has no telegram_id",
-                payload={"target_username": self.TEST_USERNAME},
+        sent = 0
+        failed = 0
+        skipped = 0
+
+        async with AsyncSessionLocal() as db:
+            day_start, day_end = cold_solo_offer_service._today_utc_window()
+            first_touch_user_ids = (
+                select(InteractiveNotificationLog.user_id)
+                .where(
+                    InteractiveNotificationLog.slot_key == cold_solo_offer_service.FIRST_SLOT_KEY,
+                    InteractiveNotificationLog.status == "sent",
+                    InteractiveNotificationLog.created_at >= day_start,
+                    InteractiveNotificationLog.created_at < day_end,
+                )
+                .distinct()
+                .subquery()
             )
+
+            last_user_id = 0
+            while True:
+                result = await db.execute(
+                    select(User)
+                    .join(first_touch_user_ids, first_touch_user_ids.c.user_id == User.id)
+                    .options(selectinload(User.subscription))
+                    .where(
+                        User.id > last_user_id,
+                        User.telegram_id.isnot(None),
+                    )
+                    .order_by(User.id.asc())
+                    .limit(self.BATCH_LIMIT)
+                )
+                users = list(result.scalars().all())
+                if not users:
+                    break
+
+                last_user_id = max(user.id for user in users)
+
+                for user in users:
+                    if await cold_solo_offer_service.was_touch_sent_today(db, user.id, slot.key):
+                        skipped += 1
+                        continue
+                    if await cold_solo_offer_service.has_successful_subscription_purchase(db, user):
+                        skipped += 1
+                        continue
+                    offer = await cold_solo_offer_service.get_active_offer(db, user.id)
+                    if not offer:
+                        skipped += 1
+                        continue
+
+                    message_id = await self._send_cold_solo_message(
+                        user.telegram_id,
+                        first_touch=False,
+                        offer_id=offer.id,
+                    )
+                    if message_id:
+                        sent += 1
+                        await self._record_log(
+                            slot,
+                            status="sent",
+                            user_id=user.id,
+                            telegram_id=user.telegram_id,
+                            message_id=message_id,
+                            payload={"offer_id": offer.id},
+                        )
+                    else:
+                        failed += 1
+                        await self._record_log(
+                            slot,
+                            status="failed",
+                            user_id=user.id,
+                            telegram_id=user.telegram_id,
+                            error="send_message_failed",
+                            payload={"offer_id": offer.id},
+                        )
+
+        return InteractiveNotificationResult(
+            status="processed",
+            payload={"sent": sent, "failed": failed, "skipped": skipped},
+        )
+
+    async def _send_cold_solo_message(
+        self,
+        telegram_id: int,
+        *,
+        first_touch: bool,
+        offer_id: int,
+    ) -> Optional[int]:
+        if not self.bot:
+            return None
+
+        if first_touch:
+            text = (
+                "<b>🔥 Особое предложение — только сегодня!</b>\n\n"
+                "Триал закончился, а VPN все еще нужен?\n\n"
+                "Забирай 1 год Solo за 990₽ вместо 1560₽\n"
+                "(это 82₽/мес → дешевле чашки кофе)\n\n"
+                "⏰ Это разовое предложение. Доступно до: 22:00 MSK."
+            )
+            button_text = "Забрать год Solo за 990₽"
+        else:
+            text = (
+                "<b>⏰ Осталось 2 часа</b>\n\n"
+                "1 Год Solo за 990₽ (82₽/мес) сгорит в 22:00.\n"
+                "Второго такого предложения не будет."
+            )
+            button_text = "Забрать Solo за 990₽"
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=button_text,
+                        callback_data=f"cold_solo_offer:claim:{offer_id}",
+                    )
+                ]
+            ]
+        )
 
         try:
             sent_message = await self.bot.send_message(
-                user.telegram_id,
-                self.TEST_MESSAGE,
+                telegram_id,
+                text,
+                reply_markup=keyboard,
+                parse_mode="HTML",
             )
         except Exception as exc:  # noqa: BLE001
             logger.error(
-                "Не удалось отправить тестовое интерактивное уведомление @%s: %s",
-                self.TEST_USERNAME,
+                "Не удалось отправить cold Solo offer пользователю %s: %s",
+                telegram_id,
                 exc,
             )
-            return InteractiveNotificationResult(
-                status="failed",
-                user_id=user.id,
-                telegram_id=user.telegram_id,
-                error=str(exc),
-                payload={"target_username": self.TEST_USERNAME},
-            )
+            return None
 
-        logger.info(
-            "✅ Тестовое интерактивное уведомление отправлено @%s",
-            self.TEST_USERNAME,
-        )
-        return InteractiveNotificationResult(
-            status="sent",
-            user_id=user.id,
-            telegram_id=user.telegram_id,
-            message_id=sent_message.message_id,
-            payload={"target_username": self.TEST_USERNAME},
-        )
+        return sent_message.message_id
 
     async def _record_log(
         self,

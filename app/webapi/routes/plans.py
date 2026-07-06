@@ -18,6 +18,7 @@ from app.database.crud.device_link import get_subscription_by_device_id
 from app.database.models import User
 from app.handlers.subscription.purchase import user_uses_tariffs
 from app.services.plan_pricing_service import list_active_plans, resolve_pricing_cohort
+from app.services.cold_solo_offer_service import cold_solo_offer_service
 
 from ..dependencies import get_db_session, require_api_token
 from ..schemas.plans import (
@@ -38,11 +39,45 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _build_plan_items(plans, cohort: str = "new") -> list[PlanItem]:
+async def _build_plan_items(
+    plans,
+    cohort: str = "new",
+    db: AsyncSession | None = None,
+    user: User | None = None,
+) -> list[PlanItem]:
     """Serialize plans, keeping only the price rows visible to `cohort` (rows tagged
     'all' plus the cohort's own). Defaults to 'new' — the public current catalog."""
-    return [
-        PlanItem(
+    items: list[PlanItem] = []
+    for plan in plans:
+        price_items: list[PlanPriceItem] = []
+        offer_price = None
+        if db is not None and user is not None:
+            offer_price, _ = await cold_solo_offer_service.get_price_override(
+                db,
+                user.id,
+                plan_code=plan.code,
+                period_days=cold_solo_offer_service.PERIOD_DAYS,
+            )
+
+        for p in plan.prices:
+            if getattr(p, "audience", "all") not in ("all", cohort):
+                continue
+            if offer_price is not None and p.period_days == cold_solo_offer_service.PERIOD_DAYS:
+                price_items.append(
+                    PlanPriceItem(
+                        period_days=p.period_days,
+                        price_kopeks=offer_price,
+                        original_price_kopeks=p.price_kopeks,
+                        offer_type=cold_solo_offer_service.NOTIFICATION_TYPE,
+                    )
+                )
+            else:
+                price_items.append(
+                    PlanPriceItem(period_days=p.period_days, price_kopeks=p.price_kopeks)
+                )
+
+        items.append(
+            PlanItem(
             id=plan.id,
             code=plan.code,
             display_name=plan.display_name,
@@ -54,14 +89,10 @@ def _build_plan_items(plans, cohort: str = "new") -> list[PlanItem]:
             sort_order=plan.sort_order,
             is_active=plan.is_active,
             description_md=plan.description_md,
-            prices=[
-                PlanPriceItem(period_days=p.period_days, price_kopeks=p.price_kopeks)
-                for p in plan.prices
-                if getattr(p, "audience", "all") in ("all", cohort)
-            ],
+            prices=price_items,
         )
-        for plan in plans
-    ]
+        )
+    return items
 
 
 def _build_legacy_catalog() -> LegacyCatalog:
@@ -112,7 +143,7 @@ async def list_plans(
     and gate which client features to enable for each tier.
     """
     plans = await list_active_plans(db)
-    return PlansListResponse(plans=_build_plan_items(plans))
+    return PlansListResponse(plans=await _build_plan_items(plans))
 
 
 @router.get(
@@ -162,7 +193,7 @@ async def get_tariffs_for_device(
     plans = await list_active_plans(db)
     response = ForDeviceResponse(
         user_type=user_type,
-        plans=_build_plan_items(plans, cohort),
+        plans=await _build_plan_items(plans, cohort, db=db, user=db_user),
     )
 
     if user_type == "legacy":

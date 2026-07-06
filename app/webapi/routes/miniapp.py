@@ -2472,6 +2472,29 @@ async def _build_promo_offer_models(
             return offer_type.replace("_", " ").title()
         return None
 
+    def fixed_price_fields(offer: Any) -> Dict[str, Any]:
+        extra = _extract_offer_extra(offer)
+        fields: Dict[str, Any] = {}
+        plan_code = extra.get("plan_code")
+        if isinstance(plan_code, str) and plan_code:
+            fields["plan_code"] = plan_code
+        for source_key, target_key in (
+            ("period_days", "period_days"),
+            ("price_kopeks", "price_kopeks"),
+            ("original_price_kopeks", "original_price_kopeks"),
+        ):
+            try:
+                value = int(extra.get(source_key))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                fields[target_key] = value
+        if "price_kopeks" in fields:
+            fields["price_label"] = settings.format_price(fields["price_kopeks"])
+        if "original_price_kopeks" in fields:
+            fields["original_price_label"] = settings.format_price(fields["original_price_kopeks"])
+        return fields
+
     for offer in available_offers:
         template_id = _extract_template_id(getattr(offer, "notification_type", None))
         template = await get_template(template_id)
@@ -2514,6 +2537,7 @@ async def _build_promo_offer_models(
                 message_text=message_text,
                 icon=_determine_offer_icon(offer_type, effect_type),
                 test_squads=test_squads,
+                **fixed_price_fields(offer),
             )
         )
 
@@ -2601,6 +2625,7 @@ async def _build_promo_offer_models(
                     active_discount_expires_at=expires_at,
                     active_discount_started_at=started_at,
                     active_discount_duration_seconds=duration_seconds,
+                    **fixed_price_fields(active_offer_record),
                 ),
             )
 
@@ -3913,6 +3938,9 @@ async def claim_promo_offer(
         )
 
     effect_type = _normalize_effect_type(getattr(offer, "effect_type", None))
+
+    if effect_type == "fixed_price_tariff":
+        return MiniAppPromoOfferClaimResponse(success=True, code="fixed_price_tariff_available")
 
     if effect_type == "test_access":
         success, newly_added, expires_at, error_code = await promo_offer_service.grant_test_access(

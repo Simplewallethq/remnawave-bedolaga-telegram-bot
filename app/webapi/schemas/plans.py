@@ -13,6 +13,8 @@ class PlanPriceItem(BaseModel):
     """One row of subscription_plan_prices."""
     period_days: int = Field(..., description="Billing period in days (30/90/180/360/720).")
     price_kopeks: int = Field(..., description="Absolute price in kopeks for this period.")
+    original_price_kopeks: Optional[int] = Field(default=None, description="Original price when a personal offer overrides price_kopeks.")
+    offer_type: Optional[str] = Field(default=None, description="Personal offer type that produced this price.")
 
 
 class PlanItem(BaseModel):

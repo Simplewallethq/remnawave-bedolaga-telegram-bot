@@ -133,6 +133,14 @@ class MiniAppPromoOffer(BaseModel):
     active_discount_expires_at: Optional[datetime] = None
     active_discount_started_at: Optional[datetime] = None
     active_discount_duration_seconds: Optional[int] = None
+    plan_code: Optional[str] = Field(default=None, alias="planCode")
+    period_days: Optional[int] = Field(default=None, alias="periodDays")
+    price_kopeks: Optional[int] = Field(default=None, alias="priceKopeks")
+    price_label: Optional[str] = Field(default=None, alias="priceLabel")
+    original_price_kopeks: Optional[int] = Field(default=None, alias="originalPriceKopeks")
+    original_price_label: Optional[str] = Field(default=None, alias="originalPriceLabel")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class MiniAppPromoOfferClaimRequest(BaseModel):
@@ -805,4 +813,3 @@ class MiniAppSubscriptionTrialResponse(BaseModel):
     balance_label: Optional[str] = Field(default=None, alias="balanceLabel")
 
     model_config = ConfigDict(populate_by_name=True)
-
