@@ -1502,6 +1502,39 @@ class SentNotification(Base):
     subscription = relationship("Subscription", backref="sent_notifications")
 
 
+class AndroidRateRequestClick(Base):
+    __tablename__ = "android_rate_request_clicks"
+    __table_args__ = (
+        UniqueConstraint(
+            "sent_notification_id",
+            name="uq_android_rate_request_clicks_sent_notification_id",
+        ),
+        Index("ix_android_rate_request_clicks_user_id", "user_id"),
+        Index("ix_android_rate_request_clicks_telegram_id", "telegram_id"),
+        Index("ix_android_rate_request_clicks_created_at", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    sent_notification_id = Column(
+        Integer,
+        ForeignKey("sent_notifications.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    telegram_id = Column(BigInteger, nullable=True)
+    message_id = Column(Integer, nullable=True)
+    callback_query_id = Column(String(255), nullable=True)
+    review_url = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    sent_notification = relationship("SentNotification", backref="android_rate_request_clicks")
+    user = relationship("User", backref="android_rate_request_clicks")
+
+
 class InteractiveNotificationLog(Base):
     __tablename__ = "interactive_notification_logs"
     __table_args__ = (

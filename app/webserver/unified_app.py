@@ -19,6 +19,7 @@ from app.webapi.docs import add_redoc_endpoint
 
 from . import payments
 from . import telegram
+from . import android_rate_request
 
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,7 @@ def create_unified_app(
     payments_router = payments.create_payment_router(bot, payment_service)
     if payments_router:
         app.include_router(payments_router)
+    app.include_router(android_rate_request.router)
     payment_providers_state = {
         "tribute": settings.TRIBUTE_ENABLED,
         "mulenpay": settings.is_mulenpay_enabled(),

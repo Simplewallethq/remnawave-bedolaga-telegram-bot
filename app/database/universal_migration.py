@@ -3962,6 +3962,128 @@ async def create_interactive_notification_logs_table() -> bool:
         return False
 
 
+async def create_android_rate_request_clicks_table() -> bool:
+    table_exists = await check_table_exists("android_rate_request_clicks")
+    if table_exists:
+        unique_index_exists = await check_index_exists(
+            "android_rate_request_clicks",
+            "uq_android_rate_request_clicks_sent_notification_id",
+        )
+        if not unique_index_exists:
+            try:
+                async with engine.begin() as conn:
+                    db_type = await get_database_type()
+                    if db_type in {"sqlite", "postgresql"}:
+                        await conn.execute(
+                            text(
+                                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                                "uq_android_rate_request_clicks_sent_notification_id "
+                                "ON android_rate_request_clicks(sent_notification_id)"
+                            )
+                        )
+                    elif db_type == "mysql":
+                        await conn.execute(
+                            text(
+                                "CREATE UNIQUE INDEX "
+                                "uq_android_rate_request_clicks_sent_notification_id "
+                                "ON android_rate_request_clicks(sent_notification_id)"
+                            )
+                        )
+                    else:
+                        logger.error(
+                            f"Неподдерживаемый тип БД для индекса android_rate_request_clicks: {db_type}"
+                        )
+                        return False
+                logger.info(
+                    "✅ Создан уникальный индекс uq_android_rate_request_clicks_sent_notification_id"
+                )
+            except Exception as e:
+                logger.error(
+                    "Ошибка создания уникального индекса android_rate_request_clicks: %s",
+                    e,
+                )
+                return False
+
+        logger.info("Таблица android_rate_request_clicks уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == "sqlite":
+                create_sql = """
+                CREATE TABLE android_rate_request_clicks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sent_notification_id INTEGER NULL,
+                    user_id INTEGER NULL,
+                    telegram_id BIGINT NULL,
+                    message_id INTEGER NULL,
+                    callback_query_id VARCHAR(255) NULL,
+                    review_url TEXT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (sent_notification_id) REFERENCES sent_notifications(id) ON DELETE SET NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                );
+
+                CREATE UNIQUE INDEX uq_android_rate_request_clicks_sent_notification_id ON android_rate_request_clicks(sent_notification_id);
+                CREATE INDEX ix_android_rate_request_clicks_user_id ON android_rate_request_clicks(user_id);
+                CREATE INDEX ix_android_rate_request_clicks_telegram_id ON android_rate_request_clicks(telegram_id);
+                CREATE INDEX ix_android_rate_request_clicks_created_at ON android_rate_request_clicks(created_at);
+                """
+            elif db_type == "postgresql":
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS android_rate_request_clicks (
+                    id SERIAL PRIMARY KEY,
+                    sent_notification_id INTEGER NULL REFERENCES sent_notifications(id) ON DELETE SET NULL,
+                    user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+                    telegram_id BIGINT NULL,
+                    message_id INTEGER NULL,
+                    callback_query_id VARCHAR(255) NULL,
+                    review_url TEXT NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_android_rate_request_clicks_sent_notification_id ON android_rate_request_clicks(sent_notification_id);
+                CREATE INDEX IF NOT EXISTS ix_android_rate_request_clicks_user_id ON android_rate_request_clicks(user_id);
+                CREATE INDEX IF NOT EXISTS ix_android_rate_request_clicks_telegram_id ON android_rate_request_clicks(telegram_id);
+                CREATE INDEX IF NOT EXISTS ix_android_rate_request_clicks_created_at ON android_rate_request_clicks(created_at);
+                """
+            elif db_type == "mysql":
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS android_rate_request_clicks (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    sent_notification_id INT NULL,
+                    user_id INT NULL,
+                    telegram_id BIGINT NULL,
+                    message_id INT NULL,
+                    callback_query_id VARCHAR(255) NULL,
+                    review_url TEXT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (sent_notification_id) REFERENCES sent_notifications(id) ON DELETE SET NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                );
+
+                CREATE UNIQUE INDEX uq_android_rate_request_clicks_sent_notification_id ON android_rate_request_clicks(sent_notification_id);
+                CREATE INDEX ix_android_rate_request_clicks_user_id ON android_rate_request_clicks(user_id);
+                CREATE INDEX ix_android_rate_request_clicks_telegram_id ON android_rate_request_clicks(telegram_id);
+                CREATE INDEX ix_android_rate_request_clicks_created_at ON android_rate_request_clicks(created_at);
+                """
+            else:
+                logger.error(f"Неподдерживаемый тип БД для создания android_rate_request_clicks: {db_type}")
+                return False
+
+            for statement in [s.strip() for s in create_sql.split(";") if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица android_rate_request_clicks успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы android_rate_request_clicks: {e}")
+        return False
+
+
 async def fix_subscription_duplicates_universal():
     async with engine.begin() as conn:
         db_type = await get_database_type()
@@ -6796,6 +6918,13 @@ async def run_universal_migration():
             logger.info("✅ Таблица interactive_notification_logs готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей interactive_notification_logs")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ ANDROID_RATE_REQUEST_CLICKS ===")
+        android_rate_clicks_created = await create_android_rate_request_clicks_table()
+        if android_rate_clicks_created:
+            logger.info("✅ Таблица android_rate_request_clicks готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей android_rate_request_clicks")
 
         logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ HAS_CONNECTED_TO_VPN В USERS ===")
         vpn_column_ready = await add_user_has_connected_to_vpn_column()

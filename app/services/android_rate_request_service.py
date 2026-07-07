@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, time, timedelta, timezone
 from typing import Callable, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -9,16 +10,16 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.database.crud.notification import (
     get_latest_notification_sent_at,
-    record_notification,
 )
 from app.database.crud.system_setting import upsert_system_setting
 from app.database.models import (
+    SentNotification,
     Subscription,
     SubscriptionStatus,
     SystemSetting,
-    SentNotification,
     User,
     UserDailyTrafficUsage,
     UserStatus as ModelUserStatus,
@@ -38,6 +39,43 @@ ANDROID_RATE_REQUEST_TRAFFIC_THRESHOLD_BYTES = 20 * 1024 * 1024
 ANDROID_RATE_REQUEST_REVIEW_URL = (
     "https://play.google.com/store/apps/details?id=com.leto.split&utm_source=letovpnbot"
 )
+ANDROID_RATE_REQUEST_CLICK_CALLBACK_PREFIX = "android_rate_request_click"
+ANDROID_RATE_REQUEST_CLICK_PATH = "/android-rate-request/click"
+IS_DEBUG = True
+ANDROID_RATE_REQUEST_DEBUG_TELEGRAM_ID = 5708953214
+
+
+def build_android_rate_request_callback_data(sent_notification_id: int) -> str:
+    return f"{ANDROID_RATE_REQUEST_CLICK_CALLBACK_PREFIX}:{sent_notification_id}"
+
+
+def build_android_rate_request_review_url(sent_notification_id: int) -> str:
+    parts = urlsplit(ANDROID_RATE_REQUEST_REVIEW_URL)
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key != "sent_notification_id"
+    ]
+    query.append(("sent_notification_id", str(sent_notification_id)))
+    return urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+    )
+
+
+def build_android_rate_request_tracking_url(
+    sent_notification_id: int,
+    *,
+    base_url: Optional[str] = None,
+) -> str:
+    configured_base_url = (base_url or settings.WEBHOOK_URL or "").strip().rstrip("/")
+    if not configured_base_url:
+        host = (
+            settings.WEB_API_HOST if settings.WEB_API_HOST != "0.0.0.0" else "localhost"
+        )
+        configured_base_url = f"http://{host}:{settings.WEB_API_PORT}"
+
+    query = urlencode({"sent_notification_id": str(sent_notification_id)})
+    return f"{configured_base_url}{ANDROID_RATE_REQUEST_CLICK_PATH}?{query}"
 
 
 class AndroidRateRequestService:
@@ -53,12 +91,18 @@ class AndroidRateRequestService:
             return {"skipped": True, "reason": "bot_not_available"}
 
         now_moscow = self._now_moscow()
-        if not self._is_send_window(now_moscow):
+        if IS_DEBUG:
+            logger.warning(
+                "Android rate request debug mode enabled: only telegram_id=%s will be processed",
+                ANDROID_RATE_REQUEST_DEBUG_TELEGRAM_ID,
+            )
+
+        if not IS_DEBUG and not self._is_send_window(now_moscow):
             return {"skipped": True, "reason": "outside_send_window"}
 
         run_date = now_moscow.date().isoformat()
         last_run_date = await self._get_last_run_date(db)
-        if last_run_date == run_date:
+        if not IS_DEBUG and last_run_date == run_date:
             return {
                 "skipped": True,
                 "reason": "already_processed_today",
@@ -99,15 +143,29 @@ class AndroidRateRequestService:
                     skipped += 1
                     continue
 
-                send_result = await self._send_rate_request(bot, user)
+                notification = SentNotification(
+                    user_id=user.id,
+                    subscription_id=subscription.id,
+                    notification_type=ANDROID_RATE_REQUEST_NOTIFICATION_TYPE,
+                )
+
+                try:
+                    db.add(notification)
+                    await db.flush()
+                except Exception as error:
+                    failed += 1
+                    await db.rollback()
+                    logger.error(
+                        "Failed to prepare Android rate request notification for user %s: %s",
+                        user.id,
+                        error,
+                    )
+                    continue
+
+                send_result = await self._send_rate_request(bot, user, notification.id)
                 if send_result == "sent":
                     try:
-                        await record_notification(
-                            db,
-                            user.id,
-                            subscription.id,
-                            ANDROID_RATE_REQUEST_NOTIFICATION_TYPE,
-                        )
+                        await db.commit()
                         sent += 1
                     except Exception as error:
                         failed += 1
@@ -118,8 +176,10 @@ class AndroidRateRequestService:
                             error,
                         )
                 elif send_result == "unreachable":
+                    await db.rollback()
                     unreachable += 1
                 else:
+                    await db.rollback()
                     failed += 1
 
         await upsert_system_setting(
@@ -151,6 +211,28 @@ class AndroidRateRequestService:
         after_user_id: int,
     ) -> list[Subscription]:
         now_utc_naive = self._to_utc_naive(now_moscow)
+        if IS_DEBUG:
+            result = await db.execute(
+                select(Subscription)
+                .join(User, User.id == Subscription.user_id)
+                .options(selectinload(Subscription.user))
+                .where(
+                    and_(
+                        User.telegram_id == ANDROID_RATE_REQUEST_DEBUG_TELEGRAM_ID,
+                        User.id > after_user_id,
+                    )
+                )
+                .order_by(User.id)
+                .limit(1)
+            )
+            subscriptions = list(result.scalars().unique().all())
+            if not subscriptions and after_user_id == 0:
+                logger.warning(
+                    "Android rate request debug candidate not found for telegram_id=%s",
+                    ANDROID_RATE_REQUEST_DEBUG_TELEGRAM_ID,
+                )
+            return subscriptions
+
         minimum_start_date = now_utc_naive - timedelta(days=3)
         cooldown_boundary = now_utc_naive - timedelta(days=30)
         required_dates = [
@@ -264,19 +346,23 @@ class AndroidRateRequestService:
         value = result.scalar_one_or_none()
         return value.strip() if value else None
 
-    async def _send_rate_request(self, bot, user: User) -> str:
+    async def _send_rate_request(
+        self, bot, user: User, sent_notification_id: int
+    ) -> str:
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
                         text="⭐ Оставить отзыв",
-                        url=ANDROID_RATE_REQUEST_REVIEW_URL,
+                        url=build_android_rate_request_tracking_url(
+                            sent_notification_id
+                        ),
                     )
                 ]
             ]
         )
         message = (
-            "Спасибо, что пользуешься Leto VPN ❤️\n\n"
+            "<b>Спасибо, что пользуешься Leto VPN</b> ❤️\n\n"
             "Если сервис помогает тебе оставаться на связи, пожалуйста, оцени приложение "
             "в Google Play. Это помогает нам расти и делать VPN лучше."
         )
