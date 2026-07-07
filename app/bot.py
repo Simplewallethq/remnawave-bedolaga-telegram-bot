@@ -29,6 +29,7 @@ from app.handlers import (
     common,
     feedback,
     tickets,
+    android_rate_request,
 )
 from app.handlers import polls as user_polls
 from app.handlers import simple_subscription
@@ -218,6 +219,7 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     admin_bulk_ban.register_bulk_ban_handlers(dp)
     admin_blacklist.register_blacklist_handlers(dp)
     feedback.register_handlers(dp)
+    android_rate_request.register_handlers(dp)
     common.register_handlers(dp)
     register_stars_handlers(dp)
     user_contests.register_handlers(dp)

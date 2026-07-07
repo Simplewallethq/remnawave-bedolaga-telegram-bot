@@ -6,9 +6,12 @@ from zoneinfo import ZoneInfo
 from app.services import android_rate_request_service as service_module
 from app.services.android_rate_request_service import (
     ANDROID_RATE_REQUEST_BATCH_SIZE,
+    ANDROID_RATE_REQUEST_DEBUG_TELEGRAM_ID,
     ANDROID_RATE_REQUEST_NOTIFICATION_TYPE,
     ANDROID_RATE_REQUEST_TRAFFIC_THRESHOLD_BYTES,
     AndroidRateRequestService,
+    build_android_rate_request_review_url,
+    build_android_rate_request_tracking_url,
 )
 
 
@@ -50,6 +53,21 @@ class _TrafficDb:
         return _RowsResult(self.rows)
 
 
+class _ProcessDb:
+    def __init__(self):
+        self.added = []
+        self.commit = AsyncMock()
+        self.rollback = AsyncMock()
+
+    def add(self, value):
+        self.added.append(value)
+
+    async def flush(self):
+        value = self.added[-1]
+        if getattr(value, "id", None) is None:
+            value.id = len(self.added)
+
+
 def _service_at(value: datetime) -> AndroidRateRequestService:
     return AndroidRateRequestService(now_provider=lambda: value)
 
@@ -89,16 +107,15 @@ async def test_has_required_traffic_rejects_missing_or_low_day():
 async def test_process_due_requests_sends_and_records(monkeypatch):
     now = datetime(2024, 1, 10, 21, 0, tzinfo=MOSCOW_TZ)
     service = _service_at(now)
-    db = SimpleNamespace(commit=AsyncMock())
+    db = _ProcessDb()
     bot = SimpleNamespace(send_message=AsyncMock())
     user = SimpleNamespace(id=1, telegram_id=TELEGRAM_ID)
     subscription = SimpleNamespace(id=2, user=user)
 
     service._get_last_run_date = AsyncMock(return_value=None)
     service._get_candidate_subscriptions = AsyncMock(side_effect=[[subscription], []])
-    record_notification = AsyncMock()
     upsert_system_setting = AsyncMock()
-    monkeypatch.setattr(service_module, "record_notification", record_notification)
+    monkeypatch.setattr(service_module.settings, "WEBHOOK_URL", "https://example.test")
     monkeypatch.setattr(service_module, "upsert_system_setting", upsert_system_setting)
 
     result = await service.process_due_requests(db, bot)
@@ -114,14 +131,19 @@ async def test_process_due_requests_sends_and_records(monkeypatch):
         "limit": ANDROID_RATE_REQUEST_BATCH_SIZE,
         "after_user_id": user.id,
     }
-    record_notification.assert_awaited_once_with(
-        db,
-        user.id,
-        subscription.id,
-        ANDROID_RATE_REQUEST_NOTIFICATION_TYPE,
+    notification = db.added[0]
+    assert notification.user_id == user.id
+    assert notification.subscription_id == subscription.id
+    assert notification.notification_type == ANDROID_RATE_REQUEST_NOTIFICATION_TYPE
+    reply_markup = bot.send_message.await_args.kwargs["reply_markup"]
+    button = reply_markup.inline_keyboard[0][0]
+    assert button.callback_data is None
+    assert button.url == (
+        f"https://example.test/android-rate-request/click?sent_notification_id={notification.id}"
     )
+    assert "<b>Спасибо, что пользуешься Leto VPN</b>" in bot.send_message.await_args.kwargs["text"]
     upsert_system_setting.assert_awaited_once()
-    db.commit.assert_awaited_once()
+    assert db.commit.await_count == 2
 
 
 async def test_process_due_requests_respects_daily_guard(monkeypatch):
@@ -132,7 +154,6 @@ async def test_process_due_requests_respects_daily_guard(monkeypatch):
 
     service._get_last_run_date = AsyncMock(return_value="2024-01-10")
     service._get_candidate_subscriptions = AsyncMock(return_value=[])
-    monkeypatch.setattr(service_module, "record_notification", AsyncMock())
     monkeypatch.setattr(service_module, "upsert_system_setting", AsyncMock())
 
     result = await service.process_due_requests(db, bot)
@@ -143,10 +164,31 @@ async def test_process_due_requests_respects_daily_guard(monkeypatch):
     db.commit.assert_not_awaited()
 
 
+async def test_debug_mode_ignores_send_window_and_daily_guard(monkeypatch):
+    now = datetime(2024, 1, 10, 10, 0, tzinfo=MOSCOW_TZ)
+    service = _service_at(now)
+    db = _ProcessDb()
+    bot = SimpleNamespace(send_message=AsyncMock())
+    user = SimpleNamespace(id=1, telegram_id=TELEGRAM_ID)
+    subscription = SimpleNamespace(id=2, user=user)
+
+    service._get_last_run_date = AsyncMock(return_value="2024-01-10")
+    service._get_candidate_subscriptions = AsyncMock(side_effect=[[subscription], []])
+    monkeypatch.setattr(service_module, "IS_DEBUG", True)
+    monkeypatch.setattr(service_module.settings, "WEBHOOK_URL", "https://example.test")
+    monkeypatch.setattr(service_module, "upsert_system_setting", AsyncMock())
+
+    result = await service.process_due_requests(db, bot)
+
+    assert result["sent"] == 1
+    assert result["skipped"] is False
+    bot.send_message.assert_awaited_once()
+
+
 async def test_process_due_requests_processes_all_batches(monkeypatch):
     now = datetime(2024, 1, 10, 21, 0, tzinfo=MOSCOW_TZ)
     service = _service_at(now)
-    db = SimpleNamespace(commit=AsyncMock())
+    db = _ProcessDb()
     bot = SimpleNamespace(send_message=AsyncMock())
     first_user = SimpleNamespace(id=1, telegram_id=TELEGRAM_ID)
     second_user = SimpleNamespace(id=2, telegram_id=TELEGRAM_ID)
@@ -159,8 +201,6 @@ async def test_process_due_requests_processes_all_batches(monkeypatch):
         [second_subscription],
         [],
     ])
-    record_notification = AsyncMock()
-    monkeypatch.setattr(service_module, "record_notification", record_notification)
     monkeypatch.setattr(service_module, "upsert_system_setting", AsyncMock())
 
     result = await service.process_due_requests(db, bot)
@@ -168,7 +208,7 @@ async def test_process_due_requests_processes_all_batches(monkeypatch):
     assert result["sent"] == 2
     assert result["candidates"] == 2
     assert bot.send_message.await_count == 2
-    assert record_notification.await_count == 2
+    assert len(db.added) == 2
     assert [call.kwargs["after_user_id"] for call in service._get_candidate_subscriptions.await_args_list] == [
         0,
         first_user.id,
@@ -179,7 +219,7 @@ async def test_process_due_requests_processes_all_batches(monkeypatch):
 async def test_process_due_requests_does_not_record_unreachable(monkeypatch):
     now = datetime(2024, 1, 10, 21, 0, tzinfo=MOSCOW_TZ)
     service = _service_at(now)
-    db = SimpleNamespace(commit=AsyncMock())
+    db = _ProcessDb()
     bot = SimpleNamespace(send_message=AsyncMock())
     user = SimpleNamespace(id=1, telegram_id=TELEGRAM_ID)
     subscription = SimpleNamespace(id=2, user=user)
@@ -187,29 +227,26 @@ async def test_process_due_requests_does_not_record_unreachable(monkeypatch):
     service._get_last_run_date = AsyncMock(return_value=None)
     service._get_candidate_subscriptions = AsyncMock(side_effect=[[subscription], []])
     service._send_rate_request = AsyncMock(return_value="unreachable")
-    record_notification = AsyncMock()
-    monkeypatch.setattr(service_module, "record_notification", record_notification)
     monkeypatch.setattr(service_module, "upsert_system_setting", AsyncMock())
 
     result = await service.process_due_requests(db, bot)
 
     assert result["unreachable"] == 1
     assert result["sent"] == 0
-    record_notification.assert_not_awaited()
+    db.rollback.assert_awaited_once()
 
 
 async def test_process_due_requests_logs_record_error_and_continues(monkeypatch):
     now = datetime(2024, 1, 10, 21, 0, tzinfo=MOSCOW_TZ)
     service = _service_at(now)
-    db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+    db = _ProcessDb()
+    db.commit.side_effect = [RuntimeError("db down"), None]
     bot = SimpleNamespace(send_message=AsyncMock())
     user = SimpleNamespace(id=1, telegram_id=TELEGRAM_ID)
     subscription = SimpleNamespace(id=2, user=user)
 
     service._get_last_run_date = AsyncMock(return_value=None)
     service._get_candidate_subscriptions = AsyncMock(side_effect=[[subscription], []])
-    record_notification = AsyncMock(side_effect=RuntimeError("db down"))
-    monkeypatch.setattr(service_module, "record_notification", record_notification)
     monkeypatch.setattr(service_module, "upsert_system_setting", AsyncMock())
 
     result = await service.process_due_requests(db, bot)
@@ -217,6 +254,20 @@ async def test_process_due_requests_logs_record_error_and_continues(monkeypatch)
     assert result["sent"] == 0
     assert result["failed"] == 1
     db.rollback.assert_awaited_once()
+
+
+def test_build_android_rate_request_review_url_adds_notification_id():
+    url = build_android_rate_request_review_url(123)
+
+    assert "id=com.leto.split" in url
+    assert "utm_source=letovpnbot" in url
+    assert "sent_notification_id=123" in url
+
+
+def test_build_android_rate_request_tracking_url_uses_base_url():
+    url = build_android_rate_request_tracking_url(123, base_url="https://bot.example/")
+
+    assert url == "https://bot.example/android-rate-request/click?sent_notification_id=123"
 
 
 async def test_cooldown_uses_latest_sent_notification(monkeypatch):
@@ -258,3 +309,26 @@ async def test_candidate_query_requires_android_app_usage():
     assert "users.id > 456" in captured["sql"]
     assert "LIMIT 123" in captured["sql"]
     assert "OFFSET" not in captured["sql"]
+
+
+async def test_debug_candidate_query_targets_only_debug_user(monkeypatch):
+    now = datetime(2024, 1, 10, 10, 0, tzinfo=MOSCOW_TZ)
+    service = _service_at(now)
+    captured = {}
+    monkeypatch.setattr(service_module, "IS_DEBUG", True)
+
+    class Db:
+        async def execute(self, statement):
+            captured["sql"] = str(statement.compile(compile_kwargs={"literal_binds": True}))
+            return _ScalarResult(values=[])
+
+    await service._get_candidate_subscriptions(Db(), now, limit=123, after_user_id=456)
+
+    sql = captured["sql"].lower()
+    assert f"users.telegram_id = {ANDROID_RATE_REQUEST_DEBUG_TELEGRAM_ID}" in sql
+    assert "users.id > 456" in sql
+    assert "users.has_used_mobile_app" not in sql
+    assert "user_daily_traffic_usage" not in sql
+    assert "sent_notifications" not in sql
+    assert "subscriptions.is_trial = false" in sql
+    assert "limit 1" in sql
