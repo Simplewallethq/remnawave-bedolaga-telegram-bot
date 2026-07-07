@@ -32,7 +32,7 @@ from app.database.models import (
 logger = logging.getLogger(__name__)
 
 
-IS_ARTEM_DEBUG = True
+IS_ARTEM_DEBUG = False
 ARTEM_DEBUG_USER_ID = 18835
 
 
