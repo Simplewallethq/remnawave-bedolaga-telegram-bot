@@ -23,6 +23,7 @@ from app.handlers import (
     subscription,
     balance,
     promocode,
+    rays_shop,
     referral,
     support,
     server_status,
@@ -180,6 +181,7 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     subscription.register_handlers(dp)
     balance.register_balance_handlers(dp)
     promocode.register_handlers(dp)
+    rays_shop.register_handlers(dp)
     referral.register_handlers(dp)
     support.register_handlers(dp)
     server_status.register_handlers(dp)

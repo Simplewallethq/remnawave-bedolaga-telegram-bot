@@ -71,8 +71,15 @@ class TransactionType(Enum):
 
 class RayTransactionType(Enum):
     REFERRAL_PURCHASE = "referral_purchase"  # начисление за квалифицирующую покупку реферала
-    SPEND = "spend"                          # списание (призы) — задел на будущее
+    SPEND = "spend"                          # списание (призы)
+    REFUND = "refund"                        # возврат лучей за отменённую заявку на приз
     ADJUSTMENT = "adjustment"                # ручная корректировка админом
+
+
+class RayPrizeClaimStatus(Enum):
+    PENDING = "pending"      # 🟡 В обработке — лучи зарезервированы (списаны, возврат при отмене)
+    COMPLETED = "completed"  # 🟢 Выполнено
+    CANCELLED = "cancelled"  # ⚪ Отменено — лучи возвращены
 
 
 class PromoCodeType(Enum):
@@ -1141,6 +1148,45 @@ class RayTransaction(Base):
 
     user = relationship("User", foreign_keys=[user_id])
     referral = relationship("User", foreign_keys=[referral_id])
+
+
+class RayPrizeClaim(Base):
+    """Заявка на «физический» приз Магазина Наград (техника по заявке).
+
+    Лучи списываются в момент создания заявки (spend_transaction_id) и
+    возвращаются при отмене (refund_transaction_id) — холд обратим только
+    пока заявка в статусе pending. Призы-подписки заявок не создают —
+    активируются сразу.
+    """
+    __tablename__ = "ray_prize_claims"
+
+    id = Column(Integer, primary_key=True, index=True)  # публичный «№ заявки»
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    prize_code = Column(String(32), nullable=False)    # код приза из каталога
+    prize_title = Column(String(128), nullable=False)  # название на момент заявки
+    cost_rays = Column(Integer, nullable=False)
+
+    status = Column(
+        String(20), nullable=False,
+        default=RayPrizeClaimStatus.PENDING.value, index=True,
+    )
+
+    spend_transaction_id = Column(Integer, ForeignKey("ray_transactions.id"), nullable=True)
+    refund_transaction_id = Column(Integer, ForeignKey("ray_transactions.id"), nullable=True)
+
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    completed_at = Column(DateTime, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+    spend_transaction = relationship("RayTransaction", foreign_keys=[spend_transaction_id])
+    refund_transaction = relationship("RayTransaction", foreign_keys=[refund_transaction_id])
+
+    @property
+    def is_pending(self) -> bool:
+        return self.status == RayPrizeClaimStatus.PENDING.value
 
 
 class SubscriptionConversion(Base):

@@ -22,6 +22,7 @@ async def add_user_rays(
     period_days: Optional[int] = None,
     description: Optional[str] = None,
     commit: bool = True,
+    count_lifetime: bool = True,
 ) -> Optional[RayTransaction]:
     """Начисляет лучи владельцу кошелька (рефереру) и пишет строку в журнал.
 
@@ -48,7 +49,8 @@ async def add_user_rays(
         old_balance = user.rays_balance or 0
         user.rays_balance = old_balance + amount
         # lifetime — неубывающий счётчик: растёт только на начислениях.
-        if amount > 0:
+        # Возвраты (REFUND) заработком не считаются — count_lifetime=False.
+        if amount > 0 and count_lifetime:
             user.rays_lifetime_earned = (user.rays_lifetime_earned or 0) + amount
         user.updated_at = datetime.utcnow()
 

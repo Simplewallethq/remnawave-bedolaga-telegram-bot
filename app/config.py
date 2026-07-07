@@ -176,6 +176,16 @@ class Settings(BaseSettings):
     RAYS_TIER_3_MIN_DAYS: int = 720
     RAYS_TIER_3_AMOUNT: int = 5
 
+    # Магазин Наград — обмен лучей на призы (подписки и техника по заявке).
+    RAYS_SHOP_ENABLED: bool = True
+    # HTTP(S) URL баннера (мозаика призов) для rich-экранов магазина.
+    # Rich-медиа Bot API принимает только URL — без него экраны идут без баннера.
+    RAYS_SHOP_BANNER_URL: Optional[str] = None
+    # Страница с полными условиями реферальной программы (telegraph и т.п.).
+    REFERRAL_TERMS_URL: Optional[str] = None
+    # Порог вывода реферальных денег на карту, ₽ (упоминается в текстах экрана).
+    REFERRAL_WITHDRAWAL_MIN_RUBLES: int = 3000
+
     # Конкурсы (глобальный флаг, будет расширяться под разные типы)
     CONTESTS_ENABLED: bool = False
     CONTESTS_BUTTON_VISIBLE: bool = False
@@ -1647,6 +1657,9 @@ class Settings(BaseSettings):
 
     def is_rays_program_enabled(self) -> bool:
         return bool(self.RAYS_PROGRAM_ENABLED)
+
+    def is_rays_shop_enabled(self) -> bool:
+        return self.is_rays_program_enabled() and bool(self.RAYS_SHOP_ENABLED)
 
     def get_rays_for_period(self, period_days: int) -> int:
         """Сколько лучей даёт покупка на period_days. Высший тир, которому период

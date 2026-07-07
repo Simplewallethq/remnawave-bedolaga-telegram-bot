@@ -3509,20 +3509,29 @@ def get_profile_keyboard(
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-def get_referral_keyboard(referral_link: str, invite_text: str = "", language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
+def get_referral_keyboard(
+    referral_link: str,
+    invite_text: str = "",
+    language: str = DEFAULT_LANGUAGE,
+    show_rewards_shop: bool = False,
+) -> InlineKeyboardMarkup:
     """
-    Экран 10: Реферальная программа
+    Экран 10: Пригласить друзей
     """
     texts = get_texts(language)
     url = f"tg://msg_url?url={quote(referral_link, safe='')}"
     if invite_text:
         url += f"&text={quote(invite_text, safe='')}"
 
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=texts.t("SHARE_REFERRAL_BUTTON", "📤 Поделиться ссылкой"), url=url)],
-        [InlineKeyboardButton(text=texts.t("COPY_REFERRAL_BUTTON", "📋 Скопировать ссылку"), callback_data="copy_referral_link")],
-        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
-    ])
+    rows = [
+        [InlineKeyboardButton(text=texts.t("SHARE_REFERRAL_BUTTON", "📤 Поделиться"), url=url)],
+        [InlineKeyboardButton(text=texts.t("COPY_REFERRAL_BUTTON", "📋 Скопировать"), callback_data="copy_referral_link")],
+    ]
+    if show_rewards_shop:
+        rows.append([InlineKeyboardButton(text=texts.t("RAYS_SHOP_BUTTON", "🎁 Магазин Наград"), callback_data="rays_shop")])
+    rows.append([InlineKeyboardButton(text=texts.t("REFERRAL_TO_PROFILE_BUTTON", "👤 В Профиль"), callback_data="profile")])
+    rows.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def get_balance_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     """

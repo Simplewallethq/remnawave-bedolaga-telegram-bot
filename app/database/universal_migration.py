@@ -6437,6 +6437,94 @@ async def create_ray_transactions_table() -> bool:
         return False
 
 
+async def create_ray_prize_claims_table() -> bool:
+    """Создаёт таблицу заявок на призы Магазина Наград ray_prize_claims."""
+    table_exists = await check_table_exists('ray_prize_claims')
+    if table_exists:
+        logger.info("Таблица ray_prize_claims уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE ray_prize_claims (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    prize_code VARCHAR(32) NOT NULL,
+                    prize_title VARCHAR(128) NOT NULL,
+                    cost_rays INTEGER NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    spend_transaction_id INTEGER NULL,
+                    refund_transaction_id INTEGER NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    completed_at DATETIME NULL,
+                    cancelled_at DATETIME NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id),
+                    FOREIGN KEY(spend_transaction_id) REFERENCES ray_transactions(id),
+                    FOREIGN KEY(refund_transaction_id) REFERENCES ray_transactions(id)
+                );
+                CREATE INDEX ix_ray_prize_claims_user_id ON ray_prize_claims(user_id);
+                CREATE INDEX ix_ray_prize_claims_status ON ray_prize_claims(status);
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS ray_prize_claims (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    prize_code VARCHAR(32) NOT NULL,
+                    prize_title VARCHAR(128) NOT NULL,
+                    cost_rays INTEGER NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    spend_transaction_id INTEGER NULL REFERENCES ray_transactions(id),
+                    refund_transaction_id INTEGER NULL REFERENCES ray_transactions(id),
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    completed_at TIMESTAMP NULL,
+                    cancelled_at TIMESTAMP NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_ray_prize_claims_user_id ON ray_prize_claims(user_id);
+                CREATE INDEX IF NOT EXISTS ix_ray_prize_claims_status ON ray_prize_claims(status);
+                """
+            elif db_type == 'mysql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS ray_prize_claims (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    prize_code VARCHAR(32) NOT NULL,
+                    prize_title VARCHAR(128) NOT NULL,
+                    cost_rays INT NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    spend_transaction_id INT NULL,
+                    refund_transaction_id INT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    completed_at DATETIME NULL,
+                    cancelled_at DATETIME NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id),
+                    FOREIGN KEY(spend_transaction_id) REFERENCES ray_transactions(id),
+                    FOREIGN KEY(refund_transaction_id) REFERENCES ray_transactions(id),
+                    INDEX ix_ray_prize_claims_user_id (user_id),
+                    INDEX ix_ray_prize_claims_status (status)
+                );
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица ray_prize_claims успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы ray_prize_claims: {e}")
+        return False
+
+
 async def run_universal_migration():
     logger.info("=== НАЧАЛО УНИВЕРСАЛЬНОЙ МИГРАЦИИ ===")
     
@@ -7059,6 +7147,13 @@ async def run_universal_migration():
             logger.info("✅ Таблица ray_transactions готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей ray_transactions")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ RAY_PRIZE_CLAIMS ===")
+        ray_prize_claims_ready = await create_ray_prize_claims_table()
+        if ray_prize_claims_ready:
+            logger.info("✅ Таблица ray_prize_claims готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей ray_prize_claims")
 
         async with engine.begin() as conn:
             total_subs = await conn.execute(text("SELECT COUNT(*) FROM subscriptions"))
