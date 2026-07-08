@@ -1056,7 +1056,8 @@ async def start_user_search(
         "Введите для поиска:\n"
         "• Telegram ID\n"
         "• Username (без @)\n"
-        "• Имя или фамилию\n\n"
+        "• Имя или фамилию\n"
+        "• Email\n\n"
         "Или нажмите /cancel для отмены",
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_users")]
@@ -1487,18 +1488,23 @@ async def process_user_search(
         else:
             subscription_emoji = "❌"
         
+        if user.telegram_id:
+            user_id_label = f"🆔 {user.telegram_id}"
+        else:
+            user_id_label = f"📧 {user.email}" if user.email else f"#{user.id}"
+
         button_text = f"{status_emoji} {subscription_emoji} {user.full_name}"
-        
-        button_text += f" | 🆔 {user.telegram_id}"
-        
+
+        button_text += f" | {user_id_label}"
+
         if user.balance_kopeks > 0:
             button_text += f" | 💰 {settings.format_price(user.balance_kopeks)}"
-        
+
         if len(button_text) > 60:
             short_name = user.full_name
             if len(short_name) > 15:
                 short_name = short_name[:12] + "..."
-            button_text = f"{status_emoji} {subscription_emoji} {short_name} | 🆔 {user.telegram_id}"
+            button_text = f"{status_emoji} {subscription_emoji} {short_name} | {user_id_label}"
         
         keyboard.append([
             types.InlineKeyboardButton(

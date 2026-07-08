@@ -739,9 +739,10 @@ async def get_users_list(
         conditions = [
             User.first_name.ilike(search_term),
             User.last_name.ilike(search_term),
-            User.username.ilike(search_term)
+            User.username.ilike(search_term),
+            User.email.ilike(search_term)
         ]
-        
+
         if search.isdigit():
             try:
                 search_int = int(search)
@@ -751,7 +752,7 @@ async def get_users_list(
             except ValueError:
                 # Если не удалось преобразовать в int, просто ищем по текстовым полям
                 pass
-        
+
         query = query.where(or_(*conditions))
 
     sort_flags = [
@@ -851,9 +852,10 @@ async def get_users_count(
         conditions = [
             User.first_name.ilike(search_term),
             User.last_name.ilike(search_term),
-            User.username.ilike(search_term)
+            User.username.ilike(search_term),
+            User.email.ilike(search_term)
         ]
-        
+
         if search.isdigit():
             try:
                 search_int = int(search)
@@ -863,9 +865,9 @@ async def get_users_count(
             except ValueError:
                 # Если не удалось преобразовать в int, просто ищем по текстовым полям
                 pass
-        
+
         query = query.where(or_(*conditions))
-    
+
     result = await db.execute(query)
     return result.scalar()
 
