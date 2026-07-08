@@ -1,8 +1,8 @@
 """Магазин Наград — обмен бонусных лучей ☀️ на призы.
 
-Экраны на rich-разметке Bot API 10.1 (см. app/utils/rich_message.py):
-каталог, карточка приза (покупка/нехватка), успех, «Мои заявки» с отменой.
-Плюс админ-кнопки Выполнено/Отклонить на уведомлении о новой заявке.
+Экраны на обычном Telegram HTML: каталог, карточка приза (покупка/нехватка),
+успех, «Мои заявки» с отменой. Плюс админ-кнопки Выполнено/Отклонить
+на уведомлении о новой заявке.
 """
 
 import html
@@ -25,7 +25,7 @@ from app.services.rays_shop_service import (
     get_prize_by_number,
     redeem_subscription_prize,
 )
-from app.utils.rich_message import RichScreen, show_rich_screen
+from app.utils.photo_message import edit_or_answer_photo
 from app.utils.timezone import format_local_datetime
 
 logger = logging.getLogger(__name__)
@@ -37,16 +37,19 @@ _CLAIM_STATUS_VIEW = {
 }
 
 
+_CLAIMS_DIVIDER = "──────────────"
+
+
 def _btn(text: str, callback_data: str) -> types.InlineKeyboardButton:
     return types.InlineKeyboardButton(text=text, callback_data=callback_data)
 
 
-def _rays_tier_lines(texts) -> list[str]:
-    """Строки «срок — N ☀️» из настроек тиров начисления."""
+def _rays_tier_line(texts) -> str:
+    """«3 месяца — 1 ☀️ • 1 год — 3 ☀️ • 2 года — 5 ☀️» из настроек тиров."""
     labels = {
-        90: texts.t("RAYS_TIER_LABEL_3M", "3 мес"),
-        180: texts.t("RAYS_TIER_LABEL_6M", "6 мес"),
-        360: texts.t("RAYS_TIER_LABEL_1Y", "год"),
+        90: texts.t("RAYS_TIER_LABEL_3M", "3 месяца"),
+        180: texts.t("RAYS_TIER_LABEL_6M", "6 месяцев"),
+        360: texts.t("RAYS_TIER_LABEL_1Y", "1 год"),
         720: texts.t("RAYS_TIER_LABEL_2Y", "2 года"),
     }
     tiers = sorted([
@@ -54,21 +57,9 @@ def _rays_tier_lines(texts) -> list[str]:
         (settings.RAYS_TIER_2_MIN_DAYS, settings.RAYS_TIER_2_AMOUNT),
         (settings.RAYS_TIER_3_MIN_DAYS, settings.RAYS_TIER_3_AMOUNT),
     ])
-    lines = []
-    for min_days, amount in tiers:
-        label = labels.get(min_days, f"{min_days} дн.")
-        lines.append(f"{label} — {amount} ☀️")
-    return lines
-
-
-def _shop_screen_base(texts) -> RichScreen:
-    """Общее начало экранов магазина: баннер-мозаика призов (если настроен URL)."""
-    return RichScreen().banner(settings.RAYS_SHOP_BANNER_URL)
-
-
-def _prize_line(texts, prize) -> str:
-    return texts.t("RAYS_PRIZE_LINE", "Приз: {title} — {cost} ☀️").format(
-        title=prize.title, cost=prize.cost,
+    return " • ".join(
+        f"{labels.get(min_days, f'{min_days} дн.')} — {amount} ☀️"
+        for min_days, amount in tiers
     )
 
 
@@ -85,35 +76,31 @@ async def show_rays_shop(callback: types.CallbackQuery, db_user: User, db: Async
     texts = get_texts(db_user.language)
     balance = db_user.rays_balance or 0
 
-    screen = _shop_screen_base(texts)
-    screen.details(
-        texts.t("RAYS_SHOP_WHAT_SUMMARY", "Что такое лучи? ▾"),
-        [
-            texts.t("RAYS_SHOP_WHAT_INTRO", "Начисляем лучи за друзей с длинной подпиской:"),
-            *_rays_tier_lines(texts),
-            texts.t("RAYS_SHOP_WHAT_SUBS", "Подписка на Leto VPN в призах — выгоднее цены в рублях"),
-            texts.t("RAYS_SHOP_WHAT_TECH", "Технику получаешь по заявке, поддержка уточнит доставку"),
-        ],
-    )
-    screen.heading(
-        texts.t("RAYS_SHOP_BALANCE_HEADING", "Баланс лучей: {balance} ☀️").format(balance=balance)
-    )
+    lines = [
+        texts.t("RAYS_SHOP_TITLE", "🎁 <b>Магазин наград</b>"),
+        "",
+        texts.t("RAYS_SHOP_BALANCE_LINE", "☀️ <b>Баланс:</b> {balance}").format(balance=balance),
+        "",
+        texts.t("RAYS_SHOP_EARN_HEADING", "❓ <b>Получай лучи за длинные подписки друзей:</b>"),
+        _rays_tier_line(texts),
+        "",
+        texts.t("RAYS_SHOP_PRIZES_HEADING", "🎁 <b>Призы:</b>"),
+    ]
     for prize in RAY_PRIZES:
-        screen.paragraph(
-            texts.t("RAYS_SHOP_PRIZE_ROW", "Приз №{number} · {title} — {cost} ☀️").format(
-                number=prize.number, title=prize.title, cost=prize.cost,
+        lines.append(
+            texts.t("RAYS_SHOP_PRIZE_ROW", "{cost} ☀️ — {title}").format(
+                cost=prize.cost, title=prize.catalog_title or prize.title,
             )
         )
-    screen.divider()
-    screen.paragraph(
-        texts.t("RAYS_SHOP_FOOTER", "Чтобы забрать приз, нажмите соответствующую кнопку ниже 👇")
-    )
+    lines += [
+        "",
+        texts.t("RAYS_SHOP_FOOTER", "Чтобы получить приз, нажми соответствующую кнопку ниже 👇"),
+    ]
 
-    prize_btn_tpl = texts.t("RAYS_SHOP_PRIZE_BUTTON", "Приз №{number}")
     rows = []
     for i in range(0, len(RAY_PRIZES), 2):
         rows.append([
-            _btn(prize_btn_tpl.format(number=p.number), f"rays_prize_{p.number}")
+            _btn(p.title, f"rays_prize_{p.number}")
             for p in RAY_PRIZES[i:i + 2]
         ])
     rows.append([
@@ -121,7 +108,9 @@ async def show_rays_shop(callback: types.CallbackQuery, db_user: User, db: Async
         _btn(texts.BACK, "referral"),
     ])
 
-    await show_rich_screen(callback, screen, types.InlineKeyboardMarkup(inline_keyboard=rows))
+    await edit_or_answer_photo(
+        callback, "\n".join(lines), types.InlineKeyboardMarkup(inline_keyboard=rows),
+    )
     await callback.answer()
 
 
@@ -140,69 +129,78 @@ async def show_rays_prize(callback: types.CallbackQuery, db_user: User, db: Asyn
 
 async def _show_prize_card(callback: types.CallbackQuery, db_user: User, prize, texts):
     balance = db_user.rays_balance or 0
-    screen = _shop_screen_base(texts)
 
     if balance < prize.cost:
-        screen.heading(texts.t("RAYS_NOT_ENOUGH_HEADING", "Пока не хватает лучей ☀️"))
-        screen.paragraph(_prize_line(texts, prize))
-        screen.paragraph(
-            texts.t(
-                "RAYS_NOT_ENOUGH_BALANCE",
-                "Ваш баланс: {balance} ☀️. <b>Не хватает: {missing} ☀️.</b>",
-            ).format(balance=balance, missing=prize.cost - balance)
-        )
-        screen.paragraph(
+        lines = [
+            texts.t("RAYS_NOT_ENOUGH_HEADING", "☀️ <b>Пока не хватает Лучей</b>"),
+            "",
+            texts.t("RAYS_NOT_ENOUGH_PRIZE", "🎁 {title} — {cost} ☀️").format(
+                title=prize.title, cost=prize.cost,
+            ),
+            "",
+            texts.t("RAYS_BALANCE_LINE", "Твой баланс: {balance} ☀️").format(balance=balance),
+            texts.t("RAYS_NOT_ENOUGH_MISSING", "Не хватает: {missing} ☀️").format(
+                missing=prize.cost - balance,
+            ),
+            "",
             texts.t(
                 "RAYS_NOT_ENOUGH_CTA",
-                "Приглашайте друзей с подпиской от 3 месяцев — и лучи накопятся 🙂",
-            )
-        )
+                "Приглашай друзей с длинной подпиской — и Лучи накопятся 🙂",
+            ),
+        ]
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [_btn(texts.t("RAYS_INVITE_FRIENDS_BUTTON", "🤝 Пригласить друзей"), "referral")],
+            [_btn(texts.t("RAYS_INVITE_FRIENDS_BUTTON", "👥 Пригласить друзей"), "referral")],
             [_btn(texts.BACK, "rays_shop")],
         ])
-        await show_rich_screen(callback, screen, keyboard)
+        await edit_or_answer_photo(callback, "\n".join(lines), keyboard)
         await callback.answer()
         return
 
     remainder = balance - prize.cost
-    balance_line = texts.t(
-        "RAYS_PRIZE_BALANCE_LINE",
-        "Ваш баланс: {balance} ☀️. <b>Остаток после покупки: {remainder} ☀️.</b>",
-    ).format(balance=balance, remainder=remainder)
+    cost_line = texts.t("RAYS_PRIZE_COST_LINE", "Стоимость: {cost} ☀️").format(cost=prize.cost)
+    balance_line = texts.t("RAYS_BALANCE_LINE", "Твой баланс: {balance} ☀️").format(balance=balance)
 
     if prize.kind == PRIZE_KIND_SUBSCRIPTION:
-        screen.heading(
-            texts.t("RAYS_PRIZE_SUB_HEADING", "Получить {plan} на {period}").format(
+        lines = [
+            texts.t("RAYS_PRIZE_SUB_HEADING", "⚡ <b>Получить {plan} на {period}</b>").format(
                 plan=prize.plan_title, period=prize.period_label,
-            )
-        )
-        screen.paragraph(_prize_line(texts, prize))
-        screen.paragraph(balance_line)
-        screen.paragraph(
-            texts.t("RAYS_PRIZE_SUB_NOTE", "⚡ Подписка активируется сразу после подтверждения.")
-        )
+            ),
+            "",
+            cost_line,
+            balance_line,
+            texts.t(
+                "RAYS_PRIZE_SUB_REMAINDER", "После активации останется: {remainder} ☀️",
+            ).format(remainder=remainder),
+            "",
+            texts.t("RAYS_PRIZE_SUB_NOTE", "Подписка активируется сразу после подтверждения."),
+        ]
         confirm_text = texts.t("RAYS_PRIZE_SUB_CONFIRM_BUTTON", "⚡ Активировать подписку")
     else:
-        screen.heading(
-            texts.t("RAYS_PRIZE_TECH_HEADING", "Заказать {title}").format(title=prize.title)
-        )
-        screen.paragraph(_prize_line(texts, prize))
-        screen.paragraph(balance_line)
-        screen.paragraph(
+        lines = [
+            texts.t("RAYS_PRIZE_TECH_HEADING", "📦 <b>Заказать {title}</b>").format(
+                title=prize.title,
+            ),
+            "",
+            cost_line,
+            balance_line,
+            texts.t(
+                "RAYS_PRIZE_TECH_REMAINDER", "После оформления останется: {remainder} ☀️",
+            ).format(remainder=remainder),
+            "",
             texts.t(
                 "RAYS_PRIZE_TECH_NOTE",
-                "📦 Лучи спишутся сейчас. Поддержка свяжется, чтобы уточнить доставку. "
-                "Статус — в «Мои заявки».",
-            )
-        )
-        confirm_text = texts.t("RAYS_PRIZE_TECH_CONFIRM_BUTTON", "📦 Оформить заявку")
+                "Лучи спишутся сразу.\n"
+                "Поддержка свяжется для уточнения доставки.\n"
+                "Статус заявки можно посмотреть в разделе «Мои заявки».",
+            ),
+        ]
+        confirm_text = texts.t("RAYS_PRIZE_TECH_CONFIRM_BUTTON", "✅ Оформить заявку")
 
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
         [_btn(confirm_text, f"rays_prize_confirm_{prize.number}")],
         [_btn(texts.BACK, "rays_shop")],
     ])
-    await show_rich_screen(callback, screen, keyboard)
+    await edit_or_answer_photo(callback, "\n".join(lines), keyboard)
     await callback.answer()
 
 
@@ -229,27 +227,24 @@ async def confirm_rays_prize(callback: types.CallbackQuery, db_user: User, db: A
             )
             return
 
-        screen = _shop_screen_base(texts)
-        screen.heading(texts.t("RAYS_SUB_SUCCESS_HEADING", "Готово! ⚡"))
-        screen.paragraph(
-            texts.t("RAYS_SUB_SUCCESS_TITLE", "<b>{plan} на {period} активирован.</b>").format(
+        lines = [
+            texts.t("RAYS_SUB_SUCCESS_HEADING", "✅ <b>Готово!</b>"),
+            "",
+            texts.t("RAYS_SUB_SUCCESS_TITLE", "{plan} на {period} активирован.").format(
                 plan=prize.plan_title, period=prize.period_label,
-            )
-        )
-        screen.paragraph(
-            texts.t("RAYS_SUB_SUCCESS_NOTE", "Подписка уже работает на ваших устройствах.")
-        )
-        screen.paragraph(
-            texts.t(
-                "RAYS_SUB_SUCCESS_BALANCE",
-                "Списано: {cost} ☀️. <b>Остаток: {remainder} ☀️.</b>",
-            ).format(cost=prize.cost, remainder=db_user.rays_balance or 0)
-        )
+            ),
+            texts.t("RAYS_SUB_SUCCESS_NOTE", "Подписка уже работает."),
+            "",
+            texts.t("RAYS_SPENT_LINE", "Списано: {cost} ☀️").format(cost=prize.cost),
+            texts.t("RAYS_REMAINDER_LINE", "Осталось: {remainder} ☀️").format(
+                remainder=db_user.rays_balance or 0,
+            ),
+        ]
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
             [_btn(texts.t("RAYS_TO_SHOP_BUTTON", "🎁 В магазин"), "rays_shop")],
             [_btn(texts.t("RAYS_TO_MAIN_MENU_BUTTON", "🏠 В главное меню"), "main_menu")],
         ])
-        await show_rich_screen(callback, screen, keyboard)
+        await edit_or_answer_photo(callback, "\n".join(lines), keyboard)
         await callback.answer()
         return
 
@@ -261,36 +256,34 @@ async def confirm_rays_prize(callback: types.CallbackQuery, db_user: User, db: A
         )
         return
 
-    screen = _shop_screen_base(texts)
-    screen.heading(texts.t("RAYS_CLAIM_SUCCESS_HEADING", "Заявка создана ✅"))
-    screen.paragraph(
-        texts.t("RAYS_CLAIM_SUCCESS_TITLE", "<b>{title} — заявка №{claim_id}.</b>").format(
+    lines = [
+        texts.t("RAYS_CLAIM_SUCCESS_HEADING", "✅ <b>Заявка создана</b>"),
+        "",
+        texts.t("RAYS_CLAIM_SUCCESS_TITLE", "<b>{title}</b>\nЗаявка №{claim_id}").format(
             title=prize.title, claim_id=claim.id,
-        )
-    )
-    screen.paragraph(
+        ),
+        "",
         texts.t(
             "RAYS_CLAIM_SUCCESS_NOTE",
-            "Поддержка свяжется в течение 1–2 дней, чтобы уточнить доставку.",
-        )
-    )
-    screen.paragraph(
-        texts.t(
-            "RAYS_CLAIM_SUCCESS_BALANCE",
-            "Зарезервировано: {cost} ☀️. <b>Остаток: {remainder} ☀️.</b>",
-        ).format(cost=prize.cost, remainder=db_user.rays_balance or 0)
-    )
-    screen.paragraph(
+            "Поддержка свяжется в течение 1–2 дней для уточнения доставки.",
+        ),
+        "",
+        texts.t("RAYS_SPENT_LINE", "Списано: {cost} ☀️").format(cost=prize.cost),
+        texts.t("RAYS_REMAINDER_LINE", "Осталось: {remainder} ☀️").format(
+            remainder=db_user.rays_balance or 0,
+        ),
+        "",
         texts.t(
             "RAYS_CLAIM_SUCCESS_REFUND_NOTE",
-            "Если не получится оформить — лучи вернём. Статус — в «Мои заявки».",
-        )
-    )
+            "Если оформить доставку не получится, Лучи будут возвращены.\n"
+            "Статус можно посмотреть в разделе «Мои заявки».",
+        ),
+    ]
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
         [_btn(texts.t("RAYS_MY_CLAIMS_BUTTON", "📦 Мои заявки"), "rays_claims")],
         [_btn(texts.t("RAYS_TO_SHOP_BUTTON", "🎁 В магазин"), "rays_shop")],
     ])
-    await show_rich_screen(callback, screen, keyboard)
+    await edit_or_answer_photo(callback, "\n".join(lines), keyboard)
     await callback.answer()
 
 
@@ -299,16 +292,15 @@ async def show_rays_claims(callback: types.CallbackQuery, db_user: User, db: Asy
     texts = get_texts(db_user.language)
     claims = await get_user_claims(db, db_user.id)
 
-    screen = _shop_screen_base(texts)
-    screen.heading(texts.t("RAYS_CLAIMS_HEADING", "Мои заявки"))
+    lines = [texts.t("RAYS_CLAIMS_HEADING", "📦 <b>Мои заявки</b>"), ""]
 
     rows: list[list[types.InlineKeyboardButton]] = []
 
     if not claims:
-        screen.paragraph(
+        lines.append(
             texts.t(
                 "RAYS_CLAIMS_EMPTY",
-                "У вас пока нет заявок. Накопите лучи и закажите приз в магазине 🎁",
+                "У тебя пока нет заявок.\nНакопи ☀️ Лучи и выбери приз в Магазине наград 🎁",
             )
         )
     else:
@@ -317,17 +309,17 @@ async def show_rays_claims(callback: types.CallbackQuery, db_user: User, db: Asy
                 claim.status, ("⚪", "RAYS_CLAIM_STATUS_CANCELLED", "Отменено"),
             )
             if index:
-                screen.divider()
-            screen.paragraph(
-                f"<b>{emoji} №{claim.id} · {html.escape(claim.prize_title)} — {claim.cost_rays} ☀️</b>"
+                lines.append(_CLAIMS_DIVIDER)
+            lines.append(
+                f"{emoji} №{claim.id} • {html.escape(claim.prize_title)} • {claim.cost_rays} ☀️"
             )
             date_str = format_local_datetime(claim.created_at, "%d.%m")
-            screen.paragraph(f"{texts.t(status_key, status_default)} · {date_str}")
+            lines.append(f"{texts.t(status_key, status_default)} • {date_str}")
 
             if claim.is_pending:
                 rows.append([
                     _btn(
-                        texts.t("RAYS_CLAIM_CANCEL_BUTTON", "✖️ Отменить №{claim_id}").format(
+                        texts.t("RAYS_CLAIM_CANCEL_BUTTON", "❌ Отменить №{claim_id}").format(
                             claim_id=claim.id,
                         ),
                         f"rays_claim_cancel_{claim.id}",
@@ -338,7 +330,9 @@ async def show_rays_claims(callback: types.CallbackQuery, db_user: User, db: Asy
         _btn(texts.t("RAYS_TO_SHOP_BUTTON", "🎁 В магазин"), "rays_shop"),
         _btn(texts.BACK, "referral"),
     ])
-    await show_rich_screen(callback, screen, types.InlineKeyboardMarkup(inline_keyboard=rows))
+    await edit_or_answer_photo(
+        callback, "\n".join(lines), types.InlineKeyboardMarkup(inline_keyboard=rows),
+    )
     await callback.answer()
 
 
@@ -353,22 +347,20 @@ async def ask_cancel_rays_claim(callback: types.CallbackQuery, db_user: User, db
         )
         return
 
-    screen = _shop_screen_base(texts)
-    screen.heading(
-        texts.t("RAYS_CLAIM_CANCEL_HEADING", "Отменить заявку на {title}?").format(
+    lines = [
+        texts.t("RAYS_CLAIM_CANCEL_HEADING", "<b>Отменить заявку на {title}?</b>").format(
             title=html.escape(claim.prize_title),
-        )
-    )
-    screen.paragraph(
+        ),
+        "",
         texts.t(
-            "RAYS_CLAIM_CANCEL_NOTE", "Лучи ({cost} ☀️) вернутся на баланс.",
-        ).format(cost=claim.cost_rays)
-    )
+            "RAYS_CLAIM_CANCEL_NOTE", "{cost} ☀️ будут возвращены на баланс.",
+        ).format(cost=claim.cost_rays),
+    ]
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[[
         _btn(texts.t("YES_BUTTON", "✅ Да"), f"rays_claim_cancel_yes_{claim.id}"),
-        _btn(texts.t("NO_BUTTON", "✖️ Нет"), "rays_claims"),
+        _btn(texts.t("NO_BUTTON", "❌ Нет"), "rays_claims"),
     ]])
-    await show_rich_screen(callback, screen, keyboard)
+    await edit_or_answer_photo(callback, "\n".join(lines), keyboard)
     await callback.answer()
 
 

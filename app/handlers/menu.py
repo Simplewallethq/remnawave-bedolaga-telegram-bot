@@ -55,7 +55,6 @@ from app.services.public_offer_service import PublicOfferService
 from app.services.faq_service import FaqService
 from app.utils.timezone import format_local_datetime
 from app.utils.pricing_utils import format_period_description
-from app.utils.rich_message import RichScreen, show_rich_screen
 from app.utils.user_utils import get_effective_referral_commission_percent
 from app.handlers.subscription.traffic import handle_add_traffic, add_traffic
 
@@ -1527,7 +1526,7 @@ async def handle_profile(callback: types.CallbackQuery, db_user: User, db: Async
     await callback.answer()
 
 async def handle_referral(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
-    """Экран «Пригласить друзей» на rich-разметке Bot API 10.1."""
+    """Экран «Пригласить друзей»."""
     texts = get_texts(db_user.language)
     stats = await get_user_referral_stats(db, db_user.id)
 
@@ -1541,75 +1540,61 @@ async def handle_referral(callback: types.CallbackQuery, db_user: User, db: Asyn
     bot = await callback.bot.get_me()
     referral_link = f"https://t.me/{bot.username}?start={db_user.referral_code}"
 
-    screen = RichScreen()
     if rays_enabled:
-        screen.pullquote(
-            texts.t(
-                "REFERRAL_RICH_PULLQUOTE",
-                "<b>Получай {percent}% </b>с платежей друзей на карту + лучи на призы 🎁",
-            ).format(percent=percent)
-        )
+        header = texts.t(
+            "REFERRAL_HEADER",
+            "💸 <b>Получай {percent}% с платежей друзей + ☀️ Лучи на призы</b>",
+        ).format(percent=percent)
     else:
-        screen.pullquote(
-            texts.t(
-                "REFERRAL_RICH_PULLQUOTE_NO_RAYS",
-                "<b>Получай {percent}% </b>с платежей друзей на карту",
-            ).format(percent=percent)
-        )
-    screen.paragraph(
-        texts.t("REFERRAL_RICH_INVITED", "<b>Приглашено друзей: {count}</b>").format(count=count)
-    )
-    screen.paragraph(
-        texts.t(
-            "REFERRAL_RICH_EARNED",
-            "<b>Заработано: {amount} ₽ </b>— на балансе в Профиле",
-        ).format(amount=amount)
-    )
-    if rays_enabled:
-        screen.paragraph(
-            texts.t(
-                "REFERRAL_RICH_RAYS",
-                "<b>Бонусные лучи: {rays} ☀️ </b>— копятся за подписки друзей",
-            ).format(rays=rays)
-        )
-    screen.divider()
-    screen.heading(texts.t("REFERRAL_RICH_LINK_HEADING", "Твоя ссылка"))
-    screen.paragraph(f"<code>{referral_link}</code>")
+        header = texts.t(
+            "REFERRAL_HEADER_NO_RAYS",
+            "💸 <b>Получай {percent}% с платежей друзей</b>",
+        ).format(percent=percent)
 
-    how_items = [
-        texts.t(
-            "REFERRAL_RICH_HOW_COMMISSION",
-            "Получай {percent}% со всех платежей друзей — деньгами на баланс "
-            "(вывод на карту от {min_withdrawal}₽)",
-        ).format(percent=percent, min_withdrawal=settings.REFERRAL_WITHDRAWAL_MIN_RUBLES),
+    lines = [
+        header,
+        "",
+        texts.t("REFERRAL_INVITED_LINE", "👥 <b>Приглашено друзей:</b> {count}").format(count=count),
+        texts.t("REFERRAL_EARNED_LINE", "💰 <b>Заработано:</b> {amount} ₽").format(amount=amount),
     ]
     if rays_enabled:
-        how_items.append(
-            texts.t(
-                "REFERRAL_RICH_HOW_RAYS",
-                "За друзей с подпиской от 3 месяцев капают бонусные лучи ☀️",
-            )
+        lines.append(texts.t("REFERRAL_RAYS_LINE", "☀️ <b>Лучей:</b> {rays}").format(rays=rays))
+    lines += [
+        "",
+        "<blockquote>"
+        + texts.t("REFERRAL_LINK_QUOTE", "🔗 Твоя ссылка\n{link}").format(link=referral_link)
+        + "</blockquote>",
+        "",
+        texts.t("REFERRAL_HOW_HEADING", "❓ <b>Как это работает</b>"),
+        texts.t(
+            "REFERRAL_HOW_COMMISSION",
+            "• Получай {percent}% со <b>всех</b> платежей друзей",
+        ).format(percent=percent),
+        texts.t(
+            "REFERRAL_HOW_BALANCE",
+            "• Деньги идут на баланс (вывод на карту от {min_withdrawal}₽)",
+        ).format(min_withdrawal=settings.REFERRAL_WITHDRAWAL_MIN_RUBLES),
+    ]
+    if rays_enabled:
+        lines.append(
+            texts.t("REFERRAL_HOW_RAYS", "• За друзей с подпиской от 3 мес. начисляются ☀️ Лучи")
         )
-        how_items.append(
-            texts.t(
-                "REFERRAL_RICH_HOW_SHOP",
-                "Лучи меняешь на ценные призы в Магазине Наград",
-            )
+        lines.append(
+            texts.t("REFERRAL_HOW_SHOP", "• Лучи можно обменять на призы в Магазине наград")
         )
-    screen.details(texts.t("REFERRAL_RICH_HOW_SUMMARY", "Как это работает? ▾"), how_items)
-
     if settings.REFERRAL_TERMS_URL:
-        screen.paragraph(
+        lines += [
+            "",
             f'<a href="{settings.REFERRAL_TERMS_URL}">'
-            + texts.t("REFERRAL_RICH_TERMS_LINK", "Полные условия программы →")
-            + "</a>"
-        )
+            + texts.t("REFERRAL_TERMS_LINK", "📖 Полные условия программы →")
+            + "</a>",
+        ]
 
     invite_text = texts.t("REFERRAL_INVITE_TEXT", "🔥 Лови 3 дня бесплатного VPN!\n{link}").format(link=referral_link)
 
-    await show_rich_screen(
+    await edit_or_answer_photo(
         callback,
-        screen,
+        "\n".join(lines),
         get_referral_keyboard(
             referral_link,
             invite_text,

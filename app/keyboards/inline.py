@@ -1,7 +1,7 @@
 from typing import List, Optional
 from urllib.parse import quote
 from aiogram import types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CopyTextButton, InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timezone
 from app.database.models import User
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -3524,11 +3524,14 @@ def get_referral_keyboard(
         url += f"&text={quote(invite_text, safe='')}"
 
     rows = [
-        [InlineKeyboardButton(text=texts.t("SHARE_REFERRAL_BUTTON", "📤 Поделиться"), url=url)],
-        [InlineKeyboardButton(text=texts.t("COPY_REFERRAL_BUTTON", "📋 Скопировать"), callback_data="copy_referral_link")],
+        [InlineKeyboardButton(text=texts.t("SHARE_REFERRAL_BUTTON", "📤 Поделиться ссылкой"), url=url)],
+        [InlineKeyboardButton(
+            text=texts.t("COPY_REFERRAL_BUTTON", "📋 Скопировать ссылку"),
+            copy_text=CopyTextButton(text=referral_link),
+        )],
     ]
     if show_rewards_shop:
-        rows.append([InlineKeyboardButton(text=texts.t("RAYS_SHOP_BUTTON", "🎁 Магазин Наград"), callback_data="rays_shop")])
+        rows.append([InlineKeyboardButton(text=texts.t("RAYS_SHOP_BUTTON", "🎁 Магазин наград"), callback_data="rays_shop")])
     rows.append([InlineKeyboardButton(text=texts.t("REFERRAL_TO_PROFILE_BUTTON", "👤 В Профиль"), callback_data="profile")])
     rows.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

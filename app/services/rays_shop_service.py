@@ -46,9 +46,10 @@ PRIZE_KIND_PHYSICAL = "physical"
 class RayPrize:
     number: int          # № приза в каталоге (и суффикс callback'ов)
     code: str
-    title: str           # короткое имя для каталога: «Plus 6 мес»
+    title: str           # короткое имя для кнопок и заявок: «Plus 6 мес»
     cost: int            # цена в лучах
     kind: str            # PRIZE_KIND_*
+    catalog_title: str = ""             # полное имя в каталоге: «AirPods 4»
     plan_code: Optional[str] = None     # для подписок: код SubscriptionPlan
     period_days: Optional[int] = None   # для подписок: срок
     period_label: Optional[str] = None  # «6 месяцев» — для заголовков/успеха
@@ -57,16 +58,24 @@ class RayPrize:
 
 RAY_PRIZES: Tuple[RayPrize, ...] = (
     RayPrize(1, "plus_6m", "Plus 6 мес", 3, PRIZE_KIND_SUBSCRIPTION,
+             catalog_title="Подписка Plus • 6 месяцев",
              plan_code="plus", period_days=180, period_label="6 месяцев", plan_title="Plus"),
     RayPrize(2, "pro_1y", "Pro 1 год", 9, PRIZE_KIND_SUBSCRIPTION,
+             catalog_title="Подписка Pro • 1 год",
              plan_code="pro", period_days=360, period_label="1 год", plan_title="Pro"),
     RayPrize(3, "pro_2y", "Pro 2 года", 15, PRIZE_KIND_SUBSCRIPTION,
+             catalog_title="Подписка Pro • 2 года",
              plan_code="pro", period_days=720, period_label="2 года", plan_title="Pro"),
-    RayPrize(4, "speaker", "Колонка", 50, PRIZE_KIND_PHYSICAL),
-    RayPrize(5, "airpods", "AirPods", 100, PRIZE_KIND_PHYSICAL),
-    RayPrize(6, "watch", "Apple Watch", 300, PRIZE_KIND_PHYSICAL),
-    RayPrize(7, "iphone", "iPhone", 700, PRIZE_KIND_PHYSICAL),
-    RayPrize(8, "macbook", "MacBook", 1000, PRIZE_KIND_PHYSICAL),
+    RayPrize(4, "speaker", "Колонка", 50, PRIZE_KIND_PHYSICAL,
+             catalog_title="Колонка JBL Flip 7"),
+    RayPrize(5, "airpods", "AirPods", 100, PRIZE_KIND_PHYSICAL,
+             catalog_title="AirPods 4"),
+    RayPrize(6, "watch", "Apple Watch", 300, PRIZE_KIND_PHYSICAL,
+             catalog_title="Apple Watch SE (2nd Gen, GPS 40 мм)"),
+    RayPrize(7, "iphone", "iPhone", 700, PRIZE_KIND_PHYSICAL,
+             catalog_title="iPhone 16 (128 GB)"),
+    RayPrize(8, "macbook", "MacBook", 1000, PRIZE_KIND_PHYSICAL,
+             catalog_title='MacBook Air 13" (M4, 16 GB / 256 GB)'),
 )
 
 
