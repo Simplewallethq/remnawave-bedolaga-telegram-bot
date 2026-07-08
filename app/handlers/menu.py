@@ -1561,9 +1561,7 @@ async def handle_referral(callback: types.CallbackQuery, db_user: User, db: Asyn
         lines.append(texts.t("REFERRAL_RAYS_LINE", "☀️ <b>Лучей:</b> {rays}").format(rays=rays))
     lines += [
         "",
-        "<blockquote>"
-        + texts.t("REFERRAL_LINK_QUOTE", "🔗 Твоя ссылка\n{link}").format(link=referral_link)
-        + "</blockquote>",
+        texts.t("REFERRAL_LINK_QUOTE", "🔗 Твоя ссылка\n<code>{link}</code>").format(link=referral_link),
         "",
         texts.t("REFERRAL_HOW_HEADING", "❓ <b>Как это работает</b>"),
         texts.t(
