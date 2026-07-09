@@ -19,7 +19,7 @@ from app.database.models import DiscountOffer, User, UserStatus
 logger = logging.getLogger(__name__)
 
 
-IS_ARTEM_DEBUG = True
+IS_ARTEM_DEBUG = False
 ARTEM_DEBUG_USER_ID = 18835
 
 
@@ -85,31 +85,31 @@ class LegacyProOfferService:
 
     OFFER_EXPIRES_AT_MSK = datetime(2026, 8, 1, 23, 59, 59, tzinfo=MSK_TZ)
 
-    AC_SCHEDULE = (
-        # (AC_SLOT_1, datetime(2026, 7, 9, 11, 20, tzinfo=MSK_TZ)),
-        # (AC_SLOT_2, datetime(2026, 7, 9, 11, 25, tzinfo=MSK_TZ)),
-        # (AC_SLOT_3, datetime(2026, 7, 9, 11, 30, tzinfo=MSK_TZ)),
-        # (AC_SLOT_4, datetime(2026, 7, 9, 11, 35, tzinfo=MSK_TZ)),
-    )
-    B_SCHEDULE = (
-        (B_SLOT_1, datetime(2026, 7, 9, 12, 7, tzinfo=MSK_TZ)),
-        (B_SLOT_2, datetime(2026, 7, 9, 12, 8, tzinfo=MSK_TZ)),
-        (B_SLOT_3, datetime(2026, 7, 9, 12, 9, tzinfo=MSK_TZ)),
-        (B_SLOT_4, datetime(2026, 7, 9, 12, 10, tzinfo=MSK_TZ)),
-    )
-
     # AC_SCHEDULE = (
-    #     (AC_SLOT_1, datetime(2026, 7, 9, 13, 30, tzinfo=MSK_TZ)),
-    #     (AC_SLOT_2, datetime(2026, 7, 17, 21, 30, tzinfo=MSK_TZ)),
-    #     (AC_SLOT_3, datetime(2026, 7, 24, 21, 30, tzinfo=MSK_TZ)),
-    #     (AC_SLOT_4, datetime(2026, 7, 30, 21, 30, tzinfo=MSK_TZ)),
+    #     # (AC_SLOT_1, datetime(2026, 7, 9, 11, 20, tzinfo=MSK_TZ)),
+    #     # (AC_SLOT_2, datetime(2026, 7, 9, 11, 25, tzinfo=MSK_TZ)),
+    #     # (AC_SLOT_3, datetime(2026, 7, 9, 11, 30, tzinfo=MSK_TZ)),
+    #     # (AC_SLOT_4, datetime(2026, 7, 9, 11, 35, tzinfo=MSK_TZ)),
     # )
     # B_SCHEDULE = (
-    #     (B_SLOT_1, datetime(2026, 7, 9, 13, 30, tzinfo=MSK_TZ)),
-    #     (B_SLOT_2, datetime(2026, 7, 17, 21, 30, tzinfo=MSK_TZ)),
-    #     (B_SLOT_3, datetime(2026, 7, 24, 21, 30, tzinfo=MSK_TZ)),
-    #     (B_SLOT_4, datetime(2026, 7, 30, 21, 30, tzinfo=MSK_TZ)),
+    #     (B_SLOT_1, datetime(2026, 7, 9, 12, 7, tzinfo=MSK_TZ)),
+    #     (B_SLOT_2, datetime(2026, 7, 9, 12, 8, tzinfo=MSK_TZ)),
+    #     (B_SLOT_3, datetime(2026, 7, 9, 12, 9, tzinfo=MSK_TZ)),
+    #     (B_SLOT_4, datetime(2026, 7, 9, 12, 10, tzinfo=MSK_TZ)),
     # )
+
+    AC_SCHEDULE = (
+        (AC_SLOT_1, datetime(2026, 7, 9, 13, 30, tzinfo=MSK_TZ)),
+        (AC_SLOT_2, datetime(2026, 7, 17, 21, 30, tzinfo=MSK_TZ)),
+        (AC_SLOT_3, datetime(2026, 7, 24, 21, 30, tzinfo=MSK_TZ)),
+        (AC_SLOT_4, datetime(2026, 7, 30, 21, 30, tzinfo=MSK_TZ)),
+    )
+    B_SCHEDULE = (
+        (B_SLOT_1, datetime(2026, 7, 9, 13, 30, tzinfo=MSK_TZ)),
+        (B_SLOT_2, datetime(2026, 7, 17, 21, 30, tzinfo=MSK_TZ)),
+        (B_SLOT_3, datetime(2026, 7, 24, 21, 30, tzinfo=MSK_TZ)),
+        (B_SLOT_4, datetime(2026, 7, 30, 21, 30, tzinfo=MSK_TZ)),
+    )
 
     AC_MESSAGES = {
         AC_SLOT_1: LegacyProOfferMessage(
