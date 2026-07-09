@@ -92,10 +92,10 @@ class LegacyProOfferService:
         (AC_SLOT_4, datetime(2026, 7, 9, 11, 35, tzinfo=MSK_TZ)),
     )
     B_SCHEDULE = (
-        (B_SLOT_1, datetime(2026, 7, 9, 11, 36, tzinfo=MSK_TZ)),
-        (B_SLOT_2, datetime(2026, 7, 9, 11, 40, tzinfo=MSK_TZ)),
-        (B_SLOT_3, datetime(2026, 7, 9, 11, 45, tzinfo=MSK_TZ)),
-        (B_SLOT_4, datetime(2026, 7, 9, 11, 50, tzinfo=MSK_TZ)),
+        (B_SLOT_1, datetime(2026, 7, 9, 11, 55, tzinfo=MSK_TZ)),
+        (B_SLOT_2, datetime(2026, 7, 9, 11, 56, tzinfo=MSK_TZ)),
+        (B_SLOT_3, datetime(2026, 7, 9, 11, 57, tzinfo=MSK_TZ)),
+        (B_SLOT_4, datetime(2026, 7, 9, 11, 58, tzinfo=MSK_TZ)),
     )
 
     # AC_SCHEDULE = (
