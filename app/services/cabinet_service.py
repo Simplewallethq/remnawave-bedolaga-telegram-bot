@@ -26,6 +26,7 @@ from app.services.plan_pricing_service import (
     list_active_plans,
 )
 from app.services.cold_solo_offer_service import cold_solo_offer_service
+from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.remnawave_service import RemnaWaveService
 from app.utils.subscription_utils import (
     convert_subscription_link_to_happ_scheme,
@@ -165,6 +166,25 @@ async def _serialize_plan(
             }
             payload["yearPriceKopeks"] = offer_price
             payload["yearPriceRub"] = round(offer_price / 100)
+        else:
+            offer_price, offer = await legacy_pro_offer_service.get_price_override(
+                db,
+                user.id,
+                plan_code=plan.code,
+                period_days=legacy_pro_offer_service.PERIOD_DAYS,
+            )
+            if offer_price is not None and offer is not None:
+                payload["activeOffer"] = {
+                    "type": getattr(offer, "notification_type", None),
+                    "periodDays": legacy_pro_offer_service.PERIOD_DAYS,
+                    "priceKopeks": offer_price,
+                    "priceRub": round(offer_price / 100),
+                    "originalPriceKopeks": legacy_pro_offer_service.ORIGINAL_PRICE_KOPEKS,
+                    "originalPriceRub": round(legacy_pro_offer_service.ORIGINAL_PRICE_KOPEKS / 100),
+                    "expiresAt": offer.expires_at.isoformat() if offer.expires_at else None,
+                }
+                payload["yearPriceKopeks"] = offer_price
+                payload["yearPriceRub"] = round(offer_price / 100)
 
     return payload
 

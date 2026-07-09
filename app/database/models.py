@@ -711,6 +711,7 @@ class User(Base):
     promo_offer_discount_percent = Column(Integer, nullable=False, default=0)
     promo_offer_discount_source = Column(String(100), nullable=True)
     promo_offer_discount_expires_at = Column(DateTime, nullable=True)
+    tariff_pricing_cohort_override = Column(String(8), nullable=True)
     last_remnawave_sync = Column(DateTime, nullable=True)
     trojan_password = Column(String(255), nullable=True)
     vless_uuid = Column(String(255), nullable=True)

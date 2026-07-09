@@ -7,12 +7,13 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.database.database import AsyncSessionLocal
 from app.database.models import InteractiveNotificationLog, Subscription, User
 from app.services.cold_solo_offer_service import cold_solo_offer_service
+from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,11 @@ logger = logging.getLogger(__name__)
 class InteractiveNotificationSlot:
     key: str
     time: datetime_time
+    run_at: Optional[datetime] = None
+
+    @property
+    def is_one_off(self) -> bool:
+        return self.run_at is not None
 
 
 @dataclass(frozen=True)
@@ -39,6 +45,10 @@ class InteractiveNotificationService:
     SLOTS = (
         InteractiveNotificationSlot(cold_solo_offer_service.FIRST_SLOT_KEY, datetime_time(hour=10, minute=0)),
         InteractiveNotificationSlot(cold_solo_offer_service.SECOND_SLOT_KEY, datetime_time(hour=20, minute=0)),
+        *(
+            InteractiveNotificationSlot(key, run_at.timetz().replace(tzinfo=None), run_at)
+            for key, run_at in legacy_pro_offer_service.get_one_off_schedule()
+        ),
     )
     BATCH_LIMIT = 500
 
@@ -59,10 +69,10 @@ class InteractiveNotificationService:
     async def start(self) -> None:
         await self.stop()
 
-        _, self._next_run = self._calculate_next_run()
+        _, self._next_run = await self._calculate_next_run()
         self._task = asyncio.create_task(self._run_loop())
         slots_text = ", ".join(
-            f"{slot.key}={slot.time.strftime('%H:%M')}" for slot in self.SLOTS
+            self._format_slot_for_log(slot) for slot in self.SLOTS
         )
         logger.info("🔔 Сервис интерактивных уведомлений запущен: %s МСК", slots_text)
 
@@ -79,7 +89,7 @@ class InteractiveNotificationService:
     async def _run_loop(self) -> None:
         try:
             while True:
-                slot, next_run_utc = self._calculate_next_run()
+                slot, next_run_utc = await self._calculate_next_run()
                 self._next_run = next_run_utc
 
                 delay = (next_run_utc - datetime.now(timezone.utc)).total_seconds()
@@ -94,25 +104,94 @@ class InteractiveNotificationService:
         finally:
             self._next_run = None
 
-    def _calculate_next_run(self) -> tuple[InteractiveNotificationSlot, datetime]:
+    async def _calculate_next_run(self) -> tuple[InteractiveNotificationSlot, datetime]:
         now_msk = datetime.now(self.MSK_TZ)
+        now_utc = datetime.now(timezone.utc)
         today = now_msk.date()
+        candidates: list[tuple[InteractiveNotificationSlot, datetime]] = []
+        due_one_off_candidates: list[tuple[InteractiveNotificationSlot, datetime]] = []
 
-        for slot in sorted(self.SLOTS, key=lambda item: item.time):
+        for slot in self.SLOTS:
+            if slot.is_one_off:
+                if await self._is_one_off_slot_processed(slot):
+                    continue
+                scheduled_msk = self._slot_run_at_msk(slot)
+                if scheduled_msk <= now_msk:
+                    due_one_off_candidates.append((slot, scheduled_msk))
+                    continue
+                scheduled_utc = scheduled_msk.astimezone(timezone.utc)
+                candidates.append((slot, scheduled_utc))
+                continue
+
             candidate_msk = datetime.combine(today, slot.time, tzinfo=self.MSK_TZ)
             if candidate_msk > now_msk:
-                return slot, candidate_msk.astimezone(timezone.utc)
+                candidates.append((slot, candidate_msk.astimezone(timezone.utc)))
+                continue
 
-        first_slot = sorted(self.SLOTS, key=lambda item: item.time)[0]
-        next_day = today + timedelta(days=1)
-        candidate_msk = datetime.combine(next_day, first_slot.time, tzinfo=self.MSK_TZ)
-        return first_slot, candidate_msk.astimezone(timezone.utc)
+            next_day = today + timedelta(days=1)
+            next_candidate_msk = datetime.combine(next_day, slot.time, tzinfo=self.MSK_TZ)
+            candidates.append((slot, next_candidate_msk.astimezone(timezone.utc)))
+
+        if due_one_off_candidates:
+            latest_due_at = max(item[1] for item in due_one_off_candidates)
+            latest_due_slots = [
+                slot for slot, scheduled_msk in due_one_off_candidates
+                if scheduled_msk == latest_due_at
+            ]
+            return latest_due_slots[0], now_utc
+
+        if not candidates:
+            recurring_slots = [slot for slot in self.SLOTS if not slot.is_one_off]
+            first_slot = sorted(recurring_slots, key=lambda item: item.time)[0]
+            next_day = today + timedelta(days=1)
+            candidate_msk = datetime.combine(next_day, first_slot.time, tzinfo=self.MSK_TZ)
+            return first_slot, candidate_msk.astimezone(timezone.utc)
+
+        return min(candidates, key=lambda item: item[1])
+
+    def _slot_run_at_msk(self, slot: InteractiveNotificationSlot) -> datetime:
+        if slot.run_at is None:
+            return datetime.combine(datetime.now(self.MSK_TZ).date(), slot.time, tzinfo=self.MSK_TZ)
+        if slot.run_at.tzinfo is None:
+            return slot.run_at.replace(tzinfo=self.MSK_TZ)
+        return slot.run_at.astimezone(self.MSK_TZ)
+
+    def _latest_due_one_off_slot_key(self, now_msk: datetime) -> Optional[str]:
+        due_slots = [
+            (slot, self._slot_run_at_msk(slot))
+            for slot in self.SLOTS
+            if slot.is_one_off and self._slot_run_at_msk(slot) <= now_msk
+        ]
+        if not due_slots:
+            return None
+        return max(due_slots, key=lambda item: item[1])[0].key
+
+    async def _is_one_off_slot_processed(self, slot: InteractiveNotificationSlot) -> bool:
+        if not slot.is_one_off:
+            return False
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(func.count(InteractiveNotificationLog.id)).where(
+                    InteractiveNotificationLog.slot_key == slot.key,
+                    InteractiveNotificationLog.user_id.is_(None),
+                    InteractiveNotificationLog.status.in_(("processed", "skipped", "failed")),
+                )
+            )
+            return int(result.scalar() or 0) > 0
+
+    def _format_slot_for_log(self, slot: InteractiveNotificationSlot) -> str:
+        if slot.is_one_off:
+            run_at = self._slot_run_at_msk(slot)
+            return f"{slot.key}={run_at.strftime('%d.%m.%Y %H:%M')}"
+        return f"{slot.key}={slot.time.strftime('%H:%M')}"
 
     async def _process_slot(self, slot: InteractiveNotificationSlot) -> None:
         payload = {
             "timezone": "Europe/Moscow",
             "slot_time": slot.time.strftime("%H:%M"),
         }
+        if slot.is_one_off:
+            payload["scheduled_at_msk"] = self._slot_run_at_msk(slot).isoformat()
 
         try:
             result = await self._run_slot_logic(slot)
@@ -156,7 +235,240 @@ class InteractiveNotificationService:
         if slot.key == cold_solo_offer_service.SECOND_SLOT_KEY:
             return await self._send_cold_solo_second_touch(slot)
 
+        if legacy_pro_offer_service.get_message_for_slot(slot.key):
+            return await self._send_legacy_pro_offer_touch(slot)
+
         return InteractiveNotificationResult(status="processed")
+
+    async def _send_legacy_pro_offer_touch(
+        self,
+        slot: InteractiveNotificationSlot,
+    ) -> InteractiveNotificationResult:
+        if not self.bot:
+            return InteractiveNotificationResult(
+                status="skipped",
+                error="Bot instance is not available",
+            )
+
+        message = legacy_pro_offer_service.get_message_for_slot(slot.key)
+        if message is None:
+            return InteractiveNotificationResult(status="skipped", error="Unknown Legacy Pro slot")
+
+        if legacy_pro_offer_service.is_debug_enabled():
+            sent = 0
+            failed = 0
+            skipped = 0
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(User)
+                    .options(selectinload(User.subscription))
+                    .where(User.id == legacy_pro_offer_service.debug_user_id())
+                    .limit(1)
+                )
+                user = result.scalars().first()
+                if user is None:
+                    return InteractiveNotificationResult(
+                        status="processed",
+                        payload={
+                            "sent": sent,
+                            "failed": failed,
+                            "skipped": skipped + 1,
+                            "debug_user_id": legacy_pro_offer_service.debug_user_id(),
+                            "debug_reason": "user_not_found",
+                        },
+                    )
+
+                member = legacy_pro_offer_service.build_debug_member(user, message.groups)
+                if member is None:
+                    return InteractiveNotificationResult(
+                        status="processed",
+                        user_id=user.id,
+                        telegram_id=user.telegram_id,
+                        payload={
+                            "sent": sent,
+                            "failed": failed,
+                            "skipped": skipped + 1,
+                            "debug_user_id": legacy_pro_offer_service.debug_user_id(),
+                            "debug_reason": "telegram_id_missing",
+                        },
+                    )
+
+                if await legacy_pro_offer_service.was_slot_sent(db, user.id, slot.key):
+                    return InteractiveNotificationResult(
+                        status="processed",
+                        user_id=user.id,
+                        telegram_id=user.telegram_id,
+                        payload={
+                            "sent": sent,
+                            "failed": failed,
+                            "skipped": skipped + 1,
+                            "debug_user_id": legacy_pro_offer_service.debug_user_id(),
+                            "debug_reason": "slot_already_sent",
+                        },
+                    )
+
+                offer = await legacy_pro_offer_service.ensure_offer(db, user, member)
+                message_id = await self._send_legacy_pro_offer_message(
+                    member.telegram_id,
+                    text=message.text,
+                    button_text=message.button_text,
+                    offer_id=offer.id,
+                )
+                if message_id:
+                    sent += 1
+                    await self._record_log(
+                        slot,
+                        status="sent",
+                        user_id=user.id,
+                        telegram_id=user.telegram_id,
+                        message_id=message_id,
+                        payload={
+                            "offer_id": offer.id,
+                            "csv_group": member.group,
+                            "price_kopeks": member.price_kopeks,
+                            "debug_user_id": legacy_pro_offer_service.debug_user_id(),
+                        },
+                    )
+                else:
+                    failed += 1
+                    await self._record_log(
+                        slot,
+                        status="failed",
+                        user_id=user.id,
+                        telegram_id=user.telegram_id,
+                        error="send_message_failed",
+                        payload={
+                            "offer_id": offer.id,
+                            "csv_group": member.group,
+                            "price_kopeks": member.price_kopeks,
+                            "debug_user_id": legacy_pro_offer_service.debug_user_id(),
+                        },
+                    )
+
+            return InteractiveNotificationResult(
+                status="processed",
+                payload={
+                    "sent": sent,
+                    "failed": failed,
+                    "skipped": skipped,
+                    "debug_user_id": legacy_pro_offer_service.debug_user_id(),
+                },
+            )
+
+        members = legacy_pro_offer_service.list_members(message.groups)
+        member_by_tg_id = {member.telegram_id: member for member in members}
+        telegram_ids = list(member_by_tg_id.keys())
+        sent = 0
+        failed = 0
+        skipped = 0
+
+        async with AsyncSessionLocal() as db:
+            batch_size = self.BATCH_LIMIT
+            for offset in range(0, len(telegram_ids), batch_size):
+                batch_ids = telegram_ids[offset:offset + batch_size]
+                result = await db.execute(
+                    select(User)
+                    .options(selectinload(User.subscription))
+                    .where(User.telegram_id.in_(batch_ids))
+                    .order_by(User.id.asc())
+                )
+                users = list(result.scalars().all())
+
+                found_ids = {int(user.telegram_id) for user in users if user.telegram_id is not None}
+                skipped += len(set(batch_ids) - found_ids)
+
+                for user in users:
+                    member = member_by_tg_id.get(int(user.telegram_id))
+                    if member is None:
+                        skipped += 1
+                        continue
+                    if not legacy_pro_offer_service.is_eligible_user(user, member):
+                        skipped += 1
+                        continue
+                    if await legacy_pro_offer_service.was_slot_sent(db, user.id, slot.key):
+                        skipped += 1
+                        continue
+
+                    offer = await legacy_pro_offer_service.ensure_offer(db, user, member)
+                    message_id = await self._send_legacy_pro_offer_message(
+                        int(user.telegram_id),
+                        text=message.text,
+                        button_text=message.button_text,
+                        offer_id=offer.id,
+                    )
+                    if message_id:
+                        sent += 1
+                        await self._record_log(
+                            slot,
+                            status="sent",
+                            user_id=user.id,
+                            telegram_id=user.telegram_id,
+                            message_id=message_id,
+                            payload={
+                                "offer_id": offer.id,
+                                "csv_group": member.group,
+                                "price_kopeks": member.price_kopeks,
+                            },
+                        )
+                    else:
+                        failed += 1
+                        await self._record_log(
+                            slot,
+                            status="failed",
+                            user_id=user.id,
+                            telegram_id=user.telegram_id,
+                            error="send_message_failed",
+                            payload={
+                                "offer_id": offer.id,
+                                "csv_group": member.group,
+                                "price_kopeks": member.price_kopeks,
+                            },
+                        )
+
+        return InteractiveNotificationResult(
+            status="processed",
+            payload={"sent": sent, "failed": failed, "skipped": skipped},
+        )
+
+    async def _send_legacy_pro_offer_message(
+        self,
+        telegram_id: int,
+        *,
+        text: str,
+        button_text: str,
+        offer_id: int,
+    ) -> Optional[int]:
+        if not self.bot:
+            return None
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=button_text,
+                        callback_data=f"legacy_pro_offer:claim:{offer_id}",
+                    )
+                ]
+            ]
+        )
+
+        try:
+            sent_message = await self.bot.send_message(
+                telegram_id,
+                text,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Не удалось отправить Legacy Pro offer пользователю %s: %s",
+                telegram_id,
+                exc,
+            )
+            return None
+
+        return sent_message.message_id
 
     async def _send_cold_solo_first_touch(
         self,

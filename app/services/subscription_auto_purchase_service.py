@@ -22,6 +22,7 @@ from app.database.models import Subscription, TransactionType, User
 from app.localization.texts import get_texts
 from app.services.admin_notification_service import AdminNotificationService
 from app.services.cold_solo_offer_service import cold_solo_offer_service
+from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.subscription_checkout_service import clear_subscription_checkout_draft
 from app.services.subscription_purchase_service import (
     PurchaseOptionsContext,
@@ -741,7 +742,8 @@ async def _auto_tariff_purchase(
 
     fixed_offer = None
     fixed_offer_price = None
-    if cart_data.get("offer_type") == cold_solo_offer_service.NOTIFICATION_TYPE:
+    offer_type = cart_data.get("offer_type")
+    if offer_type == cold_solo_offer_service.NOTIFICATION_TYPE:
         if tariff_op != "purchase":
             logger.warning("🔁 Автопокупка тарифа: cold Solo offer поддерживает только purchase")
             return False
@@ -761,6 +763,30 @@ async def _auto_tariff_purchase(
         ):
             logger.info(
                 "🔁 Автопокупка тарифа: cold Solo offer недействителен для пользователя %s",
+                user.telegram_id,
+            )
+            return False
+
+    elif offer_type in legacy_pro_offer_service.NOTIFICATION_TYPES:
+        if tariff_op != "purchase":
+            logger.warning("🔁 Автопокупка тарифа: Legacy Pro offer поддерживает только purchase")
+            return False
+        fixed_offer_price, fixed_offer = await legacy_pro_offer_service.get_price_override(
+            db,
+            user.id,
+            plan_code=plan.code,
+            period_days=period_days,
+        )
+        expected_offer_id = _safe_int(cart_data.get("offer_id"))
+        expected_price = _safe_int(cart_data.get("price_override_kopeks"))
+        if (
+            fixed_offer is None
+            or fixed_offer_price is None
+            or (expected_offer_id and fixed_offer.id != expected_offer_id)
+            or expected_price != fixed_offer_price
+        ):
+            logger.info(
+                "🔁 Автопокупка тарифа: Legacy Pro offer недействителен для пользователя %s",
                 user.telegram_id,
             )
             return False
@@ -818,7 +844,10 @@ async def _auto_tariff_purchase(
             if result is None:
                 return False
             subscription, transaction, was_trial_conversion = result
-            await cold_solo_offer_service.mark_claimed_after_purchase(db, fixed_offer)
+            if offer_type in legacy_pro_offer_service.NOTIFICATION_TYPES:
+                await legacy_pro_offer_service.mark_claimed_after_purchase(db, fixed_offer)
+            else:
+                await cold_solo_offer_service.mark_claimed_after_purchase(db, fixed_offer)
     except Exception as error:  # pragma: no cover - defensive logging
         logger.error(
             "❌ Автопокупка тарифа: ошибка оформления для пользователя %s: %s",
