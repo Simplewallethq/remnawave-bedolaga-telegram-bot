@@ -91,6 +91,55 @@ async def _send_report(
 
 @admin_required
 @error_handler
+async def send_registration_report(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+) -> None:
+    await callback.answer("🔄 Генерация отчета запущена...")
+
+    progress_msg = await callback.message.edit_text(
+        "⏳ <b>Готовим отчет по регистрациям за 30 дней...</b>\n\n"
+        "Проверяем подключения в RemnaWave — это может занять до минуты.",
+        parse_mode="HTML",
+    )
+
+    try:
+        report = await reporting_service.build_registration_cohort_report(days=30)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Ошибка генерации отчета по регистрациям: %s", exc)
+        await progress_msg.edit_text(
+            "❌ Не удалось сформировать отчет. Попробуйте позже.",
+            reply_markup=get_admin_reports_keyboard(db_user.language),
+        )
+        return
+
+    csv_text = reporting_service.render_registration_report_csv(report)
+    filename = f"registrations-{report.generated_at_msk.strftime('%Y%m%d-%H%M%S')}.csv"
+    document = types.BufferedInputFile(
+        csv_text.encode("utf-8-sig"),
+        filename=filename,
+    )
+
+    await callback.message.answer_document(
+        document=document,
+        caption=reporting_service.render_registration_report_summary(report),
+        parse_mode="HTML",
+    )
+
+    try:
+        await progress_msg.edit_text(
+            "📊 <b>Отчеты</b>\n\n"
+            "Выберите период, чтобы отправить отчет в админский топик.",
+            reply_markup=get_admin_reports_keyboard(db_user.language),
+            parse_mode="HTML",
+        )
+    except (TelegramBadRequest, TelegramForbiddenError) as exc:
+        logger.warning("Не удалось восстановить меню отчетов: %s", exc)
+
+
+@admin_required
+@error_handler
 async def close_report_message(
     callback: types.CallbackQuery,
     db_user: User,
@@ -113,5 +162,6 @@ def register_handlers(dp: Dispatcher) -> None:
     dp.callback_query.register(send_daily_report, F.data == "admin_reports_daily")
     dp.callback_query.register(send_weekly_report, F.data == "admin_reports_weekly")
     dp.callback_query.register(send_monthly_report, F.data == "admin_reports_monthly")
+    dp.callback_query.register(send_registration_report, F.data == "admin_reports_registrations")
     dp.callback_query.register(close_report_message, F.data == "admin_close_report")
 

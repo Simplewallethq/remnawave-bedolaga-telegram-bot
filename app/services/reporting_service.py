@@ -1,16 +1,18 @@
 import asyncio
+import csv
+import io
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from enum import Enum
 from html import escape
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from sqlalchemy import cast, func, not_, or_, select
+from sqlalchemy import cast, func, not_, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import false, true
 
@@ -47,6 +49,28 @@ class ReportPeriodRange:
     start_msk: datetime
     end_msk: datetime
     label: str
+
+
+@dataclass(slots=True)
+class RegistrationDayStats:
+    day: date
+    bot_registered: int = 0
+    bot_connected: int = 0
+    bot_purchased: int = 0
+    email_registered: int = 0
+    email_connected: int = 0
+    email_purchased: int = 0
+
+
+@dataclass(slots=True)
+class RegistrationReport:
+    days: List[RegistrationDayStats]
+    start_msk: date
+    end_msk: date
+    api_available: bool
+    api_checked: int
+    api_errors: int
+    generated_at_msk: datetime
 
 
 class ReportingService:
@@ -564,6 +588,214 @@ class ReportingService:
             "active_paid_users": active_paid_users,
             "never_connected_users": never_connected_users,
         }
+
+    async def build_registration_cohort_report(self, days: int = 30) -> RegistrationReport:
+        now_msk = datetime.now(self._moscow_tz)
+        end_msk = datetime.combine(
+            now_msk.date() + timedelta(days=1), datetime_time.min, tzinfo=self._moscow_tz
+        )
+        start_msk = end_msk - timedelta(days=days)
+        start_utc = start_msk.astimezone(timezone.utc).replace(tzinfo=None)
+        end_utc = end_msk.astimezone(timezone.utc).replace(tzinfo=None)
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(
+                    User.id,
+                    User.created_at,
+                    User.auth_source,
+                    User.has_connected_to_vpn,
+                    User.remnawave_uuid,
+                    User.has_had_paid_subscription,
+                ).where(
+                    User.created_at >= start_utc,
+                    User.created_at < end_utc,
+                )
+            )
+            rows = result.all()
+
+            connected_ids: Set[int] = {row.id for row in rows if row.has_connected_to_vpn}
+            to_check = [
+                (row.id, row.remnawave_uuid)
+                for row in rows
+                if not row.has_connected_to_vpn and row.remnawave_uuid
+            ]
+
+            api_available = True
+            api_checked = 0
+            api_errors = 0
+
+            if to_check:
+                api_available, api_checked, api_errors, newly_connected = (
+                    await self._check_vpn_connections(to_check)
+                )
+                connected_ids |= newly_connected
+
+                if newly_connected:
+                    try:
+                        await session.execute(
+                            update(User)
+                            .where(User.id.in_(newly_connected))
+                            .values(has_connected_to_vpn=True)
+                        )
+                        await session.commit()
+                    except Exception as exc:  # noqa: BLE001 - best effort
+                        logger.warning(
+                            "Не удалось обновить флаги подключения к VPN: %s", exc
+                        )
+
+        day_map: Dict[date, RegistrationDayStats] = {}
+        first_day = start_msk.date()
+        for offset in range(days):
+            day = first_day + timedelta(days=offset)
+            day_map[day] = RegistrationDayStats(day=day)
+
+        for row in rows:
+            created_msk = row.created_at.replace(tzinfo=timezone.utc).astimezone(self._moscow_tz)
+            stats = day_map.get(created_msk.date())
+            if stats is None:
+                continue
+
+            connected = row.id in connected_ids
+            purchased = connected and bool(row.has_had_paid_subscription)
+
+            if (row.auth_source or "telegram") == "telegram":
+                stats.bot_registered += 1
+                stats.bot_connected += int(connected)
+                stats.bot_purchased += int(purchased)
+            else:
+                stats.email_registered += 1
+                stats.email_connected += int(connected)
+                stats.email_purchased += int(purchased)
+
+        return RegistrationReport(
+            days=[day_map[day] for day in sorted(day_map)],
+            start_msk=first_day,
+            end_msk=now_msk.date(),
+            api_available=api_available,
+            api_checked=api_checked,
+            api_errors=api_errors,
+            generated_at_msk=now_msk,
+        )
+
+    async def _check_vpn_connections(
+        self,
+        pairs: List[Tuple[int, str]],
+    ) -> Tuple[bool, int, int, Set[int]]:
+        """Проверяет подключения через RemnaWave. Возвращает
+        (api_available, checked, errors, connected_user_ids)."""
+        from app.services.subscription_service import SubscriptionService
+
+        service = SubscriptionService()
+        if not service.is_configured:
+            logger.warning(
+                "RemnaWave API не настроен, подключения посчитаны только по флагу"
+            )
+            return False, 0, 0, set()
+
+        semaphore = asyncio.Semaphore(5)
+        errors = 0
+        checked = 0
+        connected: Set[int] = set()
+
+        async def check_user(user_id: int, uuid: str, api) -> None:
+            nonlocal errors, checked
+            async with semaphore:
+                try:
+                    remnawave_user = await api.get_user_by_uuid(uuid)
+                    checked += 1
+                    if remnawave_user and remnawave_user.first_connected_at:
+                        connected.add(user_id)
+                except Exception as exc:  # noqa: BLE001
+                    checked += 1
+                    errors += 1
+                    logger.debug(
+                        "Ошибка проверки подключения пользователя %s: %s", user_id, exc
+                    )
+
+        try:
+            async with service.get_api_client() as api:
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        *(check_user(user_id, uuid, api) for user_id, uuid in pairs)
+                    ),
+                    timeout=180,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Не удалось проверить подключения через RemnaWave: %s", exc)
+            return False, checked, errors, connected
+
+        return True, checked, errors, connected
+
+    def render_registration_report_csv(self, report: RegistrationReport) -> str:
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(
+            [
+                "date",
+                "bot_registered",
+                "bot_connected",
+                "bot_purchased",
+                "email_registered",
+                "email_connected",
+                "email_purchased",
+            ]
+        )
+
+        totals = [0] * 6
+        for day in report.days:
+            values = [
+                day.bot_registered,
+                day.bot_connected,
+                day.bot_purchased,
+                day.email_registered,
+                day.email_connected,
+                day.email_purchased,
+            ]
+            totals = [total + value for total, value in zip(totals, values)]
+            writer.writerow([day.day.isoformat(), *values])
+
+        writer.writerow(["TOTAL", *totals])
+        return output.getvalue()
+
+    def render_registration_report_summary(self, report: RegistrationReport) -> str:
+        bot_reg = sum(day.bot_registered for day in report.days)
+        bot_conn = sum(day.bot_connected for day in report.days)
+        bot_pur = sum(day.bot_purchased for day in report.days)
+        email_reg = sum(day.email_registered for day in report.days)
+        email_conn = sum(day.email_connected for day in report.days)
+        email_pur = sum(day.email_purchased for day in report.days)
+
+        lines = [
+            (
+                f"👥 <b>Регистрации за {len(report.days)} дней</b> "
+                f"({report.start_msk.strftime('%d.%m')} — {report.end_msk.strftime('%d.%m')}, МСК)"
+            ),
+            (
+                f"🤖 Через бота: <b>{bot_reg}</b> → подключились <b>{bot_conn}</b> "
+                f"→ купили <b>{bot_pur}</b>"
+            ),
+            (
+                f"📧 Через email: <b>{email_reg}</b> → подключились <b>{email_conn}</b> "
+                f"→ купили <b>{email_pur}</b>"
+            ),
+        ]
+
+        if report.api_checked:
+            lines.append(f"🔍 Проверено через RemnaWave: {report.api_checked}")
+
+        if not report.api_available:
+            lines.append(
+                "⚠️ RemnaWave API недоступен — «подключился» посчитан по "
+                "сохраненному флагу, значения могут быть занижены."
+            )
+        elif report.api_errors:
+            lines.append(
+                f"⚠️ Ошибок проверки через RemnaWave: {report.api_errors} — "
+                "значения могут быть занижены."
+            )
+
+        return "\n".join(lines)
 
     def _user_label(self, user: User) -> str:
         if getattr(user, "username", None):

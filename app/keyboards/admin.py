@@ -287,6 +287,12 @@ def get_admin_reports_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
                 callback_data="admin_reports_monthly"
             )
         ],
+        [
+            InlineKeyboardButton(
+                text=_t(texts, "ADMIN_REPORTS_REGISTRATIONS", "👥 Регистрации за 30 дней (CSV)"),
+                callback_data="admin_reports_registrations"
+            )
+        ],
         [InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel")]
     ])
 
