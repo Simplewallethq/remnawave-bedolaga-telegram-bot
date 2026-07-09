@@ -19,6 +19,7 @@ from app.database.models import User
 from app.handlers.subscription.purchase import user_uses_tariffs
 from app.services.plan_pricing_service import list_active_plans, resolve_pricing_cohort
 from app.services.cold_solo_offer_service import cold_solo_offer_service
+from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 
 from ..dependencies import get_db_session, require_api_token
 from ..schemas.plans import (
@@ -51,24 +52,39 @@ async def _build_plan_items(
     for plan in plans:
         price_items: list[PlanPriceItem] = []
         offer_price = None
+        offer_type = None
+        offer_original_price = None
         if db is not None and user is not None:
-            offer_price, _ = await cold_solo_offer_service.get_price_override(
+            offer_price, offer = await cold_solo_offer_service.get_price_override(
                 db,
                 user.id,
                 plan_code=plan.code,
                 period_days=cold_solo_offer_service.PERIOD_DAYS,
             )
+            if offer_price is not None and offer is not None:
+                offer_type = cold_solo_offer_service.NOTIFICATION_TYPE
+                offer_original_price = cold_solo_offer_service.ORIGINAL_PRICE_KOPEKS
+            else:
+                offer_price, offer = await legacy_pro_offer_service.get_price_override(
+                    db,
+                    user.id,
+                    plan_code=plan.code,
+                    period_days=legacy_pro_offer_service.PERIOD_DAYS,
+                )
+                if offer_price is not None and offer is not None:
+                    offer_type = getattr(offer, "notification_type", None)
+                    offer_original_price = legacy_pro_offer_service.ORIGINAL_PRICE_KOPEKS
 
         for p in plan.prices:
             if getattr(p, "audience", "all") not in ("all", cohort):
                 continue
-            if offer_price is not None and p.period_days == cold_solo_offer_service.PERIOD_DAYS:
+            if offer_price is not None and p.period_days == legacy_pro_offer_service.PERIOD_DAYS:
                 price_items.append(
                     PlanPriceItem(
                         period_days=p.period_days,
                         price_kopeks=offer_price,
-                        original_price_kopeks=p.price_kopeks,
-                        offer_type=cold_solo_offer_service.NOTIFICATION_TYPE,
+                        original_price_kopeks=offer_original_price or p.price_kopeks,
+                        offer_type=offer_type,
                     )
                 )
             else:

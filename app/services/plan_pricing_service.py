@@ -25,6 +25,10 @@ def resolve_pricing_cohort(db_user) -> str:
     """Pricing cohort for a user: 'new' if they registered at/after the new-pricing
     cutoff, else 'legacy'. None-safe — missing user/created_at/cutoff falls back to
     'legacy' (the grandfathered, current-prices set)."""
+    override = str(getattr(db_user, "tariff_pricing_cohort_override", None) or "").lower()
+    if override in ("new", "legacy"):
+        return override
+
     cutoff = settings.get_tariffs_new_pricing_cutoff()
     created_at = getattr(db_user, "created_at", None)
     if cutoff is not None and created_at is not None and created_at >= cutoff:

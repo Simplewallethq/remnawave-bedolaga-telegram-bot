@@ -46,6 +46,7 @@ from app.services.plan_pricing_service import (
     select_prices_for_cohort,
 )
 from app.services.cold_solo_offer_service import cold_solo_offer_service
+from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.subscription_service import SubscriptionService
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,7 @@ async def _save_tariff_intent_cart(
                 "price_override_kopeks": price_override_kopeks,
             }
         )
+
     try:
         await user_cart_service.save_user_cart(db_user.id, cart_data, ttl=3600)
         logger.info(
@@ -127,6 +129,42 @@ async def _save_tariff_intent_cart(
         logger.warning(
             "Не удалось сохранить intent тарифа для %s: %s", db_user.telegram_id, e
         )
+
+
+async def _get_fixed_price_tariff_offer(
+    db: AsyncSession,
+    db_user: User,
+    *,
+    plan_code: str,
+    period_days: int,
+) -> tuple[Optional[int], Optional[object], Optional[str]]:
+    offer_price, offer = await cold_solo_offer_service.get_price_override(
+        db,
+        db_user.id,
+        plan_code=plan_code,
+        period_days=period_days,
+    )
+    if offer_price is not None and offer is not None:
+        return offer_price, offer, cold_solo_offer_service.NOTIFICATION_TYPE
+
+    offer_price, offer = await legacy_pro_offer_service.get_price_override(
+        db,
+        db_user.id,
+        plan_code=plan_code,
+        period_days=period_days,
+    )
+    if offer_price is not None and offer is not None:
+        return offer_price, offer, getattr(offer, "notification_type", None)
+
+    return None, None, None
+
+
+async def _mark_fixed_price_tariff_offer_claimed(db: AsyncSession, offer: Optional[object]) -> None:
+    notification_type = getattr(offer, "notification_type", None)
+    if notification_type in legacy_pro_offer_service.NOTIFICATION_TYPES:
+        await legacy_pro_offer_service.mark_claimed_after_purchase(db, offer)
+        return
+    await cold_solo_offer_service.mark_claimed_after_purchase(db, offer)
 
 
 async def show_tariffs_page(
@@ -219,14 +257,14 @@ async def show_tariff_periods(
         return
 
     period_prices = select_prices_for_cohort(plan, resolve_pricing_cohort(db_user))
-    offer_price, _ = await cold_solo_offer_service.get_price_override(
+    offer_price, _, _ = await _get_fixed_price_tariff_offer(
         db,
-        db_user.id,
+        db_user,
         plan_code=plan.code,
         period_days=cold_solo_offer_service.PERIOD_DAYS,
     )
     if offer_price is not None:
-        period_prices[cold_solo_offer_service.PERIOD_DAYS] = offer_price
+        period_prices[legacy_pro_offer_service.PERIOD_DAYS] = offer_price
     if not period_prices:
         await callback.answer(
             texts.t("TARIFFS_PRICES_MISSING", "Цены для этого тарифа не настроены."),
@@ -670,9 +708,9 @@ async def start_tariff_purchase(
         )
         return
 
-    offer_price, offer = await cold_solo_offer_service.get_price_override(
+    offer_price, offer, offer_type = await _get_fixed_price_tariff_offer(
         db,
-        db_user.id,
+        db_user,
         plan_code=plan.code,
         period_days=period_days,
     )
@@ -699,7 +737,7 @@ async def start_tariff_purchase(
             total_price=price_kopeks,
             offer_id=getattr(offer, "id", None),
             price_override_kopeks=offer_price,
-            offer_type=cold_solo_offer_service.NOTIFICATION_TYPE if offer else None,
+            offer_type=offer_type,
         )
         await callback.message.edit_text(
             texts.t(
@@ -730,7 +768,7 @@ async def start_tariff_purchase(
         )
         return
     new_sub, transaction, was_trial_conversion = result
-    await cold_solo_offer_service.mark_claimed_after_purchase(db, offer)
+    await _mark_fixed_price_tariff_offer_claimed(db, offer)
 
     try:
         await send_purchase_notification(
@@ -879,6 +917,163 @@ async def pay_cold_solo_offer_from_balance(
         return
 
     await cold_solo_offer_service.mark_claimed_after_purchase(db, offer)
+    await callback.answer("Подписка активирована ✅", show_alert=False)
+    from app.handlers.subscription.purchase import show_subscription_info
+    callback.data = "menu_subscription"
+    await show_subscription_info(callback, db_user, db)
+
+
+async def claim_legacy_pro_offer(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    texts = get_texts(db_user.language)
+    parts = (callback.data or "").split(":")
+    try:
+        offer_id = int(parts[2]) if len(parts) > 2 else 0
+    except (TypeError, ValueError):
+        offer_id = 0
+
+    offer = await legacy_pro_offer_service.get_active_offer(db, db_user.id)
+    if not offer or (offer_id and offer.id != offer_id):
+        await callback.answer("Предложение недоступно или истекло", show_alert=True)
+        return
+
+    offer_user = getattr(offer, "user", None) or db_user
+    if legacy_pro_offer_service.has_converted_to_tariff(offer_user):
+        await callback.answer("У вас уже подключён новый тариф", show_alert=True)
+        return
+
+    plan = await get_plan_by_code(db, legacy_pro_offer_service.PLAN_CODE)
+    if not plan or not plan.is_active:
+        await callback.answer("Тариф Pro временно недоступен", show_alert=True)
+        return
+
+    if not legacy_pro_offer_service.validate_offer_for_plan(
+        offer,
+        plan_code=plan.code,
+        period_days=legacy_pro_offer_service.PERIOD_DAYS,
+    ):
+        await callback.answer("Предложение недоступно или истекло", show_alert=True)
+        return
+
+    price_kopeks, offer = await legacy_pro_offer_service.get_price_override(
+        db,
+        db_user.id,
+        plan_code=plan.code,
+        period_days=legacy_pro_offer_service.PERIOD_DAYS,
+    )
+    if price_kopeks is None or offer is None:
+        await callback.answer("Предложение недоступно или истекло", show_alert=True)
+        return
+
+    missing = max(0, price_kopeks - db_user.balance_kopeks)
+    await _save_tariff_intent_cart(
+        db_user,
+        tariff_op="purchase",
+        plan=plan,
+        period_days=legacy_pro_offer_service.PERIOD_DAYS,
+        total_price=price_kopeks,
+        offer_id=offer.id,
+        price_override_kopeks=price_kopeks,
+        offer_type=getattr(offer, "notification_type", None),
+    )
+
+    price_label = _format_rub_short(price_kopeks)
+    if missing == 0:
+        keyboard = types.InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    types.InlineKeyboardButton(
+                        text=f"Оплатить с баланса {price_label}",
+                        callback_data=f"legacy_pro_offer:balance:{offer.id}",
+                    )
+                ],
+                [types.InlineKeyboardButton(text=texts.BACK, callback_data="subscription_tariffs")],
+            ]
+        )
+    else:
+        keyboard = get_payment_methods_keyboard(missing, db_user.language)
+
+    message = (
+        f"💎 <b>Pro на 1 год за {price_label}</b>\n\n"
+        "Обычная цена: <s>2280₽</s>\n"
+        f"Цена предложения: <b>{price_label}</b>\n"
+        "Действует до: <b>1 августа 23:59 MSK</b>\n\n"
+    )
+    if missing:
+        message += (
+            f"На балансе: {texts.format_price(db_user.balance_kopeks)}\n"
+            f"К оплате сейчас: {texts.format_price(missing)}"
+        )
+    else:
+        message += "Средств на балансе достаточно для активации."
+
+    try:
+        await callback.message.edit_text(message, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(message, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+async def pay_legacy_pro_offer_from_balance(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    parts = (callback.data or "").split(":")
+    try:
+        offer_id = int(parts[2]) if len(parts) > 2 else 0
+    except (TypeError, ValueError):
+        offer_id = 0
+
+    offer = await legacy_pro_offer_service.get_active_offer(db, db_user.id)
+    if not offer or not offer_id or offer.id != offer_id:
+        await callback.answer("Предложение недоступно или истекло", show_alert=True)
+        return
+
+    offer_user = getattr(offer, "user", None) or db_user
+    if legacy_pro_offer_service.has_converted_to_tariff(offer_user):
+        await callback.answer("У вас уже подключён новый тариф", show_alert=True)
+        return
+
+    plan = await get_plan_by_code(db, legacy_pro_offer_service.PLAN_CODE)
+    if not plan or not legacy_pro_offer_service.validate_offer_for_plan(
+        offer,
+        plan_code=getattr(plan, "code", None),
+        period_days=legacy_pro_offer_service.PERIOD_DAYS,
+    ):
+        await callback.answer("Предложение недоступно", show_alert=True)
+        return
+
+    price_kopeks, offer = await legacy_pro_offer_service.get_price_override(
+        db,
+        db_user.id,
+        plan_code=plan.code,
+        period_days=legacy_pro_offer_service.PERIOD_DAYS,
+    )
+    if price_kopeks is None or offer is None:
+        await callback.answer("Предложение недоступно", show_alert=True)
+        return
+
+    if db_user.balance_kopeks < price_kopeks:
+        await callback.answer("Недостаточно средств на балансе", show_alert=True)
+        return
+
+    result = await finalize_tariff_purchase(
+        db,
+        db_user,
+        plan,
+        legacy_pro_offer_service.PERIOD_DAYS,
+        price_kopeks,
+        bot=callback.bot,
+    )
+    if result is None:
+        await callback.answer("Не удалось списать средства", show_alert=True)
+        return
+
+    await legacy_pro_offer_service.mark_claimed_after_purchase(db, offer)
     await callback.answer("Подписка активирована ✅", show_alert=False)
     from app.handlers.subscription.purchase import show_subscription_info
     callback.data = "menu_subscription"
@@ -1052,6 +1247,14 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         pay_cold_solo_offer_from_balance,
         F.data.startswith("cold_solo_offer:balance:"),
+    )
+    dp.callback_query.register(
+        claim_legacy_pro_offer,
+        F.data.startswith("legacy_pro_offer:claim:"),
+    )
+    dp.callback_query.register(
+        pay_legacy_pro_offer_from_balance,
+        F.data.startswith("legacy_pro_offer:balance:"),
     )
     dp.callback_query.register(
         show_tariffs_page,

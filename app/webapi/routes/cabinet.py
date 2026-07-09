@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -20,6 +20,7 @@ from app.database.crud.subscription import (
     extend_subscription,
     update_subscription_autopay,
 )
+from app.database.crud.server_squad import get_active_server_squads
 from app.database.crud.subscription_event import record_subscription_renewal_event
 from app.database.crud.device_binding_code import get_or_create_binding_code
 from app.database.crud.transaction import create_transaction
@@ -31,6 +32,7 @@ from app.database.crud.user import (
 )
 from app.database.models import (
     PaymentMethod,
+    SubscriptionStatus,
     TransactionType,
     User,
     UserStatus,
@@ -44,6 +46,7 @@ from app.services.plan_pricing_service import (
     resolve_pricing_cohort,
 )
 from app.services.cold_solo_offer_service import cold_solo_offer_service
+from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.subscription_service import SubscriptionService
 from app.utils.passwords import hash_password
 from app.utils.telegram_webapp import parse_webapp_init_data
@@ -478,8 +481,19 @@ async def purchase(
         plan_code=plan.code,
         period_days=period_days,
     )
+    is_legacy_pro_fixed_offer = False
     if offer_price is not None:
         price_kopeks = offer_price
+    else:
+        offer_price, fixed_offer = await legacy_pro_offer_service.get_price_override(
+            db,
+            user.id,
+            plan_code=plan.code,
+            period_days=period_days,
+        )
+        if offer_price is not None:
+            price_kopeks = offer_price
+            is_legacy_pro_fixed_offer = True
 
     if user.balance_kopeks < price_kopeks:
         raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient balance")
@@ -507,7 +521,20 @@ async def purchase(
     subscription.device_limit = plan.device_limit
     subscription.traffic_limit_gb = plan.traffic_limit_gb
     subscription.is_trial = False
-    await extend_subscription(db, subscription, period_days)
+    if is_legacy_pro_fixed_offer:
+        squads = await get_active_server_squads(db)
+        subscription.connected_squads = [
+            squad.squad_uuid
+            for squad in squads
+            if getattr(squad, "squad_uuid", None)
+        ]
+        now = datetime.utcnow()
+        subscription.status = SubscriptionStatus.ACTIVE.value
+        subscription.start_date = now
+        subscription.end_date = now + timedelta(days=period_days)
+        await db.flush()
+    else:
+        await extend_subscription(db, subscription, period_days)
     await record_subscription_renewal_event(
         db,
         user_id=user.id,
@@ -525,7 +552,10 @@ async def purchase(
 
     user.has_had_paid_subscription = True
     await db.commit()
-    await cold_solo_offer_service.mark_claimed_after_purchase(db, fixed_offer)
+    if getattr(fixed_offer, "notification_type", None) in legacy_pro_offer_service.NOTIFICATION_TYPES:
+        await legacy_pro_offer_service.mark_claimed_after_purchase(db, fixed_offer)
+    else:
+        await cold_solo_offer_service.mark_claimed_after_purchase(db, fixed_offer)
 
     # Синхронизация с панелью (is_configured — @property, без скобок!)
     try:

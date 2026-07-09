@@ -1947,6 +1947,34 @@ async def ensure_user_promo_offer_discount_columns():
         return False
 
 
+async def add_user_tariff_pricing_cohort_override_column() -> bool:
+    try:
+        if await check_column_exists('users', 'tariff_pricing_cohort_override'):
+            logger.info("ℹ️ Колонка users.tariff_pricing_cohort_override уже существует")
+            return True
+
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+            if db_type == 'sqlite':
+                column_def = 'VARCHAR(8) NULL'
+            elif db_type == 'postgresql':
+                column_def = 'VARCHAR(8) NULL'
+            elif db_type == 'mysql':
+                column_def = 'VARCHAR(8) NULL'
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            await conn.execute(text(
+                f"ALTER TABLE users ADD COLUMN tariff_pricing_cohort_override {column_def}"
+            ))
+
+        logger.info("✅ Колонка users.tariff_pricing_cohort_override добавлена")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления колонки users.tariff_pricing_cohort_override: {e}")
+        return False
+
+
 async def ensure_promo_offer_template_active_duration_column() -> bool:
     try:
         column_exists = await check_column_exists('promo_offer_templates', 'active_discount_hours')
@@ -7127,6 +7155,13 @@ async def run_universal_migration():
         else:
             logger.warning("⚠️ Проблемы с колонкой language_code в users")
 
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ TARIFF_PRICING_COHORT_OVERRIDE В USERS ===")
+        tariff_cohort_override_ready = await add_user_tariff_pricing_cohort_override_column()
+        if tariff_cohort_override_ready:
+            logger.info("✅ Колонка tariff_pricing_cohort_override в users готова")
+        else:
+            logger.warning("⚠️ Проблемы с колонкой tariff_pricing_cohort_override в users")
+
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ AD_CAMPAIGN_VISITS ===")
         ad_visits_ready = await create_ad_campaign_visits_table()
         if ad_visits_ready:
@@ -7236,6 +7271,7 @@ async def check_migration_status():
             "users_promo_offer_discount_percent_column": False,
             "users_promo_offer_discount_source_column": False,
             "users_promo_offer_discount_expires_column": False,
+            "users_tariff_pricing_cohort_override_column": False,
             "users_referral_commission_percent_column": False,
             "subscription_crypto_link_column": False,
             "discount_offers_table": False,
@@ -7309,6 +7345,7 @@ async def check_migration_status():
         status["users_promo_offer_discount_percent_column"] = await check_column_exists('users', 'promo_offer_discount_percent')
         status["users_promo_offer_discount_source_column"] = await check_column_exists('users', 'promo_offer_discount_source')
         status["users_promo_offer_discount_expires_column"] = await check_column_exists('users', 'promo_offer_discount_expires_at')
+        status["users_tariff_pricing_cohort_override_column"] = await check_column_exists('users', 'tariff_pricing_cohort_override')
         status["users_referral_commission_percent_column"] = await check_column_exists('users', 'referral_commission_percent')
         status["subscription_crypto_link_column"] = await check_column_exists('subscriptions', 'subscription_crypto_link')
         
@@ -7383,6 +7420,7 @@ async def check_migration_status():
             "users_promo_offer_discount_percent_column": "Колонка процента промо-скидки у пользователей",
             "users_promo_offer_discount_source_column": "Колонка источника промо-скидки у пользователей",
             "users_promo_offer_discount_expires_column": "Колонка срока действия промо-скидки у пользователей",
+            "users_tariff_pricing_cohort_override_column": "Колонка переопределения тарифной когорты у пользователей",
             "users_referral_commission_percent_column": "Колонка процента реферальной комиссии у пользователей",
             "subscription_crypto_link_column": "Колонка subscription_crypto_link в subscriptions",
             "discount_offers_table": "Таблица discount_offers",
