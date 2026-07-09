@@ -86,16 +86,16 @@ class LegacyProOfferService:
     OFFER_EXPIRES_AT_MSK = datetime(2026, 8, 1, 23, 59, 59, tzinfo=MSK_TZ)
 
     AC_SCHEDULE = (
-        (AC_SLOT_1, datetime(2026, 7, 9, 11, 20, tzinfo=MSK_TZ)),
-        (AC_SLOT_2, datetime(2026, 7, 9, 11, 25, tzinfo=MSK_TZ)),
-        (AC_SLOT_3, datetime(2026, 7, 9, 11, 30, tzinfo=MSK_TZ)),
-        (AC_SLOT_4, datetime(2026, 7, 9, 11, 35, tzinfo=MSK_TZ)),
+        # (AC_SLOT_1, datetime(2026, 7, 9, 11, 20, tzinfo=MSK_TZ)),
+        # (AC_SLOT_2, datetime(2026, 7, 9, 11, 25, tzinfo=MSK_TZ)),
+        # (AC_SLOT_3, datetime(2026, 7, 9, 11, 30, tzinfo=MSK_TZ)),
+        # (AC_SLOT_4, datetime(2026, 7, 9, 11, 35, tzinfo=MSK_TZ)),
     )
     B_SCHEDULE = (
-        (B_SLOT_1, datetime(2026, 7, 9, 11, 55, tzinfo=MSK_TZ)),
-        (B_SLOT_2, datetime(2026, 7, 9, 11, 56, tzinfo=MSK_TZ)),
-        (B_SLOT_3, datetime(2026, 7, 9, 11, 57, tzinfo=MSK_TZ)),
-        (B_SLOT_4, datetime(2026, 7, 9, 11, 58, tzinfo=MSK_TZ)),
+        (B_SLOT_1, datetime(2026, 7, 9, 12, 7, tzinfo=MSK_TZ)),
+        (B_SLOT_2, datetime(2026, 7, 9, 12, 8, tzinfo=MSK_TZ)),
+        (B_SLOT_3, datetime(2026, 7, 9, 12, 9, tzinfo=MSK_TZ)),
+        (B_SLOT_4, datetime(2026, 7, 9, 12, 10, tzinfo=MSK_TZ)),
     )
 
     # AC_SCHEDULE = (
