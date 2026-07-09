@@ -66,6 +66,32 @@ async def create_transaction(
                 exc,
             )
 
+    # Пополнения от платёжных провайдеров (payment_method задан) → лента кабинета.
+    # Реферальные/внутренние начисления идут без payment_method и сюда не попадают.
+    if type == TransactionType.DEPOSIT and is_completed and payment_method is not None:
+        try:
+            from app.services.cabinet_notification_service import (
+                CabinetNotificationType,
+                notify,
+            )
+
+            await notify(
+                db,
+                user_id=user_id,
+                type=CabinetNotificationType.TOPUP_SUCCESS,
+                payload={
+                    "amountKopeks": amount_kopeks,
+                    "paymentMethod": payment_method.value,
+                    "description": description,
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "Не удалось создать уведомление кабинета о пополнении для пользователя %s: %s",
+                user_id,
+                exc,
+            )
+
     return transaction
 
 

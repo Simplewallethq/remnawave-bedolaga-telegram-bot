@@ -371,3 +371,13 @@ async def reset_devices(user: User) -> bool:
     except Exception as error:
         logger.error(f"Ошибка сброса устройств пользователя {user.id}: {error}")
         return False
+
+
+# ── Уведомления ──────────────────────────────────────────────────────────
+
+def build_notification(notification) -> Dict[str, Any]:
+    """Контракт фронта для уведомления кабинета (единый источник —
+    cabinet_notification_service.serialize_notification)."""
+    from app.services.cabinet_notification_service import serialize_notification
+
+    return serialize_notification(notification)

@@ -86,6 +86,7 @@ class MonitoringService:
         self.bot = bot
         self._notified_users: Set[str] = set()
         self._last_cleanup = datetime.utcnow()
+        self._last_cabinet_notifications_cleanup = datetime.min
         self._sla_task = None
 
     async def _send_message_with_logo(
@@ -240,6 +241,7 @@ class MonitoringService:
                 await self._cleanup_inactive_users(db)
                 await self._collect_user_daily_traffic_usage(db)
                 await self._process_android_rate_requests(db)
+                await self._cleanup_cabinet_notifications(db)
                 
                 await self._log_monitoring_event(
                     db, "monitoring_cycle_completed", 
@@ -260,12 +262,32 @@ class MonitoringService:
     
     async def _cleanup_notification_cache(self):
         current_time = datetime.utcnow()
-        
+
         if (current_time - self._last_cleanup).total_seconds() >= 3600:
             old_count = len(self._notified_users)
             self._notified_users.clear()
             self._last_cleanup = current_time
             logger.info(f"🧹 Очищен кеш уведомлений ({old_count} записей)")
+
+    async def _cleanup_cabinet_notifications(self, db: AsyncSession):
+        """Retention-очистка ленты уведомлений кабинета (раз в ~6 часов)."""
+        current_time = datetime.utcnow()
+        if (current_time - self._last_cabinet_notifications_cleanup).total_seconds() < 6 * 3600:
+            return
+        self._last_cabinet_notifications_cleanup = current_time
+
+        try:
+            from app.database.crud.cabinet_notification import cleanup_old_notifications
+
+            deleted = await cleanup_old_notifications(
+                db,
+                retention_days=settings.CABINET_NOTIFICATIONS_RETENTION_DAYS,
+                max_per_user=settings.CABINET_NOTIFICATIONS_MAX_PER_USER,
+            )
+            if deleted:
+                logger.info(f"🧹 Удалено {deleted} старых уведомлений кабинета")
+        except Exception as e:
+            logger.error(f"Ошибка очистки уведомлений кабинета: {e}")
     
     async def _check_expired_subscriptions(self, db: AsyncSession):
         try:
@@ -276,9 +298,20 @@ class MonitoringService:
                 await expire_subscription(db, subscription)
                 
                 user = await get_user_by_id(db, subscription.user_id)
+                if user:
+                    await self._notify_cabinet(
+                        db,
+                        user_id=user.id,
+                        type="subscription_expired",
+                        payload={
+                            "endDate": subscription.end_date.isoformat()
+                            if subscription.end_date
+                            else None,
+                        },
+                    )
                 if user and self.bot:
                     await self._send_subscription_expired_notification(user)
-                
+
                 logger.info(f"🔴 Подписка пользователя {subscription.user_id} истекла и статус изменен на 'expired'")
             
             if expired_subscriptions:
@@ -395,6 +428,18 @@ class MonitoringService:
                         success = await self._send_subscription_expiring_notification(user, subscription, days)
                         if success:
                             await record_notification(db, user.id, subscription.id, "expiring", days)
+                            await self._notify_cabinet(
+                                db,
+                                user_id=user.id,
+                                type="subscription_expiring",
+                                payload={
+                                    "days": days,
+                                    "endDate": subscription.end_date.isoformat()
+                                    if subscription.end_date
+                                    else None,
+                                    "autopayEnabled": bool(subscription.autopay_enabled),
+                                },
+                            )
                             all_processed_users.add(user_key)
                             sent_count += 1
                             logger.info(f"✅ Пользователю {user.telegram_id} отправлено уведомление об истечении подписки через {days} дней")
@@ -446,6 +491,16 @@ class MonitoringService:
                     success = await self._send_trial_ending_notification(user, subscription)
                     if success:
                         await record_notification(db, user.id, subscription.id, "trial_2h")
+                        await self._notify_cabinet(
+                            db,
+                            user_id=user.id,
+                            type="trial_ending",
+                            payload={
+                                "endDate": subscription.end_date.isoformat()
+                                if subscription.end_date
+                                else None,
+                            },
+                        )
                         logger.info(f"🎁 Пользователю {user.telegram_id} отправлено уведомление об окончании тестовой подписки через 2 часа")
             
             if trial_expiring:
@@ -1034,11 +1089,13 @@ class MonitoringService:
                         failed_count += 1
                         if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
                             await self._send_autopay_failed_notification(user, user.balance_kopeks, charge_amount)
+                        await self._notify_cabinet_autopay_failed(db, user, subscription, charge_amount)
                         logger.warning(f"💳 Ошибка списания средств для автопродления пользователя {user.telegram_id}")
                 else:
                     failed_count += 1
                     if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
                         await self._send_autopay_failed_notification(user, user.balance_kopeks, charge_amount)
+                    await self._notify_cabinet_autopay_failed(db, user, subscription, charge_amount)
                     logger.warning(f"💳 Недостаточно средств для автопродления у пользователя {user.telegram_id}")
             
             if processed_count > 0 or failed_count > 0:
@@ -1051,6 +1108,50 @@ class MonitoringService:
         except Exception as e:
             logger.error(f"Ошибка обработки автоплатежей: {e}")
     
+    async def _notify_cabinet(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        type: str,
+        payload: Optional[dict] = None,
+    ) -> None:
+        """Дублирует событие мониторинга в ленту уведомлений кабинета (best-effort)."""
+        try:
+            from app.services.cabinet_notification_service import notify
+
+            await notify(db, user_id=user_id, type=type, payload=payload)
+        except Exception as exc:
+            logger.warning(
+                "Не удалось создать уведомление кабинета (%s) для пользователя %s: %s",
+                type,
+                user_id,
+                exc,
+            )
+
+    async def _notify_cabinet_autopay_failed(
+        self,
+        db: AsyncSession,
+        user: User,
+        subscription: Subscription,
+        charge_amount: int,
+    ) -> None:
+        # Ветки неудачи автоплатежа выполняются каждый цикл мониторинга —
+        # дедупим ленту кабинета через кеш (очищается раз в час).
+        cabinet_key = f"autopay_failed_cabinet_{user.id}_{subscription.id}"
+        if cabinet_key in self._notified_users:
+            return
+        self._notified_users.add(cabinet_key)
+        await self._notify_cabinet(
+            db,
+            user_id=user.id,
+            type="autopay_failed",
+            payload={
+                "balanceKopeks": user.balance_kopeks,
+                "requiredKopeks": charge_amount,
+            },
+        )
+
     async def _send_subscription_expired_notification(self, user: User) -> bool:
         try:
             message = """

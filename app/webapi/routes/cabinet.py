@@ -6,15 +6,26 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import secrets
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database.database import get_db
+from app.database.crud.cabinet_notification import (
+    get_missed_notifications,
+    get_unread_count,
+    list_cabinet_notifications,
+    mark_all_read,
+    mark_notification_read,
+)
 from app.database.crud.subscription import (
     create_trial_subscription,
     extend_subscription,
@@ -39,6 +50,7 @@ from app.database.models import (
 )
 from app.services import cabinet_service
 from app.services.cabinet_auth_service import cabinet_auth_service
+from app.services.cabinet_notification_service import cabinet_notification_hub
 from app.services.payment_service import PaymentService
 from app.services.plan_pricing_service import (
     get_plan_by_code,
@@ -794,12 +806,142 @@ async def get_referral_payouts(
     return {"payouts": await cabinet_service.build_referral_payouts(db, user, limit=limit, offset=offset)}
 
 
-# ── Уведомления (v1: пусто, см. план/риски) ──────────────────────────────
+# ── Уведомления (лента + SSE) ─────────────────────────────────────────────
 
 @router.get("/notifications")
 async def get_notifications(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    unread_only: bool = Query(False, alias="unreadOnly"),
+    db: AsyncSession = Depends(get_db_session),
     user: User = Depends(get_current_cabinet_user),
 ) -> Dict[str, Any]:
-    # В боте нет per-user ленты уведомлений под формат фронта.
-    # v1: возвращаем пустой список (см. раздел "Риски" в плане).
-    return {"notifications": []}
+    items, total = await list_cabinet_notifications(
+        db, user.id, limit=limit, offset=offset, unread_only=unread_only
+    )
+    return {
+        "items": [cabinet_service.build_notification(n) for n in items],
+        "total": total,
+        "unreadCount": await get_unread_count(db, user.id),
+    }
+
+
+@router.get("/notifications/unread-count")
+async def get_notifications_unread_count(
+    db: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_cabinet_user),
+) -> Dict[str, Any]:
+    return {"unreadCount": await get_unread_count(db, user.id)}
+
+
+@router.post("/notifications/read-all")
+async def mark_notifications_read_all(
+    db: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_cabinet_user),
+) -> Dict[str, Any]:
+    marked = await mark_all_read(db, user.id)
+    return {"success": True, "marked": marked}
+
+
+@router.post("/notifications/{notification_id}/read")
+async def mark_notification_as_read(
+    notification_id: int,
+    db: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_cabinet_user),
+) -> Dict[str, Any]:
+    marked = await mark_notification_read(db, user.id, notification_id)
+    if not marked:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Notification not found")
+    return {"success": True, "unreadCount": await get_unread_count(db, user.id)}
+
+
+@router.post("/notifications/stream-token")
+async def issue_notifications_stream_token(
+    user: User = Depends(get_current_cabinet_user),
+) -> Dict[str, Any]:
+    return {
+        "token": cabinet_auth_service.issue_sse_ticket(user),
+        "expiresIn": settings.CABINET_NOTIFICATIONS_SSE_TICKET_TTL_SECONDS,
+    }
+
+
+@router.get("/notifications/stream")
+async def stream_notifications(
+    request: Request,
+    ticket: str = Query(...),
+    since: Optional[int] = Query(None, ge=0),
+) -> StreamingResponse:
+    """SSE-стрим уведомлений. Auth — короткоживущий тикет в query
+    (EventSource не умеет Authorization-заголовок). Backfill — по
+    ?since=<id> или заголовку Last-Event-ID."""
+    _ensure_enabled()
+    if not settings.CABINET_NOTIFICATIONS_ENABLED:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Notifications are disabled")
+
+    user_id = cabinet_auth_service.decode_sse_ticket(ticket)
+    if not user_id:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired stream ticket"
+        )
+
+    since_id = since
+    if since_id is None:
+        last_event_id = request.headers.get("Last-Event-ID")
+        if last_event_id:
+            try:
+                since_id = int(last_event_id.removeprefix("ntf_"))
+            except ValueError:
+                since_id = None
+
+    def _format_event(event: Dict[str, Any]) -> str:
+        numeric_id = str(event.get("id", "")).removeprefix("ntf_")
+        return (
+            f"id: {numeric_id}\n"
+            "event: notification\n"
+            f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        )
+
+    async def event_stream():
+        # Не держим сессию на время стрима: короткая — только для backfill.
+        if since_id is not None:
+            try:
+                async for session in get_db():
+                    missed = await get_missed_notifications(
+                        session, user_id, since_id=since_id, limit=50
+                    )
+                    for notification in missed:
+                        yield _format_event(
+                            cabinet_service.build_notification(notification)
+                        )
+            except Exception:
+                logger.error(
+                    "Ошибка backfill уведомлений кабинета для пользователя %s",
+                    user_id,
+                    exc_info=True,
+                )
+
+        queue = cabinet_notification_hub.subscribe(user_id)
+        try:
+            heartbeat = max(5, settings.CABINET_NOTIFICATIONS_HEARTBEAT_SECONDS)
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=heartbeat)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                if event.get("event") == "close":
+                    break
+                yield _format_event(event)
+        finally:
+            cabinet_notification_hub.unsubscribe(user_id, queue)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

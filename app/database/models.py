@@ -1607,6 +1607,26 @@ class InteractiveNotificationLog(Base):
     user = relationship("User", backref="interactive_notification_logs")
 
 
+class CabinetNotification(Base):
+    __tablename__ = "cabinet_notifications"
+    __table_args__ = (
+        Index("ix_cabinet_notifications_user_created", "user_id", "created_at"),
+        Index("ix_cabinet_notifications_user_unread", "user_id", "is_read"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    type = Column(String(50), nullable=False)
+    title = Column(String(255), nullable=True)
+    body = Column(Text, nullable=True)
+    payload = Column(JSON, nullable=True)
+    is_read = Column(Boolean, default=False, nullable=False)
+    read_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    user = relationship("User", backref="cabinet_notifications")
+
+
 class Feedback(Base):
     __tablename__ = "feedbacks"
     __table_args__ = (

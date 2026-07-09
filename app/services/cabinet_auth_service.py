@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 JWT_ALGORITHM = "HS256"
 JWT_TYPE = "cabinet"
+JWT_SSE_TYPE = "cabinet_sse"
 
 
 class CabinetAuthService:
@@ -57,6 +58,47 @@ class CabinetAuthService:
         sub = payload.get("sub")
         try:
             return int(sub)
+        except (TypeError, ValueError):
+            return None
+
+    def issue_sse_ticket(self, user: User) -> str:
+        """Короткоживущий тикет для SSE-стрима: EventSource не умеет
+        Authorization-заголовок, поэтому тикет передаётся query-параметром.
+        Короткий TTL ограничивает утечку через URL/логи."""
+        now = datetime.now(timezone.utc)
+        payload = {
+            "sub": str(user.id),
+            "type": JWT_SSE_TYPE,
+            "iat": int(now.timestamp()),
+            "exp": int(
+                (
+                    now
+                    + timedelta(
+                        seconds=settings.CABINET_NOTIFICATIONS_SSE_TICKET_TTL_SECONDS
+                    )
+                ).timestamp()
+            ),
+        }
+        return jwt.encode(
+            payload, settings.get_cabinet_jwt_secret(), algorithm=JWT_ALGORITHM
+        )
+
+    def decode_sse_ticket(self, token: str) -> Optional[int]:
+        try:
+            payload = jwt.decode(
+                token,
+                settings.get_cabinet_jwt_secret(),
+                algorithms=[JWT_ALGORITHM],
+            )
+        except jwt.PyJWTError as error:
+            logger.debug(f"Невалидный SSE-тикет кабинета: {error}")
+            return None
+
+        if payload.get("type") != JWT_SSE_TYPE:
+            return None
+
+        try:
+            return int(payload.get("sub"))
         except (TypeError, ValueError):
             return None
 

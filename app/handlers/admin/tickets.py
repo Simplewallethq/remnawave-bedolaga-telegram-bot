@@ -1063,14 +1063,6 @@ async def block_user_permanently(
 async def notify_user_about_ticket_reply(bot: Bot, ticket: Ticket, reply_text: str, db: AsyncSession):
     """Уведомить пользователя о новом ответе в тикете"""
     try:
-        # Respect runtime toggle for user ticket notifications
-        try:
-            if not SupportSettingsService.get_user_ticket_notifications_enabled():
-                return
-        except Exception:
-            pass
-        from app.localization.texts import get_texts
-
         # Обеспечим наличие данных пользователя в объекте тикета
         ticket_with_user = ticket
         if not getattr(ticket_with_user, "user", None):
@@ -1080,6 +1072,36 @@ async def notify_user_about_ticket_reply(bot: Bot, ticket: Ticket, reply_text: s
         if not user:
             logger.error(f"User not found for ticket #{ticket.id}")
             return
+
+        # Лента кабинета — до гейтов Telegram-уведомлений: работает и для
+        # web-пользователей без telegram_id, и при выключенном тумблере поддержки.
+        try:
+            from app.services.cabinet_notification_service import (
+                CabinetNotificationType,
+                notify,
+            )
+
+            preview = reply_text[:100] + "..." if len(reply_text) > 100 else reply_text
+            await notify(
+                db,
+                user_id=user.id,
+                type=CabinetNotificationType.TICKET_REPLY,
+                payload={"ticketId": ticket.id, "preview": preview},
+            )
+        except Exception as exc:
+            logger.warning(
+                "Не удалось создать уведомление кабинета об ответе в тикете #%s: %s",
+                ticket.id,
+                exc,
+            )
+
+        # Respect runtime toggle for user ticket notifications
+        try:
+            if not SupportSettingsService.get_user_ticket_notifications_enabled():
+                return
+        except Exception:
+            pass
+        from app.localization.texts import get_texts
 
         if not getattr(user, "telegram_id", None):
             logger.error(

@@ -499,6 +499,14 @@ class Settings(BaseSettings):
     CABINET_OTP_RESEND_SECONDS: int = 60  # минимальный интервал между отправками кода
     CABINET_OTP_MAX_ATTEMPTS: int = 5
 
+    # Уведомления кабинета (лента + SSE)
+    CABINET_NOTIFICATIONS_ENABLED: bool = True
+    CABINET_NOTIFICATIONS_RETENTION_DAYS: int = 90
+    CABINET_NOTIFICATIONS_MAX_PER_USER: int = 200
+    CABINET_NOTIFICATIONS_SSE_MAX_CONNECTIONS: int = 5  # одновременных SSE-стримов на пользователя
+    CABINET_NOTIFICATIONS_SSE_TICKET_TTL_SECONDS: int = 300
+    CABINET_NOTIFICATIONS_HEARTBEAT_SECONDS: int = 25
+
     # SendGrid (письма кабинета: коды подтверждения)
     SENDGRID_API_KEY: Optional[str] = None
     SENDGRID_FROM_EMAIL: Optional[str] = None

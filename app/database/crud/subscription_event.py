@@ -51,7 +51,49 @@ async def create_subscription_event(
     db.add(event)
     await db.commit()
     await db.refresh(event)
+
+    await _notify_cabinet(db, event)
+
     return event
+
+
+async def _notify_cabinet(db: AsyncSession, event: SubscriptionEvent) -> None:
+    """Дублирует событие подписки в ленту уведомлений кабинета (best-effort)."""
+    try:
+        from app.services.cabinet_notification_service import (
+            CabinetNotificationType,
+            notify,
+        )
+
+        extra = event.extra or {}
+        if event.event_type == "purchase":
+            notification_type = CabinetNotificationType.SUBSCRIPTION_PURCHASED
+        elif event.event_type == "renewal":
+            if extra.get("source") == "autopay":
+                notification_type = CabinetNotificationType.AUTOPAY_SUCCESS
+            else:
+                notification_type = CabinetNotificationType.SUBSCRIPTION_RENEWED
+        else:
+            return
+
+        payload = {
+            "amountKopeks": event.amount_kopeks,
+            "periodDays": extra.get("period_days"),
+            "newEndDate": extra.get("new_end_date") or extra.get("ends_at"),
+            "source": extra.get("source"),
+        }
+        await notify(
+            db,
+            user_id=event.user_id,
+            type=notification_type,
+            payload={key: value for key, value in payload.items() if value is not None},
+        )
+    except Exception:
+        logger.warning(
+            "Не удалось создать уведомление кабинета о событии подписки для пользователя %s",
+            event.user_id,
+            exc_info=True,
+        )
 
 
 async def record_subscription_purchase_event(

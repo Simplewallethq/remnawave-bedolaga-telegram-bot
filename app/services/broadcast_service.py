@@ -138,6 +138,25 @@ class BroadcastService:
                 await self._mark_finished(broadcast_id, sent_count, failed_count, cancelled=False)
                 return
 
+            try:
+                from app.services.cabinet_notification_service import (
+                    CabinetNotificationType,
+                    notify_bulk,
+                )
+
+                await notify_bulk(
+                    [user.id for user in recipients],
+                    type=CabinetNotificationType.BROADCAST,
+                    body=config.message_text,
+                    payload={"broadcastId": broadcast_id},
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Не удалось создать уведомления кабинета для рассылки %s: %s",
+                    broadcast_id,
+                    exc,
+                )
+
             keyboard = self._build_keyboard(config.selected_buttons)
 
             if len(recipients) > LARGE_BROADCAST_THRESHOLD:

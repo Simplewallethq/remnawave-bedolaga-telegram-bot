@@ -52,9 +52,31 @@ async def process_referral_registration(
         except Exception as exc:
             logger.debug("Не удалось записать конкурсную регистрацию: %s", exc)
 
-        if bot:
-            commission_percent = get_effective_referral_commission_percent(referrer)
+        commission_percent = get_effective_referral_commission_percent(referrer)
 
+        try:
+            from app.services.cabinet_notification_service import (
+                CabinetNotificationType,
+                notify,
+            )
+
+            await notify(
+                db,
+                user_id=referrer.id,
+                type=CabinetNotificationType.REFERRAL_JOINED,
+                payload={
+                    "referralName": new_user.full_name,
+                    "commissionPercent": commission_percent,
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "Не удалось создать уведомление кабинета о новом реферале для %s: %s",
+                referrer.id,
+                exc,
+            )
+
+        if bot:
             referral_notification = (
                 f"🎉 <b>Добро пожаловать!</b>\n\n"
                 f"Вы перешли по реферальной ссылке пользователя <b>{referrer.full_name}</b>."
@@ -148,6 +170,29 @@ async def process_referral_topup(
             commission_amount / 100,
             user.telegram_id,
         )
+
+        try:
+            from app.services.cabinet_notification_service import (
+                CabinetNotificationType,
+                notify,
+            )
+
+            await notify(
+                db,
+                user_id=referrer.id,
+                type=CabinetNotificationType.REFERRAL_COMMISSION,
+                payload={
+                    "amountKopeks": commission_amount,
+                    "percent": commission_percent,
+                    "fromName": user.full_name,
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "Не удалось создать уведомление кабинета о комиссии для %s: %s",
+                referrer.id,
+                exc,
+            )
 
         if bot:
             commission_notification = (
