@@ -1902,7 +1902,7 @@
     "TARIFFS_BACK": "⬅️ 返回",
     "TARIFF_CARD_APP": "<blockquote>App（仅限 Android）\n• 1 台设备\n• 仅应用 VPN\n• 30 GB/月</blockquote>",
     "TARIFF_CARD_SOLO": "<blockquote>Solo\n• 1 台设备\n• 完整 VPN 与所有绕过\n• ♾️ 流量</blockquote>",
-    "TARIFF_CARD_PLUS": "<blockquote>Plus\n• 2 台设备\n• 完整 VPN 与所有绕过\n• ♾️ 流量</blockquote>",
+    "TARIFF_CARD_PLUS": "<blockquote>Plus\n• 3 台设备\n• 完整 VPN 与所有绕过\n• ♾️ 流量</blockquote>",
     "TARIFF_CARD_PRO": "<blockquote>Pro\n• 10 台设备\n• 完整 VPN 与所有绕过\n• ♾️ 流量\n• 优先服务器与支持</blockquote>",
     "TARIFF_BUTTON_SELECT_FROM": "选择：{name} — 起价 {price} / 月",
     "TARIFF_BUTTON_CURRENT": "✅ 当前：{name} — {price} / {period}",

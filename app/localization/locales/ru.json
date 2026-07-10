@@ -1744,7 +1744,7 @@
   "TARIFFS_BACK": "⬅️ Назад",
   "TARIFF_CARD_APP": "<blockquote>App (только для Android)\n• 1 устройство\n• VPN только для приложений\n• 30 ГБ/мес.</blockquote>",
   "TARIFF_CARD_SOLO": "<blockquote>Solo\n• 1 устройство\n• полный VPN и все обходы\n• ♾️ трафик</blockquote>",
-  "TARIFF_CARD_PLUS": "<blockquote>Plus\n• 2 устройства\n• полный VPN и все обходы\n• ♾️ трафик</blockquote>",
+  "TARIFF_CARD_PLUS": "<blockquote>Plus\n• 3 устройства\n• полный VPN и все обходы\n• ♾️ трафик</blockquote>",
   "TARIFF_CARD_PRO": "<blockquote>Pro\n• 10 устройств\n• полный VPN и все обходы\n• ♾️ трафик\n• приоритетные серверы и поддержка</blockquote>",
   "TARIFF_BUTTON_SELECT_FROM": "Выбрать: {name} — от {price} / мес",
   "TARIFF_BUTTON_SELECT": "Выбрать {name}",

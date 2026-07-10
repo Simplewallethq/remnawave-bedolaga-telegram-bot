@@ -5973,7 +5973,7 @@ _SUBSCRIPTION_PLAN_SEED = [
     {
         "code": "plus",
         "display_name": "Plus",
-        "device_limit": 2,
+        "device_limit": 3,
         "traffic_limit_gb": 0,
         "traffic_reset_strategy": "NO_RESET",
         "custom_app_only": False,
@@ -5981,7 +5981,7 @@ _SUBSCRIPTION_PLAN_SEED = [
         "sort_order": 30,
         "description_md": (
             "Plus\n"
-            "• 2 устройства\n"
+            "• 3 устройства\n"
             "• полный VPN и все обходы\n"
             "• ♾️ трафик"
         ),
@@ -6107,6 +6107,84 @@ async def seed_subscription_plans() -> bool:
         return True
     except Exception as e:
         logger.error(f"Ошибка сидирования subscription_plans: {e}")
+        return False
+
+
+async def update_plus_plan_device_limit_to_three() -> bool:
+    """One-off bump of the Plus tier: 2 → 3 devices.
+
+    Updates the plan row (limit + description), bumps existing Plus subscriptions
+    that still carry the old limit and pushes the new HWID limit to RemnaWave for
+    their owners — otherwise the panel keeps enforcing 2 devices and the
+    panel→DB auto-sync would revert subscription.device_limit. Idempotent and
+    self-healing: Plus subscriptions left at 2 are retried on every startup.
+    """
+    try:
+        affected: List[Tuple[int, str]] = []
+        async with engine.begin() as conn:
+            plan_row = (await conn.execute(
+                text("SELECT id, device_limit FROM subscription_plans WHERE code = 'plus'")
+            )).fetchone()
+            if not plan_row:
+                return True  # свежая установка — план засеется сразу с лимитом 3
+
+            plan_id, device_limit = plan_row[0], plan_row[1]
+            if device_limit == 2:
+                await conn.execute(text(
+                    "UPDATE subscription_plans SET device_limit = 3 WHERE id = :p"
+                ), {"p": plan_id})
+                await conn.execute(text(
+                    "UPDATE subscription_plans "
+                    "SET description_md = REPLACE(description_md, '2 устройства', '3 устройства') "
+                    "WHERE id = :p AND description_md LIKE '%2 устройства%'"
+                ), {"p": plan_id})
+                device_limit = 3
+                logger.info("  → План 'plus': лимит устройств 2 → 3")
+
+            if device_limit != 3:
+                # Лимит менялся вручную — существующие подписки не трогаем.
+                return True
+
+            rows = (await conn.execute(text(
+                "SELECT s.id, u.remnawave_uuid FROM subscriptions s "
+                "JOIN users u ON u.id = s.user_id "
+                "WHERE s.plan_id = :p AND s.device_limit = 2"
+            ), {"p": plan_id})).fetchall()
+            if rows:
+                await conn.execute(text(
+                    "UPDATE subscriptions SET device_limit = 3 "
+                    "WHERE plan_id = :p AND device_limit = 2"
+                ), {"p": plan_id})
+                affected = [(row[0], row[1]) for row in rows]
+                logger.info(f"  → Подписок Plus обновлено до 3 устройств: {len(rows)}")
+
+        uuids = [uuid for _, uuid in affected if uuid]
+        if uuids:
+            from app.services.subscription_service import SubscriptionService
+
+            service = SubscriptionService()
+            if not service.is_configured:
+                logger.warning(
+                    "⚠️ RemnaWave API не настроен — лимит 3 устройств для %d подписок Plus "
+                    "не отправлен в панель (обновится при следующем запуске)",
+                    len(uuids),
+                )
+                return True
+
+            pushed = 0
+            async with service.get_api_client() as api:
+                for uuid in uuids:
+                    try:
+                        await api.update_user(uuid=uuid, hwid_device_limit=3)
+                        pushed += 1
+                    except Exception as push_error:
+                        logger.warning(
+                            f"⚠️ Не удалось обновить hwidDeviceLimit в панели для {uuid}: {push_error}"
+                        )
+            logger.info(f"  → HWID-лимит 3 отправлен в панель: {pushed}/{len(uuids)}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка обновления лимита устройств тарифа Plus: {e}")
         return False
 
 
@@ -7133,6 +7211,12 @@ async def run_universal_migration():
                 logger.info("✅ Тарифные планы засеяны")
             else:
                 logger.warning("⚠️ Проблемы с сидированием тарифных планов")
+
+            logger.info("=== ОБНОВЛЕНИЕ ЛИМИТА УСТРОЙСТВ ТАРИФА PLUS ===")
+            if await update_plus_plan_device_limit_to_three():
+                logger.info("✅ Тариф Plus: лимит устройств актуален (3)")
+            else:
+                logger.warning("⚠️ Проблемы с обновлением лимита устройств Plus")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ ADVERTISING_CAMPAIGNS ===")
         ad_campaigns_ready = await create_advertising_campaigns_table()
