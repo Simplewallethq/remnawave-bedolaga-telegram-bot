@@ -434,6 +434,9 @@ class WataPayment(Base):
 
 class PlategaPayment(Base):
     __tablename__ = "platega_payments"
+    __table_args__ = (
+        Index("ix_platega_payments_unpaid_created", "is_paid", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)

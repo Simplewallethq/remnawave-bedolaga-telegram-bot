@@ -22,6 +22,7 @@ from app.database.models import Subscription, TransactionType, User
 from app.localization.texts import get_texts
 from app.services.admin_notification_service import AdminNotificationService
 from app.services.cold_solo_offer_service import cold_solo_offer_service
+from app.services.hot_invoice_offer_service import hot_invoice_offer_service
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.subscription_checkout_service import clear_subscription_checkout_draft
 from app.services.subscription_purchase_service import (
@@ -791,6 +792,37 @@ async def _auto_tariff_purchase(
             )
             return False
 
+    elif offer_type == hot_invoice_offer_service.NOTIFICATION_TYPE:
+        base_offer_price = await get_plan_price(
+            db,
+            plan.id,
+            period_days,
+            cohort=cohort,
+        )
+        fixed_offer_price, fixed_offer = await hot_invoice_offer_service.get_price_override(
+            db,
+            user.id,
+            plan_code=plan.code,
+            period_days=period_days,
+            base_price_kopeks=base_offer_price,
+            validate_campaign=False,
+        )
+        expected_offer_id = _safe_int(cart_data.get("offer_id"))
+        expected_price = _safe_int(cart_data.get("price_override_kopeks"))
+        if (
+            expected_offer_id <= 0
+            or fixed_offer is None
+            or fixed_offer_price is None
+            or not hot_invoice_offer_service.is_offer_activated(fixed_offer)
+            or fixed_offer.id != expected_offer_id
+            or expected_price != fixed_offer_price
+        ):
+            logger.info(
+                "🔁 Автопокупка тарифа: Segment B offer недействителен для пользователя %s",
+                user.telegram_id,
+            )
+            return False
+
     subscription = None
     transaction = None
     old_end_date = None
@@ -809,6 +841,9 @@ async def _auto_tariff_purchase(
             current_price = await get_current_plan_price_for_period(db, active_sub, user)
             if new_price is None:
                 return False
+            base_new_price = new_price
+            if fixed_offer_price is not None:
+                new_price = fixed_offer_price
             delta = calculate_upgrade_delta(active_sub, plan, new_price, current_price)
             if delta > 0 and user.balance_kopeks < delta:
                 logger.info(
@@ -817,6 +852,15 @@ async def _auto_tariff_purchase(
                 )
                 return False
             subscription = await finalize_tier_switch(db, user, active_sub, plan, delta)
+            if offer_type == hot_invoice_offer_service.NOTIFICATION_TYPE:
+                await hot_invoice_offer_service.mark_claimed_after_purchase(
+                    db,
+                    fixed_offer,
+                    plan_code=plan.code,
+                    period_days=switch_period,
+                    base_price_kopeks=base_new_price,
+                    price_kopeks=new_price,
+                )
 
         elif tariff_op == "renew":
             active_sub = await _resolve_active_subscription(user)
@@ -827,12 +871,26 @@ async def _auto_tariff_purchase(
                 )
                 return False
             price = await get_plan_price(db, plan.id, period_days, cohort=cohort)
+            if fixed_offer_price is not None:
+                price = fixed_offer_price
             if price is None or user.balance_kopeks < price:
                 return False
             result = await finalize_tariff_renewal(db, user, active_sub, plan, period_days, price)
             if result is None:
                 return False
             subscription, transaction, old_end_date = result
+            if offer_type == hot_invoice_offer_service.NOTIFICATION_TYPE:
+                base_price = await get_plan_price(
+                    db, plan.id, period_days, cohort=cohort
+                )
+                await hot_invoice_offer_service.mark_claimed_after_purchase(
+                    db,
+                    fixed_offer,
+                    plan_code=plan.code,
+                    period_days=period_days,
+                    base_price_kopeks=int(base_price or price),
+                    price_kopeks=price,
+                )
 
         else:  # purchase
             price = await get_plan_price(db, plan.id, period_days, cohort=cohort)
@@ -846,6 +904,18 @@ async def _auto_tariff_purchase(
             subscription, transaction, was_trial_conversion = result
             if offer_type in legacy_pro_offer_service.NOTIFICATION_TYPES:
                 await legacy_pro_offer_service.mark_claimed_after_purchase(db, fixed_offer)
+            elif offer_type == hot_invoice_offer_service.NOTIFICATION_TYPE:
+                base_price = await get_plan_price(
+                    db, plan.id, period_days, cohort=cohort
+                )
+                await hot_invoice_offer_service.mark_claimed_after_purchase(
+                    db,
+                    fixed_offer,
+                    plan_code=plan.code,
+                    period_days=period_days,
+                    base_price_kopeks=int(base_price or price),
+                    price_kopeks=price,
+                )
             else:
                 await cold_solo_offer_service.mark_claimed_after_purchase(db, fixed_offer)
     except Exception as error:  # pragma: no cover - defensive logging
