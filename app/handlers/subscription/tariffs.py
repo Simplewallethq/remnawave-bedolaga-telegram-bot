@@ -46,6 +46,7 @@ from app.services.plan_pricing_service import (
     select_prices_for_cohort,
 )
 from app.services.cold_solo_offer_service import cold_solo_offer_service
+from app.services.hot_invoice_offer_service import hot_invoice_offer_service
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.subscription_service import SubscriptionService
 
@@ -167,6 +168,50 @@ async def _mark_fixed_price_tariff_offer_claimed(db: AsyncSession, offer: Option
     await cold_solo_offer_service.mark_claimed_after_purchase(db, offer)
 
 
+async def _get_hot_invoice_tariff_offer(
+    db: AsyncSession,
+    db_user: User,
+    *,
+    plan_code: str,
+    period_days: int,
+    base_price_kopeks: Optional[int],
+    activate: bool = False,
+) -> tuple[Optional[int], Optional[object], Optional[str]]:
+    offer_price, offer = await hot_invoice_offer_service.get_price_override(
+        db,
+        db_user.id,
+        plan_code=plan_code,
+        period_days=period_days,
+        base_price_kopeks=base_price_kopeks,
+        activate=activate,
+    )
+    if offer_price is None or offer is None:
+        return None, None, None
+    return offer_price, offer, hot_invoice_offer_service.NOTIFICATION_TYPE
+
+
+async def _mark_tariff_offer_claimed(
+    db: AsyncSession,
+    offer: Optional[object],
+    *,
+    plan_code: str,
+    period_days: int,
+    base_price_kopeks: int,
+    price_kopeks: int,
+) -> None:
+    if getattr(offer, "notification_type", None) == hot_invoice_offer_service.NOTIFICATION_TYPE:
+        await hot_invoice_offer_service.mark_claimed_after_purchase(
+            db,
+            offer,
+            plan_code=plan_code,
+            period_days=period_days,
+            base_price_kopeks=base_price_kopeks,
+            price_kopeks=price_kopeks,
+        )
+        return
+    await _mark_fixed_price_tariff_offer_claimed(db, offer)
+
+
 async def show_tariffs_page(
     callback: types.CallbackQuery,
     db_user: User,
@@ -184,7 +229,18 @@ async def show_tariffs_page(
         return
 
     cohort = resolve_pricing_cohort(db_user)
-    plans_with_lowest = [(plan, get_lowest_monthly_price(plan, cohort)) for plan in plans]
+    plans_with_lowest = []
+    hot_offer = await hot_invoice_offer_service.get_available_offer(db, db_user.id)
+    for plan in plans:
+        lowest_price = get_lowest_monthly_price(plan, cohort)
+        hot_price, _, _ = await _get_hot_invoice_tariff_offer(
+            db,
+            db_user,
+            plan_code=plan.code,
+            period_days=30,
+            base_price_kopeks=lowest_price,
+        )
+        plans_with_lowest.append((plan, hot_price if hot_price is not None else lowest_price))
 
     current_plan_id: Optional[int] = None
     current_plan_label: Optional[str] = None
@@ -209,6 +265,11 @@ async def show_tariffs_page(
     message_text = "\n\n".join(
         part for part in [
             texts.t("TARIFFS_TITLE", "📋 <b>Тарифы</b>"),
+            (
+                "🎁 <b>Скидка −20% активна до 22:00 MSK</b>"
+                if hot_offer is not None
+                else None
+            ),
             cards,
             texts.t("TARIFFS_SUBTITLE", "Выберите подходящий тариф:"),
         ] if part
@@ -257,14 +318,38 @@ async def show_tariff_periods(
         return
 
     period_prices = select_prices_for_cohort(plan, resolve_pricing_cohort(db_user))
-    offer_price, _, _ = await _get_fixed_price_tariff_offer(
-        db,
-        db_user,
-        plan_code=plan.code,
-        period_days=cold_solo_offer_service.PERIOD_DAYS,
-    )
-    if offer_price is not None:
-        period_prices[legacy_pro_offer_service.PERIOD_DAYS] = offer_price
+    hot_offer = await hot_invoice_offer_service.get_available_offer(db, db_user.id)
+    if hot_offer is not None:
+        await hot_invoice_offer_service.activate_offer(db, hot_offer)
+    for period_days, base_price in list(period_prices.items()):
+        hot_price, _, _ = await _get_hot_invoice_tariff_offer(
+            db,
+            db_user,
+            plan_code=plan.code,
+            period_days=period_days,
+            base_price_kopeks=base_price,
+            activate=True,
+        )
+        if hot_price is not None:
+            period_prices[period_days] = hot_price
+            continue
+        fixed_price, _, _ = await _get_fixed_price_tariff_offer(
+            db,
+            db_user,
+            plan_code=plan.code,
+            period_days=period_days,
+        )
+        if fixed_price is not None:
+            period_prices[period_days] = fixed_price
+    if legacy_pro_offer_service.PERIOD_DAYS not in period_prices and hot_offer is None:
+        offer_price, _, _ = await _get_fixed_price_tariff_offer(
+            db,
+            db_user,
+            plan_code=plan.code,
+            period_days=legacy_pro_offer_service.PERIOD_DAYS,
+        )
+        if offer_price is not None:
+            period_prices[legacy_pro_offer_service.PERIOD_DAYS] = offer_price
     if not period_prices:
         await callback.answer(
             texts.t("TARIFFS_PRICES_MISSING", "Цены для этого тарифа не настроены."),
@@ -316,6 +401,17 @@ async def _show_tier_switch(
             show_alert=True,
         )
         return
+
+    hot_price, _, _ = await _get_hot_invoice_tariff_offer(
+        db,
+        db_user,
+        plan_code=new_plan.code,
+        period_days=period_days,
+        base_price_kopeks=new_price,
+        activate=True,
+    )
+    if hot_price is not None:
+        new_price = hot_price
 
     delta = calculate_upgrade_delta(active_sub, new_plan, new_price, current_price)
     days_remaining = max(0, (active_sub.end_date - datetime.utcnow()).days)
@@ -615,17 +711,28 @@ async def confirm_tier_upgrade(
         return
 
     period_days = active_sub.plan_period_days or 30
-    new_price = await get_plan_price(
+    base_new_price = await get_plan_price(
         db, plan.id, period_days, cohort=resolve_pricing_cohort(db_user)
     )
     current_price = await get_current_plan_price_for_period(db, active_sub, db_user)
 
-    if new_price is None:
+    if base_new_price is None:
         await callback.answer(
             texts.t("TARIFFS_PRICES_MISSING", "Цены для этого тарифа не настроены."),
             show_alert=True,
         )
         return
+    new_price = base_new_price
+    hot_price, hot_offer, hot_offer_type = await _get_hot_invoice_tariff_offer(
+        db,
+        db_user,
+        plan_code=plan.code,
+        period_days=period_days,
+        base_price_kopeks=base_new_price,
+        activate=True,
+    )
+    if hot_price is not None:
+        new_price = hot_price
 
     delta = calculate_upgrade_delta(active_sub, plan, new_price, current_price)
 
@@ -637,6 +744,9 @@ async def confirm_tier_upgrade(
             plan=plan,
             period_days=period_days,
             total_price=delta,
+            offer_id=getattr(hot_offer, "id", None),
+            price_override_kopeks=hot_price,
+            offer_type=hot_offer_type,
         )
         await callback.message.edit_text(
             texts.t(
@@ -658,6 +768,15 @@ async def confirm_tier_upgrade(
         return
 
     await finalize_tier_switch(db, db_user, active_sub, plan, delta)
+    if hot_offer is not None:
+        await hot_invoice_offer_service.mark_claimed_after_purchase(
+            db,
+            hot_offer,
+            plan_code=plan.code,
+            period_days=period_days,
+            base_price_kopeks=base_new_price,
+            price_kopeks=new_price,
+        )
 
     await callback.answer(
         texts.t("TARIFF_UPGRADE_DONE", "Тариф изменён ✅"),
@@ -698,24 +817,36 @@ async def start_tariff_purchase(
         )
         return
 
-    price_kopeks = await get_plan_price(
+    base_price_kopeks = await get_plan_price(
         db, plan.id, period_days, cohort=resolve_pricing_cohort(db_user)
     )
-    if price_kopeks is None:
+    if base_price_kopeks is None:
         await callback.answer(
             texts.t("TARIFFS_PRICES_MISSING", "Цены для этого тарифа не настроены."),
             show_alert=True,
         )
         return
 
-    offer_price, offer, offer_type = await _get_fixed_price_tariff_offer(
+    price_kopeks = base_price_kopeks
+    offer_price, offer, offer_type = await _get_hot_invoice_tariff_offer(
         db,
         db_user,
         plan_code=plan.code,
         period_days=period_days,
+        base_price_kopeks=base_price_kopeks,
+        activate=True,
     )
     if offer_price is not None:
         price_kopeks = offer_price
+    else:
+        offer_price, offer, offer_type = await _get_fixed_price_tariff_offer(
+            db,
+            db_user,
+            plan_code=plan.code,
+            period_days=period_days,
+        )
+        if offer_price is not None:
+            price_kopeks = offer_price
 
     active_sub = await _resolve_active_subscription(db_user)
     if active_sub and active_sub.plan_id == plan.id:
@@ -768,7 +899,14 @@ async def start_tariff_purchase(
         )
         return
     new_sub, transaction, was_trial_conversion = result
-    await _mark_fixed_price_tariff_offer_claimed(db, offer)
+    await _mark_tariff_offer_claimed(
+        db,
+        offer,
+        plan_code=plan.code,
+        period_days=period_days,
+        base_price_kopeks=base_price_kopeks,
+        price_kopeks=price_kopeks,
+    )
 
     try:
         await send_purchase_notification(
@@ -1105,6 +1243,20 @@ async def show_renew_current(
         return
 
     period_prices = select_prices_for_cohort(plan, resolve_pricing_cohort(db_user))
+    hot_offer = await hot_invoice_offer_service.get_available_offer(db, db_user.id)
+    if hot_offer is not None:
+        await hot_invoice_offer_service.activate_offer(db, hot_offer)
+        for period_days, base_price in list(period_prices.items()):
+            hot_price, _, _ = await _get_hot_invoice_tariff_offer(
+                db,
+                db_user,
+                plan_code=plan.code,
+                period_days=period_days,
+                base_price_kopeks=base_price,
+                activate=True,
+            )
+            if hot_price is not None:
+                period_prices[period_days] = hot_price
 
     description = texts.t(
         f"TARIFF_CARD_{plan.code.upper()}",
@@ -1171,15 +1323,27 @@ async def _execute_renewal(
     period_days: int,
 ):
     texts = get_texts(db_user.language)
-    price_kopeks = await get_plan_price(
+    base_price_kopeks = await get_plan_price(
         db, plan.id, period_days, cohort=resolve_pricing_cohort(db_user)
     )
-    if price_kopeks is None:
+    if base_price_kopeks is None:
         await callback.answer(
             texts.t("TARIFFS_PRICES_MISSING", "Цены для этого тарифа не настроены."),
             show_alert=True,
         )
         return
+
+    price_kopeks = base_price_kopeks
+    hot_price, hot_offer, hot_offer_type = await _get_hot_invoice_tariff_offer(
+        db,
+        db_user,
+        plan_code=plan.code,
+        period_days=period_days,
+        base_price_kopeks=base_price_kopeks,
+        activate=True,
+    )
+    if hot_price is not None:
+        price_kopeks = hot_price
 
     if db_user.balance_kopeks < price_kopeks:
         missing = price_kopeks - db_user.balance_kopeks
@@ -1189,6 +1353,9 @@ async def _execute_renewal(
             plan=plan,
             period_days=period_days,
             total_price=price_kopeks,
+            offer_id=getattr(hot_offer, "id", None),
+            price_override_kopeks=hot_price,
+            offer_type=hot_offer_type,
         )
         await callback.message.edit_text(
             texts.t(
@@ -1217,6 +1384,15 @@ async def _execute_renewal(
         )
         return
     subscription, transaction, old_end_date = result
+    if hot_offer is not None:
+        await hot_invoice_offer_service.mark_claimed_after_purchase(
+            db,
+            hot_offer,
+            plan_code=plan.code,
+            period_days=period_days,
+            base_price_kopeks=base_price_kopeks,
+            price_kopeks=price_kopeks,
+        )
 
     try:
         await send_extension_notification(

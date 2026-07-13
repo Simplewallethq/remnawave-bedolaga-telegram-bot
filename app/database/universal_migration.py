@@ -3990,6 +3990,27 @@ async def create_interactive_notification_logs_table() -> bool:
         return False
 
 
+async def create_platega_unpaid_created_index() -> bool:
+    if not await check_table_exists("platega_payments"):
+        return True
+    index_name = "ix_platega_payments_unpaid_created"
+    if await check_index_exists("platega_payments", index_name):
+        return True
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    f"CREATE INDEX {index_name} "
+                    "ON platega_payments(is_paid, created_at)"
+                )
+            )
+        logger.info("✅ Индекс неоплаченных Platega счетов создан")
+        return True
+    except Exception as e:
+        logger.error("Ошибка создания индекса неоплаченных Platega счетов: %s", e)
+        return False
+
+
 async def create_android_rate_request_clicks_table() -> bool:
     table_exists = await check_table_exists("android_rate_request_clicks")
     if table_exists:
@@ -7112,6 +7133,9 @@ async def run_universal_migration():
             logger.info("✅ Таблица interactive_notification_logs готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей interactive_notification_logs")
+
+        if not await create_platega_unpaid_created_index():
+            logger.warning("⚠️ Проблемы с индексом неоплаченных Platega счетов")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ ANDROID_RATE_REQUEST_CLICKS ===")
         android_rate_clicks_created = await create_android_rate_request_clicks_table()
