@@ -850,6 +850,12 @@ def get_admin_messages_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
             )
         ],
         [
+            InlineKeyboardButton(
+                text=_t(texts, "ADMIN_CABINET_NOTIFY", "📬 Уведомление в кабинет"),
+                callback_data="admin_cabinet_notify",
+            )
+        ],
+        [
             InlineKeyboardButton(text=texts.BACK, callback_data="admin_submenu_communications")
         ]
     ])

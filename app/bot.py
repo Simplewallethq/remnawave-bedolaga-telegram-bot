@@ -42,6 +42,7 @@ from app.handlers.admin import (
     subscriptions as admin_subscriptions,
     promocodes as admin_promocodes,
     messages as admin_messages,
+    cabinet_notify as admin_cabinet_notify,
     monitoring as admin_monitoring,
     referrals as admin_referrals,
     rules as admin_rules,
@@ -192,6 +193,7 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     admin_servers.register_handlers(dp)  
     admin_promocodes.register_handlers(dp)
     admin_messages.register_handlers(dp)
+    admin_cabinet_notify.register_handlers(dp)
     admin_monitoring.register_handlers(dp)
     admin_referrals.register_handlers(dp)
     admin_rules.register_handlers(dp)

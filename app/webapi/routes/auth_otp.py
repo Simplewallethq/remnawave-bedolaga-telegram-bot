@@ -26,6 +26,7 @@ from app.database.crud.user import (
     get_user_by_email,
     get_user_by_id,
 )
+from app.utils.install_referrer import apply_install_referrer
 from app.utils.passwords import hash_password
 from app.utils.validators import validate_email
 
@@ -168,9 +169,13 @@ async def verify_otp(
         # Существующий пользователь — ленивый до-провижн RemnaWave при отсутствии.
         await ensure_remnawave_account(db, user)
 
-    # Отмечаем, что пользователь хоть раз авторизовался из мобильного приложения.
+    # Отмечаем, что пользователь хоть раз авторизовался из мобильного приложения,
+    # и применяем атрибуцию установки (utm_source / tg_user_id из Install Referrer).
+    changed = apply_install_referrer(user, payload.install_referrer)
     if not user.has_used_mobile_app:
         user.has_used_mobile_app = True
+        changed = True
+    if changed:
         await db.commit()
 
     # Перечитываем с eager-подпиской, чтобы вернуть свежие remnawave_uuid/URL.

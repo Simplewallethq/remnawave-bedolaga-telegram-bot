@@ -23,6 +23,9 @@ class AppOtpVerifyRequest(BaseModel):
     # по аналогии с device-deeplink флоу). Старые клиенты без device_id
     # сохраняют прежнее поведение.
     device_id: Optional[str] = Field(default=None, max_length=255)
+    # Опционально: сырая строка Google Play Install Referrer
+    # ('utm_source=telegram&tg_user_id=123456789'). Пустая строка — no-op.
+    install_referrer: Optional[str] = Field(default=None, max_length=512)
 
 
 class AppOtpRequestResponse(BaseModel):

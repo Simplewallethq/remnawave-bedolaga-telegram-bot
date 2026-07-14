@@ -731,6 +731,11 @@ class User(Base):
     raw_start_payload = Column(String(64), nullable=True)
     attribution_source = Column(String(100), nullable=True)
     attribution_campaign_id = Column(String(8), nullable=True, index=True)
+    # Атрибуция установки мобильного приложения (Google Play Install Referrer).
+    # tg_user_id — Telegram ID из referrer-строки; НЕ telegram_id (тот unique,
+    # и этим же Telegram ID может владеть отдельный нативный TG-аккаунт).
+    acquisition_source = Column(String(100), nullable=True)
+    tg_user_id = Column(BigInteger, nullable=True)
 
     @property
     def balance_rubles(self) -> float:

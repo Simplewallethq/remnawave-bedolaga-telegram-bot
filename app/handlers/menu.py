@@ -1331,7 +1331,12 @@ async def handle_onboarding_device_selection(
     if user.subscription:
         subscription_link = get_display_subscription_link(user.subscription)
 
-    keyboard = get_onboarding_connection_keyboard(device_type, user.language, subscription_link=subscription_link)
+    keyboard = get_onboarding_connection_keyboard(
+        device_type,
+        user.language,
+        subscription_link=subscription_link,
+        telegram_id=user.telegram_id,
+    )
 
     image_path = os.path.join("images", "connection_screen.png")
     if not os.path.exists(image_path):

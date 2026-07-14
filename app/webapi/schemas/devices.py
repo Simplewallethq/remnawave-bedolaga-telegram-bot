@@ -27,3 +27,6 @@ class BindByCodeRequest(BaseModel):
     """Request body for POST /api/devices/bind-by-code."""
     code: str = Field(..., min_length=16, max_length=16)
     device_id: str = Field(..., min_length=1, max_length=255)
+    # Опционально: сырая строка Google Play Install Referrer
+    # ('utm_source=telegram&tg_user_id=123456789'). Пустая строка — no-op.
+    install_referrer: Optional[str] = Field(default=None, max_length=512)

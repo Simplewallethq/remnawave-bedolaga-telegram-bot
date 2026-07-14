@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings, PERIOD_PRICES, TRAFFIC_PRICES
 from app.localization.loader import DEFAULT_LANGUAGE
 from app.localization.texts import get_texts
+from app.utils.install_referrer import build_personal_play_link
 from app.utils.miniapp_buttons import build_miniapp_or_callback_button
 from app.utils.pricing_utils import (
     format_period_description,
@@ -3109,10 +3110,16 @@ def get_onboarding_device_selection_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT_LANGUAGE, subscription_link: Optional[str] = None) -> InlineKeyboardMarkup:
+def get_onboarding_connection_keyboard(
+    device_type: str,
+    language: str = DEFAULT_LANGUAGE,
+    subscription_link: Optional[str] = None,
+    telegram_id: Optional[int] = None,
+) -> InlineKeyboardMarkup:
     """
     Onboarding Screen 3: Device-specific connection instructions.
     device_type: 'iphone', 'android', 'windows', or 'macos'
+    telegram_id personalizes the Google Play link (Install Referrer attribution).
     """
     texts = get_texts(language)
     buttons = []
@@ -3131,7 +3138,9 @@ def get_onboarding_connection_keyboard(device_type: str, language: str = DEFAULT
             ),
         ])
     elif device_type == "android":
-        leto_android_url = (settings.LETO_APP_DOWNLOAD_LINK_ANDROID or "").strip()
+        leto_android_url = build_personal_play_link(
+            settings.LETO_APP_DOWNLOAD_LINK_ANDROID, telegram_id
+        )
         if leto_android_url:
             buttons.append([
                 InlineKeyboardButton(

@@ -5157,6 +5157,68 @@ async def add_user_has_used_mobile_app_column() -> bool:
         return False
 
 
+async def add_user_acquisition_source_column() -> bool:
+    """Добавляет колонку acquisition_source в таблицу users (Install Referrer)."""
+    column_exists = await check_column_exists('users', 'acquisition_source')
+    if column_exists:
+        logger.info("Колонка acquisition_source уже существует в users")
+        return True
+
+    try:
+        db_type = await get_database_type()
+        async with engine.begin() as conn:
+            if db_type == 'sqlite':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN acquisition_source VARCHAR(100)")
+                )
+            elif db_type == 'postgresql':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN acquisition_source VARCHAR(100) NULL")
+                )
+            elif db_type == 'mysql':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN acquisition_source VARCHAR(100) NULL")
+                )
+
+        logger.info("✅ Добавлена колонка acquisition_source в users")
+        return True
+
+    except Exception as error:
+        logger.error(f"❌ Ошибка добавления acquisition_source в users: {error}")
+        return False
+
+
+async def add_user_tg_user_id_column() -> bool:
+    """Добавляет колонку tg_user_id в таблицу users (Install Referrer, связка с Telegram)."""
+    column_exists = await check_column_exists('users', 'tg_user_id')
+    if column_exists:
+        logger.info("Колонка tg_user_id уже существует в users")
+        return True
+
+    try:
+        db_type = await get_database_type()
+        async with engine.begin() as conn:
+            if db_type == 'sqlite':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN tg_user_id BIGINT")
+                )
+            elif db_type == 'postgresql':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN tg_user_id BIGINT NULL")
+                )
+            elif db_type == 'mysql':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN tg_user_id BIGINT NULL")
+                )
+
+        logger.info("✅ Добавлена колонка tg_user_id в users")
+        return True
+
+    except Exception as error:
+        logger.error(f"❌ Ошибка добавления tg_user_id в users: {error}")
+        return False
+
+
 async def create_device_binding_codes_table() -> bool:
     table_exists = await check_table_exists('device_binding_codes')
     if table_exists:
@@ -7157,6 +7219,20 @@ async def run_universal_migration():
             logger.info("✅ Колонка has_used_mobile_app в users готова")
         else:
             logger.warning("⚠️ Проблемы с добавлением has_used_mobile_app в users")
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ ACQUISITION_SOURCE В USERS ===")
+        acquisition_source_ready = await add_user_acquisition_source_column()
+        if acquisition_source_ready:
+            logger.info("✅ Колонка acquisition_source в users готова")
+        else:
+            logger.warning("⚠️ Проблемы с добавлением acquisition_source в users")
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ TG_USER_ID В USERS ===")
+        tg_user_id_ready = await add_user_tg_user_id_column()
+        if tg_user_id_ready:
+            logger.info("✅ Колонка tg_user_id в users готова")
+        else:
+            logger.warning("⚠️ Проблемы с добавлением tg_user_id в users")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ DEVICE_BINDING_CODES ===")
         device_binding_codes_ready = await create_device_binding_codes_table()
