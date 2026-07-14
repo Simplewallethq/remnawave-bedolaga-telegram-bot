@@ -23,6 +23,7 @@ from app.localization.texts import get_texts
 from app.services.admin_notification_service import AdminNotificationService
 from app.services.cold_solo_offer_service import cold_solo_offer_service
 from app.services.hot_invoice_offer_service import hot_invoice_offer_service
+from app.services.expired_subscription_offer_service import expired_subscription_offer_service
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.subscription_checkout_service import clear_subscription_checkout_draft
 from app.services.subscription_purchase_service import (
@@ -705,6 +706,7 @@ async def _auto_tariff_purchase(
     from app.database.crud.user import get_user_by_id
     from app.handlers.subscription.tariffs import (
         _resolve_active_subscription,
+        _resolve_renewable_subscription,
         finalize_tariff_purchase,
         finalize_tariff_renewal,
         finalize_tier_switch,
@@ -823,6 +825,37 @@ async def _auto_tariff_purchase(
             )
             return False
 
+    elif offer_type == expired_subscription_offer_service.NOTIFICATION_TYPE:
+        base_offer_price = await get_plan_price(
+            db,
+            plan.id,
+            period_days,
+            cohort=cohort,
+        )
+        fixed_offer_price, fixed_offer = await expired_subscription_offer_service.get_price_override(
+            db,
+            user.id,
+            plan_code=plan.code,
+            period_days=period_days,
+            base_price_kopeks=base_offer_price,
+            validate_campaign=False,
+        )
+        expected_offer_id = _safe_int(cart_data.get("offer_id"))
+        expected_price = _safe_int(cart_data.get("price_override_kopeks"))
+        if (
+            expected_offer_id <= 0
+            or fixed_offer is None
+            or fixed_offer_price is None
+            or not expired_subscription_offer_service.is_offer_activated(fixed_offer)
+            or fixed_offer.id != expected_offer_id
+            or expected_price != fixed_offer_price
+        ):
+            logger.info(
+                "🔁 Автопокупка тарифа: Segment C offer недействителен для пользователя %s",
+                user.telegram_id,
+            )
+            return False
+
     subscription = None
     transaction = None
     old_end_date = None
@@ -861,9 +894,18 @@ async def _auto_tariff_purchase(
                     base_price_kopeks=base_new_price,
                     price_kopeks=new_price,
                 )
+            elif offer_type == expired_subscription_offer_service.NOTIFICATION_TYPE:
+                await expired_subscription_offer_service.mark_claimed_after_purchase(
+                    db,
+                    fixed_offer,
+                    plan_code=plan.code,
+                    period_days=switch_period,
+                    base_price_kopeks=base_new_price,
+                    price_kopeks=new_price,
+                )
 
         elif tariff_op == "renew":
-            active_sub = await _resolve_active_subscription(user)
+            active_sub = await _resolve_renewable_subscription(user)
             if not active_sub or active_sub.plan_id != plan.id:
                 logger.info(
                     "🔁 Автопокупка тарифа: нет совпадающей активной подписки для продления %s",
@@ -891,6 +933,18 @@ async def _auto_tariff_purchase(
                     base_price_kopeks=int(base_price or price),
                     price_kopeks=price,
                 )
+            elif offer_type == expired_subscription_offer_service.NOTIFICATION_TYPE:
+                base_price = await get_plan_price(
+                    db, plan.id, period_days, cohort=cohort
+                )
+                await expired_subscription_offer_service.mark_claimed_after_purchase(
+                    db,
+                    fixed_offer,
+                    plan_code=plan.code,
+                    period_days=period_days,
+                    base_price_kopeks=int(base_price or price),
+                    price_kopeks=price,
+                )
 
         else:  # purchase
             price = await get_plan_price(db, plan.id, period_days, cohort=cohort)
@@ -909,6 +963,18 @@ async def _auto_tariff_purchase(
                     db, plan.id, period_days, cohort=cohort
                 )
                 await hot_invoice_offer_service.mark_claimed_after_purchase(
+                    db,
+                    fixed_offer,
+                    plan_code=plan.code,
+                    period_days=period_days,
+                    base_price_kopeks=int(base_price or price),
+                    price_kopeks=price,
+                )
+            elif offer_type == expired_subscription_offer_service.NOTIFICATION_TYPE:
+                base_price = await get_plan_price(
+                    db, plan.id, period_days, cohort=cohort
+                )
+                await expired_subscription_offer_service.mark_claimed_after_purchase(
                     db,
                     fixed_offer,
                     plan_code=plan.code,

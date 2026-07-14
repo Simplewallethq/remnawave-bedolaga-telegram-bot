@@ -47,6 +47,7 @@ from app.services.plan_pricing_service import (
 )
 from app.services.cold_solo_offer_service import cold_solo_offer_service
 from app.services.hot_invoice_offer_service import hot_invoice_offer_service
+from app.services.expired_subscription_offer_service import expired_subscription_offer_service
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.subscription_service import SubscriptionService
 
@@ -81,6 +82,21 @@ async def _resolve_active_subscription(db_user: User) -> Optional[Subscription]:
     if sub.status not in (SubscriptionStatus.ACTIVE.value, SubscriptionStatus.TRIAL.value):
         return None
     return sub
+
+
+async def _resolve_renewable_subscription(db_user: User) -> Optional[Subscription]:
+    active_sub = await _resolve_active_subscription(db_user)
+    if active_sub is not None:
+        return active_sub
+
+    sub = db_user.subscription
+    if not sub or sub.plan_id is None:
+        return None
+    if sub.is_trial or sub.is_partner:
+        return None
+    if sub.status == SubscriptionStatus.EXPIRED.value or sub.end_date <= datetime.utcnow():
+        return sub
+    return None
 
 
 async def _save_tariff_intent_cart(
@@ -190,6 +206,28 @@ async def _get_hot_invoice_tariff_offer(
     return offer_price, offer, hot_invoice_offer_service.NOTIFICATION_TYPE
 
 
+async def _get_expired_subscription_tariff_offer(
+    db: AsyncSession,
+    db_user: User,
+    *,
+    plan_code: str,
+    period_days: int,
+    base_price_kopeks: Optional[int],
+    activate: bool = False,
+) -> tuple[Optional[int], Optional[object], Optional[str]]:
+    offer_price, offer = await expired_subscription_offer_service.get_price_override(
+        db,
+        db_user.id,
+        plan_code=plan_code,
+        period_days=period_days,
+        base_price_kopeks=base_price_kopeks,
+        activate=activate,
+    )
+    if offer_price is None or offer is None:
+        return None, None, None
+    return offer_price, offer, expired_subscription_offer_service.NOTIFICATION_TYPE
+
+
 async def _mark_tariff_offer_claimed(
     db: AsyncSession,
     offer: Optional[object],
@@ -201,6 +239,16 @@ async def _mark_tariff_offer_claimed(
 ) -> None:
     if getattr(offer, "notification_type", None) == hot_invoice_offer_service.NOTIFICATION_TYPE:
         await hot_invoice_offer_service.mark_claimed_after_purchase(
+            db,
+            offer,
+            plan_code=plan_code,
+            period_days=period_days,
+            base_price_kopeks=base_price_kopeks,
+            price_kopeks=price_kopeks,
+        )
+        return
+    if getattr(offer, "notification_type", None) == expired_subscription_offer_service.NOTIFICATION_TYPE:
+        await expired_subscription_offer_service.mark_claimed_after_purchase(
             db,
             offer,
             plan_code=plan_code,
@@ -231,6 +279,9 @@ async def show_tariffs_page(
     cohort = resolve_pricing_cohort(db_user)
     plans_with_lowest = []
     hot_offer = await hot_invoice_offer_service.get_available_offer(db, db_user.id)
+    expired_offer = None
+    if hot_offer is None:
+        expired_offer = await expired_subscription_offer_service.get_available_offer(db, db_user.id)
     for plan in plans:
         lowest_price = get_lowest_monthly_price(plan, cohort)
         hot_price, _, _ = await _get_hot_invoice_tariff_offer(
@@ -240,7 +291,18 @@ async def show_tariffs_page(
             period_days=30,
             base_price_kopeks=lowest_price,
         )
-        plans_with_lowest.append((plan, hot_price if hot_price is not None else lowest_price))
+        display_price = hot_price if hot_price is not None else lowest_price
+        if hot_price is None and expired_offer is not None:
+            expired_price, _, _ = await _get_expired_subscription_tariff_offer(
+                db,
+                db_user,
+                plan_code=plan.code,
+                period_days=30,
+                base_price_kopeks=lowest_price,
+            )
+            if expired_price is not None:
+                display_price = expired_price
+        plans_with_lowest.append((plan, display_price))
 
     current_plan_id: Optional[int] = None
     current_plan_label: Optional[str] = None
@@ -268,6 +330,11 @@ async def show_tariffs_page(
             (
                 "🎁 <b>Скидка −20% активна до 22:00 MSK</b>"
                 if hot_offer is not None
+                else None
+            ),
+            (
+                "🎁 <b>Скидка −20% на восстановление активна до 22:00 MSK</b>"
+                if expired_offer is not None
                 else None
             ),
             cards,
@@ -319,8 +386,13 @@ async def show_tariff_periods(
 
     period_prices = select_prices_for_cohort(plan, resolve_pricing_cohort(db_user))
     hot_offer = await hot_invoice_offer_service.get_available_offer(db, db_user.id)
+    expired_offer = None
+    if hot_offer is None:
+        expired_offer = await expired_subscription_offer_service.get_available_offer(db, db_user.id)
     if hot_offer is not None:
         await hot_invoice_offer_service.activate_offer(db, hot_offer)
+    elif expired_offer is not None:
+        await expired_subscription_offer_service.activate_offer(db, expired_offer)
     for period_days, base_price in list(period_prices.items()):
         hot_price, _, _ = await _get_hot_invoice_tariff_offer(
             db,
@@ -333,6 +405,17 @@ async def show_tariff_periods(
         if hot_price is not None:
             period_prices[period_days] = hot_price
             continue
+        expired_price, _, _ = await _get_expired_subscription_tariff_offer(
+            db,
+            db_user,
+            plan_code=plan.code,
+            period_days=period_days,
+            base_price_kopeks=base_price,
+            activate=True,
+        )
+        if expired_price is not None:
+            period_prices[period_days] = expired_price
+            continue
         fixed_price, _, _ = await _get_fixed_price_tariff_offer(
             db,
             db_user,
@@ -341,7 +424,11 @@ async def show_tariff_periods(
         )
         if fixed_price is not None:
             period_prices[period_days] = fixed_price
-    if legacy_pro_offer_service.PERIOD_DAYS not in period_prices and hot_offer is None:
+    if (
+        legacy_pro_offer_service.PERIOD_DAYS not in period_prices
+        and hot_offer is None
+        and expired_offer is None
+    ):
         offer_price, _, _ = await _get_fixed_price_tariff_offer(
             db,
             db_user,
@@ -839,14 +926,25 @@ async def start_tariff_purchase(
     if offer_price is not None:
         price_kopeks = offer_price
     else:
-        offer_price, offer, offer_type = await _get_fixed_price_tariff_offer(
+        offer_price, offer, offer_type = await _get_expired_subscription_tariff_offer(
             db,
             db_user,
             plan_code=plan.code,
             period_days=period_days,
+            base_price_kopeks=base_price_kopeks,
+            activate=True,
         )
         if offer_price is not None:
             price_kopeks = offer_price
+        else:
+            offer_price, offer, offer_type = await _get_fixed_price_tariff_offer(
+                db,
+                db_user,
+                plan_code=plan.code,
+                period_days=period_days,
+            )
+            if offer_price is not None:
+                price_kopeks = offer_price
 
     active_sub = await _resolve_active_subscription(db_user)
     if active_sub and active_sub.plan_id == plan.id:
@@ -1225,7 +1323,7 @@ async def show_renew_current(
 ):
     """Show 5 period buttons priced at the user's current tier."""
     texts = get_texts(db_user.language)
-    active_sub = await _resolve_active_subscription(db_user)
+    active_sub = await _resolve_renewable_subscription(db_user)
     if not active_sub:
         await callback.answer(
             texts.t("SUBSCRIPTION_NOT_ACTIVE", "Подписка не активна."),
@@ -1244,6 +1342,9 @@ async def show_renew_current(
 
     period_prices = select_prices_for_cohort(plan, resolve_pricing_cohort(db_user))
     hot_offer = await hot_invoice_offer_service.get_available_offer(db, db_user.id)
+    expired_offer = None
+    if hot_offer is None:
+        expired_offer = await expired_subscription_offer_service.get_available_offer(db, db_user.id)
     if hot_offer is not None:
         await hot_invoice_offer_service.activate_offer(db, hot_offer)
         for period_days, base_price in list(period_prices.items()):
@@ -1257,6 +1358,19 @@ async def show_renew_current(
             )
             if hot_price is not None:
                 period_prices[period_days] = hot_price
+    elif expired_offer is not None:
+        await expired_subscription_offer_service.activate_offer(db, expired_offer)
+        for period_days, base_price in list(period_prices.items()):
+            expired_price, _, _ = await _get_expired_subscription_tariff_offer(
+                db,
+                db_user,
+                plan_code=plan.code,
+                period_days=period_days,
+                base_price_kopeks=base_price,
+                activate=True,
+            )
+            if expired_price is not None:
+                period_prices[period_days] = expired_price
 
     description = texts.t(
         f"TARIFF_CARD_{plan.code.upper()}",
@@ -1297,7 +1411,7 @@ async def apply_renewal(
         await callback.answer("bad_period", show_alert=False)
         return
 
-    active_sub = await _resolve_active_subscription(db_user)
+    active_sub = await _resolve_renewable_subscription(db_user)
     if not active_sub or active_sub.plan_id != plan_id:
         await callback.answer(
             texts.t("SUBSCRIPTION_NOT_ACTIVE", "Подписка не активна."),
@@ -1344,6 +1458,17 @@ async def _execute_renewal(
     )
     if hot_price is not None:
         price_kopeks = hot_price
+    else:
+        hot_price, hot_offer, hot_offer_type = await _get_expired_subscription_tariff_offer(
+            db,
+            db_user,
+            plan_code=plan.code,
+            period_days=period_days,
+            base_price_kopeks=base_price_kopeks,
+            activate=True,
+        )
+        if hot_price is not None:
+            price_kopeks = hot_price
 
     if db_user.balance_kopeks < price_kopeks:
         missing = price_kopeks - db_user.balance_kopeks
@@ -1384,15 +1509,14 @@ async def _execute_renewal(
         )
         return
     subscription, transaction, old_end_date = result
-    if hot_offer is not None:
-        await hot_invoice_offer_service.mark_claimed_after_purchase(
-            db,
-            hot_offer,
-            plan_code=plan.code,
-            period_days=period_days,
-            base_price_kopeks=base_price_kopeks,
-            price_kopeks=price_kopeks,
-        )
+    await _mark_tariff_offer_claimed(
+        db,
+        hot_offer,
+        plan_code=plan.code,
+        period_days=period_days,
+        base_price_kopeks=base_price_kopeks,
+        price_kopeks=price_kopeks,
+    )
 
     try:
         await send_extension_notification(

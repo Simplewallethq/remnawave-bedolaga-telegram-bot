@@ -17,6 +17,10 @@ from app.services.hot_invoice_offer_service import (
     HotInvoiceCandidate,
     hot_invoice_offer_service,
 )
+from app.services.expired_subscription_offer_service import (
+    ExpiredSubscriptionCandidate,
+    expired_subscription_offer_service,
+)
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 
 
@@ -74,6 +78,26 @@ class InteractiveNotificationService:
             hot_invoice_offer_service.FOURTH_EVENING_SLOT_KEY,
             datetime_time(hour=21, minute=0),
         ),
+        InteractiveNotificationSlot(
+            expired_subscription_offer_service.FIRST_SLOT_KEY,
+            interval=timedelta(minutes=1),
+        ),
+        InteractiveNotificationSlot(
+            expired_subscription_offer_service.SECOND_SLOT_KEY,
+            datetime_time(hour=10, minute=0),
+        ),
+        InteractiveNotificationSlot(
+            expired_subscription_offer_service.THIRD_SLOT_KEY,
+            datetime_time(hour=21, minute=0),
+        ),
+        InteractiveNotificationSlot(
+            expired_subscription_offer_service.FOURTH_MORNING_SLOT_KEY,
+            datetime_time(hour=10, minute=0),
+        ),
+        InteractiveNotificationSlot(
+            expired_subscription_offer_service.FOURTH_EVENING_SLOT_KEY,
+            datetime_time(hour=21, minute=0),
+        ),
         *(
             InteractiveNotificationSlot(key, run_at.timetz().replace(tzinfo=None), run_at)
             for key, run_at in legacy_pro_offer_service.get_one_off_schedule()
@@ -85,6 +109,7 @@ class InteractiveNotificationService:
         self.bot: Optional[Bot] = None
         self._task: Optional[asyncio.Task] = None
         self._debug_task: Optional[asyncio.Task] = None
+        self._expired_debug_task: Optional[asyncio.Task] = None
         self._next_run: Optional[datetime] = None
 
     def set_bot(self, bot: Bot) -> None:
@@ -103,6 +128,10 @@ class InteractiveNotificationService:
         self._task = asyncio.create_task(self._run_loop())
         if hot_invoice_offer_service.is_debug_enabled():
             self._debug_task = asyncio.create_task(self._run_hot_invoice_debug_sequence())
+        if expired_subscription_offer_service.is_debug_enabled():
+            self._expired_debug_task = asyncio.create_task(
+                self._run_expired_subscription_debug_sequence()
+            )
         slots_text = ", ".join(
             self._format_slot_for_log(slot) for slot in self.SLOTS
         )
@@ -123,6 +152,13 @@ class InteractiveNotificationService:
             except asyncio.CancelledError:
                 pass
         self._debug_task = None
+        if self._expired_debug_task and not self._expired_debug_task.done():
+            self._expired_debug_task.cancel()
+            try:
+                await self._expired_debug_task
+            except asyncio.CancelledError:
+                pass
+        self._expired_debug_task = None
         self._next_run = None
 
     async def _run_loop(self) -> None:
@@ -299,6 +335,9 @@ class InteractiveNotificationService:
 
         if slot.key in hot_invoice_offer_service.SLOT_KEYS:
             return await self._send_hot_invoice_touch(slot)
+
+        if slot.key in expired_subscription_offer_service.SLOT_KEYS:
+            return await self._send_expired_subscription_touch(slot)
 
         if legacy_pro_offer_service.get_message_for_slot(slot.key):
             return await self._send_legacy_pro_offer_touch(slot)
@@ -595,6 +634,282 @@ class InteractiveNotificationService:
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "Не удалось отправить Segment B пользователю %s: %s",
+                candidate.user.telegram_id,
+                exc,
+            )
+            return None
+        return sent_message.message_id
+
+    async def _send_expired_subscription_touch(
+        self,
+        slot: InteractiveNotificationSlot,
+    ) -> InteractiveNotificationResult:
+        if expired_subscription_offer_service.is_debug_enabled():
+            return InteractiveNotificationResult(
+                status="processed",
+                payload={"sent": 0, "failed": 0, "skipped": 0, "debug": True},
+            )
+        if not self.bot:
+            return InteractiveNotificationResult(
+                status="skipped",
+                error="Bot instance is not available",
+            )
+
+        sent = 0
+        failed = 0
+        skipped = 0
+        now = datetime.utcnow()
+
+        async with AsyncSessionLocal() as db:
+            after_subscription_id = 0
+            while True:
+                if slot.key == expired_subscription_offer_service.FIRST_SLOT_KEY:
+                    candidates = await expired_subscription_offer_service.list_first_touch_candidates(
+                        db,
+                        now_utc=now,
+                        after_subscription_id=after_subscription_id,
+                        limit=self.BATCH_LIMIT,
+                    )
+                else:
+                    candidates = await expired_subscription_offer_service.list_daily_touch_candidates(
+                        db,
+                        slot.key,
+                        now_utc=now,
+                        after_subscription_id=after_subscription_id,
+                        limit=self.BATCH_LIMIT,
+                    )
+                if not candidates:
+                    break
+
+                after_subscription_id = max(candidate.subscription.id for candidate in candidates)
+                for candidate in candidates:
+                    if await expired_subscription_offer_service.was_touch_sent(
+                        db,
+                        user_id=candidate.user.id,
+                        slot_key=slot.key,
+                        campaign_key=candidate.campaign_key,
+                    ):
+                        skipped += 1
+                        continue
+                    if slot.key in (
+                        expired_subscription_offer_service.THIRD_SLOT_KEY,
+                        expired_subscription_offer_service.FOURTH_MORNING_SLOT_KEY,
+                        expired_subscription_offer_service.FOURTH_EVENING_SLOT_KEY,
+                    ) and not await expired_subscription_offer_service.was_touch_sent(
+                        db,
+                        user_id=candidate.user.id,
+                        slot_key=expired_subscription_offer_service.SECOND_SLOT_KEY,
+                        campaign_key=candidate.campaign_key,
+                    ):
+                        skipped += 1
+                        continue
+                    if not await expired_subscription_offer_service.is_campaign_eligible(
+                        db,
+                        candidate,
+                        now_utc=now,
+                    ):
+                        skipped += 1
+                        continue
+
+                    offer = None
+                    offer_created = False
+                    if slot.key in (
+                        expired_subscription_offer_service.FOURTH_MORNING_SLOT_KEY,
+                        expired_subscription_offer_service.FOURTH_EVENING_SLOT_KEY,
+                    ):
+                        offer = await expired_subscription_offer_service.get_available_offer(
+                            db, candidate.user.id
+                        )
+                        if offer is None:
+                            if await expired_subscription_offer_service.has_conflicting_active_offer(
+                                db, candidate.user.id
+                            ):
+                                skipped += 1
+                                continue
+                            offer = await expired_subscription_offer_service.ensure_discount_offer(
+                                db, candidate
+                            )
+                            offer_created = True
+
+                    message_id = await self._send_expired_subscription_message(
+                        candidate,
+                        slot.key,
+                    )
+                    payload = expired_subscription_offer_service.build_campaign_payload(candidate)
+                    if offer:
+                        payload["offer_id"] = offer.id
+
+                    if message_id:
+                        sent += 1
+                        await self._record_log(
+                            slot,
+                            status="sent",
+                            user_id=candidate.user.id,
+                            telegram_id=candidate.user.telegram_id,
+                            message_id=message_id,
+                            payload=payload,
+                        )
+                    else:
+                        failed += 1
+                        if offer_created and offer is not None:
+                            await expired_subscription_offer_service.deactivate_offer(db, offer)
+                        await self._record_log(
+                            slot,
+                            status="failed",
+                            user_id=candidate.user.id,
+                            telegram_id=candidate.user.telegram_id,
+                            error="send_message_failed",
+                            payload=payload,
+                        )
+
+        return InteractiveNotificationResult(
+            status="processed",
+            payload={"sent": sent, "failed": failed, "skipped": skipped},
+        )
+
+    async def _run_expired_subscription_debug_sequence(self) -> None:
+        if not self.bot:
+            logger.warning("Segment C debug: bot instance is not available")
+            return
+
+        interval = expired_subscription_offer_service.debug_touch_interval()
+        logger.warning(
+            "Segment C debug is enabled: sending all waves to Artem with %s seconds interval",
+            int(interval.total_seconds()),
+        )
+
+        for index, slot_key in enumerate(expired_subscription_offer_service.SLOT_KEYS):
+            if index > 0:
+                await asyncio.sleep(interval.total_seconds())
+
+            async with AsyncSessionLocal() as db:
+                candidate = await expired_subscription_offer_service.get_debug_candidate(db)
+                if candidate is None:
+                    logger.warning(
+                        "Segment C debug: Artem user or tiered subscription was not found"
+                    )
+                    return
+
+                offer = None
+                if slot_key in (
+                    expired_subscription_offer_service.FOURTH_MORNING_SLOT_KEY,
+                    expired_subscription_offer_service.FOURTH_EVENING_SLOT_KEY,
+                ):
+                    offer = await expired_subscription_offer_service.ensure_discount_offer(
+                        db,
+                        candidate,
+                    )
+
+                message_id = await self._send_expired_subscription_message(
+                    candidate,
+                    slot_key,
+                )
+                payload = expired_subscription_offer_service.build_campaign_payload(candidate)
+                payload["debug"] = True
+                if offer:
+                    payload["offer_id"] = offer.id
+
+                await self._record_log(
+                    InteractiveNotificationSlot(slot_key),
+                    status="sent" if message_id else "failed",
+                    user_id=candidate.user.id,
+                    telegram_id=candidate.user.telegram_id,
+                    message_id=message_id,
+                    error=None if message_id else "debug_send_failed",
+                    payload=payload,
+                )
+
+    async def _send_expired_subscription_message(
+        self,
+        candidate: ExpiredSubscriptionCandidate,
+        slot_key: str,
+    ) -> Optional[int]:
+        if not self.bot or candidate.user.telegram_id is None:
+            return None
+
+        plan_code = candidate.plan_code
+        plan_name = candidate.plan_name
+        if slot_key == expired_subscription_offer_service.FIRST_SLOT_KEY:
+            text = (
+                "<b>⛔ Подписка закончилась</b>\n\n"
+                "Доступ к серверам отключён. Продли, чтобы вернуть VPN — займёт минуту."
+            )
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="💎 Восстановить подписку",
+                            callback_data="subscription_renew_current",
+                        )
+                    ]
+                ]
+            )
+        elif slot_key == expired_subscription_offer_service.SECOND_SLOT_KEY:
+            text = (
+                "<b>Без VPN уже сутки — всё ещё нужен? 🙂</b>\n\n"
+                "Твой прежний тариф на месте, восстановить можно в один тап."
+            )
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="💎 Вернуть доступ",
+                            callback_data="subscription_renew_current",
+                        )
+                    ]
+                ]
+            )
+        elif slot_key == expired_subscription_offer_service.THIRD_SLOT_KEY:
+            text = (
+                "<b>Возвращайся — мы соскучились 👋</b>\n\n"
+                "VPN готов подключиться там, где остановились. Настройки сохранены."
+            )
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="💎 Восстановить",
+                            callback_data="subscription_renew_current",
+                        )
+                    ],
+                    [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu_support")],
+                ]
+            )
+        else:
+            if not plan_code:
+                return None
+            if slot_key == expired_subscription_offer_service.FOURTH_MORNING_SLOT_KEY:
+                text = (
+                    "<b>🎁 Скидка −20% на возврат — только сегодня</b>\n\n"
+                    "Мы бы хотели, чтобы ты остался. Держи скидку на восстановление тарифа.\n\n"
+                    "⏰ До 22:00 MSK."
+                )
+            else:
+                text = (
+                    "<b>⏰ Час до конца скидки</b>\n\n"
+                    "Скидка −20% сгорит в 22:00 MSK. Другого такого предложения не будет."
+                )
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text=f"💎 Восстановить {plan_name} −20%",
+                            callback_data=f"tariff_select:{plan_code}",
+                        )
+                    ]
+                ]
+            )
+
+        try:
+            sent_message = await self.bot.send_message(
+                int(candidate.user.telegram_id),
+                text,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Не удалось отправить Segment C пользователю %s: %s",
                 candidate.user.telegram_id,
                 exc,
             )
