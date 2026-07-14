@@ -36,7 +36,7 @@ class HotInvoiceCandidate:
         return self.payment.created_at + timedelta(hours=1)
 
 
-IS_ARTEM_DEBUG = True
+IS_ARTEM_DEBUG = False
 ARTEM_DEBUG_USER_ID = 18835
 ARTEM_DEBUG_TOUCH_INTERVAL = timedelta(minutes=5)
 

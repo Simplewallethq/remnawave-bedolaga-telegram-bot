@@ -29,6 +29,17 @@ def _payment(created_at: datetime, payment_id: int = 1) -> PlategaPayment:
     )
 
 
+class _AsyncSessionContext:
+    def __init__(self, db):
+        self.db = db
+
+    async def __aenter__(self):
+        return self.db
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+
 def test_first_touch_window_is_50_to_55_minutes() -> None:
     now = datetime(2026, 7, 13, 9, 0)
 
@@ -255,6 +266,106 @@ async def test_scheduler_returns_all_slots_with_same_time(monkeypatch) -> None:
 
     assert [slot.key for slot in slots] == ["first", "second"]
     assert next_run == datetime(2026, 7, 13, 7, 0, tzinfo=timezone.utc)
+
+
+async def test_later_touch_requires_second_touch_for_same_campaign(monkeypatch) -> None:
+    db = AsyncMock()
+    candidate = HotInvoiceCandidate(
+        payment=_payment(datetime(2026, 7, 10, 6, 0), payment_id=77),
+        user=User(id=10, telegram_id=1000, status="active"),
+    )
+    service = InteractiveNotificationService()
+    service.bot = AsyncMock()
+    send_message = AsyncMock()
+    record_log = AsyncMock()
+    was_touch_sent = AsyncMock(side_effect=[False, False])
+
+    monkeypatch.setattr(
+        interactive_module,
+        "AsyncSessionLocal",
+        lambda: _AsyncSessionContext(db),
+    )
+    monkeypatch.setattr(hot_invoice_offer_service, "is_debug_enabled", lambda: False)
+    monkeypatch.setattr(
+        hot_invoice_offer_service,
+        "get_active_campaign_payment_id",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        hot_invoice_offer_service,
+        "list_daily_touch_candidates",
+        AsyncMock(side_effect=[[candidate], []]),
+    )
+    monkeypatch.setattr(hot_invoice_offer_service, "was_touch_sent", was_touch_sent)
+    monkeypatch.setattr(
+        hot_invoice_offer_service,
+        "is_campaign_eligible",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(service, "_send_hot_invoice_message", send_message)
+    monkeypatch.setattr(service, "_record_log", record_log)
+
+    result = await service._send_hot_invoice_touch(
+        InteractiveNotificationSlot(hot_invoice_offer_service.THIRD_SLOT_KEY)
+    )
+
+    assert result.payload == {"sent": 0, "failed": 0, "skipped": 1}
+    assert (
+        was_touch_sent.await_args_list[0].kwargs["slot_key"]
+        == hot_invoice_offer_service.THIRD_SLOT_KEY
+    )
+    assert (
+        was_touch_sent.await_args_list[1].kwargs["slot_key"]
+        == hot_invoice_offer_service.SECOND_SLOT_KEY
+    )
+    send_message.assert_not_awaited()
+    record_log.assert_not_awaited()
+
+
+async def test_later_touch_sends_when_second_touch_exists(monkeypatch) -> None:
+    db = AsyncMock()
+    candidate = HotInvoiceCandidate(
+        payment=_payment(datetime(2026, 7, 10, 6, 0), payment_id=77),
+        user=User(id=10, telegram_id=1000, status="active"),
+    )
+    service = InteractiveNotificationService()
+    service.bot = AsyncMock()
+    send_message = AsyncMock(return_value=42)
+    record_log = AsyncMock()
+    was_touch_sent = AsyncMock(side_effect=[False, True])
+
+    monkeypatch.setattr(
+        interactive_module,
+        "AsyncSessionLocal",
+        lambda: _AsyncSessionContext(db),
+    )
+    monkeypatch.setattr(hot_invoice_offer_service, "is_debug_enabled", lambda: False)
+    monkeypatch.setattr(
+        hot_invoice_offer_service,
+        "get_active_campaign_payment_id",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        hot_invoice_offer_service,
+        "list_daily_touch_candidates",
+        AsyncMock(side_effect=[[candidate], []]),
+    )
+    monkeypatch.setattr(hot_invoice_offer_service, "was_touch_sent", was_touch_sent)
+    monkeypatch.setattr(
+        hot_invoice_offer_service,
+        "is_campaign_eligible",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(service, "_send_hot_invoice_message", send_message)
+    monkeypatch.setattr(service, "_record_log", record_log)
+
+    result = await service._send_hot_invoice_touch(
+        InteractiveNotificationSlot(hot_invoice_offer_service.THIRD_SLOT_KEY)
+    )
+
+    assert result.payload == {"sent": 1, "failed": 0, "skipped": 0}
+    send_message.assert_awaited_once()
+    record_log.assert_awaited_once()
 
 
 def test_campaign_payload_anchors_platega_invoice() -> None:

@@ -367,6 +367,18 @@ class InteractiveNotificationService:
                     ):
                         skipped += 1
                         continue
+                    if slot.key in (
+                        hot_invoice_offer_service.THIRD_SLOT_KEY,
+                        hot_invoice_offer_service.FOURTH_MORNING_SLOT_KEY,
+                        hot_invoice_offer_service.FOURTH_EVENING_SLOT_KEY,
+                    ) and not await hot_invoice_offer_service.was_touch_sent(
+                        db,
+                        user_id=candidate.user.id,
+                        slot_key=hot_invoice_offer_service.SECOND_SLOT_KEY,
+                        campaign_key=candidate.campaign_key,
+                    ):
+                        skipped += 1
+                        continue
                     if not await hot_invoice_offer_service.is_campaign_eligible(db, candidate.payment):
                         skipped += 1
                         continue
