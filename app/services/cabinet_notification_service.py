@@ -166,6 +166,42 @@ def _is_enabled() -> bool:
     return bool(settings.CABINET_ENABLED and settings.CABINET_NOTIFICATIONS_ENABLED)
 
 
+# Лимит получателей одного вызова push-вебхука (совпадает с капом бэкенда).
+_APP_PUSH_CHUNK_SIZE = 10_000
+
+
+def _schedule_app_push(
+    user_ids: List[int],
+    *,
+    notification_id: Optional[int],
+    type: str,
+    title: Optional[str],
+    body: Optional[str],
+    payload: Optional[Dict[str, Any]],
+    created_at: Optional[str],
+) -> None:
+    """Fire-and-forget FCM-пуш через teleVpn-вебхук. Никогда не raises."""
+    try:
+        from app.external.app_push import is_configured, send_app_push
+
+        if not is_configured():
+            return
+        for start in range(0, len(user_ids), _APP_PUSH_CHUNK_SIZE):
+            asyncio.create_task(
+                send_app_push(
+                    user_ids[start : start + _APP_PUSH_CHUNK_SIZE],
+                    notification_id=notification_id,
+                    type=type,
+                    title=title,
+                    body=body,
+                    payload=payload,
+                    created_at=created_at,
+                )
+            )
+    except Exception:
+        logger.warning("Не удалось запланировать app push (%s)", type, exc_info=True)
+
+
 def _resolve_texts(
     type: str, title: Optional[str], body: Optional[str]
 ) -> tuple:
@@ -200,6 +236,17 @@ async def notify(
             payload=payload,
         )
         cabinet_notification_hub.publish(user_id, serialize_notification(notification))
+        _schedule_app_push(
+            [user_id],
+            notification_id=notification.id,
+            type=type,
+            title=resolved_title,
+            body=resolved_body,
+            payload=payload,
+            created_at=(
+                notification.created_at.isoformat() if notification.created_at else None
+            ),
+        )
         return notification
     except Exception:
         logger.error(
@@ -293,6 +340,18 @@ async def notify_bulk(
                         cabinet_notification_hub.publish(
                             user_id, serialize_notification(items[0])
                         )
+
+            # Пуш — всем получателям, не только подключённым к SSE; per-user id
+            # после bulk insert недоступен, поэтому id=0.
+            _schedule_app_push(
+                ids,
+                notification_id=None,
+                type=type,
+                title=resolved_title,
+                body=resolved_body,
+                payload=payload,
+                created_at=None,
+            )
             return created
     except Exception:
         logger.error(

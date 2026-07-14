@@ -507,6 +507,16 @@ class Settings(BaseSettings):
     CABINET_NOTIFICATIONS_SSE_TICKET_TTL_SECONDS: int = 300
     CABINET_NOTIFICATIONS_HEARTBEAT_SECONDS: int = 25
 
+    # Push-уведомления приложений: webhook в teleVpn-бэкенд, который шлёт FCM.
+    # Достаточно задать APP_PUSH_WEBHOOK_URL — ключ по умолчанию совпадает с
+    # дефолтом PUSH_INBOUND_API_KEY бэкенда (оба репо приватные).
+    APP_PUSH_ENABLED: bool = True
+    APP_PUSH_WEBHOOK_URL: str = ""  # напр. https://backend.example.com/internal/v1/push/notify
+    APP_PUSH_API_KEY: str = (
+        "49b98d0ceb54381d80cd51c2ec19c64918cb12ad3092258696e9b09d6bc1bf09"
+    )
+    APP_PUSH_TIMEOUT_SECONDS: int = 10
+
     # SendGrid (письма кабинета: коды подтверждения)
     SENDGRID_API_KEY: Optional[str] = None
     SENDGRID_FROM_EMAIL: Optional[str] = None
