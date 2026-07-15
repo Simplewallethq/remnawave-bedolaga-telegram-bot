@@ -77,6 +77,8 @@ logger = logging.getLogger(__name__)
 
 class MonitoringService:
     SEND_AUTOPAY_USER_NOTIFICATIONS = False
+    SEND_LEGACY_EXPIRED_TELEGRAM_NOTIFICATIONS = False
+    SEND_LEGACY_EXPIRED_FOLLOWUPS = False
     
     def __init__(self, bot=None):
         self.is_running = False
@@ -309,7 +311,11 @@ class MonitoringService:
                             else None,
                         },
                     )
-                if user and self.bot:
+                if (
+                    self.SEND_LEGACY_EXPIRED_TELEGRAM_NOTIFICATIONS
+                    and user
+                    and self.bot
+                ):
                     await self._send_subscription_expired_notification(user)
 
                 logger.info(f"🔴 Подписка пользователя {subscription.user_id} истекла и статус изменен на 'expired'")
@@ -762,6 +768,8 @@ class MonitoringService:
 
     async def _check_expired_subscription_followups(self, db: AsyncSession):
         if not NotificationSettingsService.are_notifications_globally_enabled():
+            return
+        if not self.SEND_LEGACY_EXPIRED_FOLLOWUPS:
             return
         if not self.bot:
             return

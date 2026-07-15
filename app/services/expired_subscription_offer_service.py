@@ -50,7 +50,7 @@ class ExpiredSubscriptionCandidate:
         return getattr(plan, "display_name", None) or self.plan_code or "тариф"
 
 
-IS_ARTEM_DEBUG = True
+IS_ARTEM_DEBUG = False
 ARTEM_DEBUG_USER_ID = 18835
 ARTEM_DEBUG_TOUCH_INTERVAL = timedelta(minutes=5)
 

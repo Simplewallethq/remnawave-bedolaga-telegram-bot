@@ -21,14 +21,14 @@ class NotificationSettingsService:
         "trial_inactive_1h": {"enabled": True},
         "trial_inactive_24h": {"enabled": True},
         "trial_channel_unsubscribed": {"enabled": True},
-        "expired_1d": {"enabled": True},
+        "expired_1d": {"enabled": False},
         "expired_second_wave": {
-            "enabled": True,
+            "enabled": False,
             "discount_percent": 10,
             "valid_hours": 24,
         },
         "expired_third_wave": {
-            "enabled": True,
+            "enabled": False,
             "discount_percent": 20,
             "valid_hours": 24,
             "trigger_days": 5,
