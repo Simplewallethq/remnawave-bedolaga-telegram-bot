@@ -189,16 +189,34 @@ class SubscriptionService:
 
             async with self.get_api_client() as api:
                 hwid_limit = resolve_hwid_device_limit_for_payload(subscription)
-                # Веб-пользователи кабинета не имеют telegram_id — поиск по нему пропускаем
-                existing_users = (
-                    await api.get_user_by_telegram_id(user.telegram_id)
-                    if user.telegram_id
-                    else None
-                )
-                if existing_users:
-                    logger.info(f"🔄 Найден существующий пользователь в панели для {user.telegram_id}")
-                    remnawave_user = existing_users[0]
-                    
+
+                if user.telegram_id:
+                    username = settings.format_remnawave_username(
+                        full_name=user.full_name,
+                        username=user.username,
+                        telegram_id=user.telegram_id,
+                    )
+                else:
+                    # Веб-пользователь без Telegram: детерминированный username.
+                    # Паддинг до 10 символов — RemnaWave требует username длиннее 5.
+                    username = f"web_{user.id:06d}"
+
+                # Ищем существующего пользователя панели: по telegram_id (веб-пользователи
+                # кабинета его не имеют), затем по сохранённому UUID, затем по username —
+                # иначе create_user упадёт с "username already exists".
+                remnawave_user = None
+                if user.telegram_id:
+                    existing_users = await api.get_user_by_telegram_id(user.telegram_id)
+                    if existing_users:
+                        remnawave_user = existing_users[0]
+                if remnawave_user is None and user.remnawave_uuid:
+                    remnawave_user = await api.get_user_by_uuid(user.remnawave_uuid)
+                if remnawave_user is None:
+                    remnawave_user = await api.get_user_by_username(username)
+
+                if remnawave_user:
+                    logger.info(f"🔄 Найден существующий пользователь в панели для {user.telegram_id or user.email}")
+
                     try:
                         await api.reset_user_devices(remnawave_user.uuid)
                         logger.info(f"🔧 Сброшены HWID устройства для пользователя {user.telegram_id}")
@@ -237,16 +255,6 @@ class SubscriptionService:
 
                 else:
                     logger.info(f"🆕 Создаем нового пользователя в панели для {user.telegram_id or user.email}")
-                    if user.telegram_id:
-                        username = settings.format_remnawave_username(
-                            full_name=user.full_name,
-                            username=user.username,
-                            telegram_id=user.telegram_id,
-                        )
-                    else:
-                        # Веб-пользователь без Telegram: детерминированный username.
-                        # Паддинг до 10 символов — RemnaWave требует username длиннее 5.
-                        username = f"web_{user.id:06d}"
                     create_kwargs = dict(
                         username=username,
                         expire_at=subscription.end_date,

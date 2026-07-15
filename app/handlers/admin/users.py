@@ -4440,7 +4440,9 @@ async def _admin_assign_tariff(
         )
 
         try:
-            await SubscriptionService().create_remnawave_user(db, subscription)
+            remnawave_user = await SubscriptionService().create_remnawave_user(db, subscription)
+            if remnawave_user is None:
+                logger.error(f"Не удалось синхронизировать подписку {subscription.id} с панелью (см. ошибки выше)")
         except Exception as e:
             logger.warning(f"Не удалось синхронизировать подписку {subscription.id} с панелью: {e}")
 
