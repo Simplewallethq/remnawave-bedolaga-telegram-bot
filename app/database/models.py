@@ -82,6 +82,12 @@ class RayPrizeClaimStatus(Enum):
     CANCELLED = "cancelled"  # ⚪ Отменено — лучи возвращены
 
 
+class WithdrawalStatus(Enum):
+    PENDING = "pending"    # 🟡 Ожидает — сумма зарезервирована (списана с баланса)
+    PAID = "paid"          # 🟢 Выплачено админом
+    REJECTED = "rejected"  # 🔴 Отклонено — сумма возвращена на баланс
+
+
 class PromoCodeType(Enum):
     BALANCE = "balance"
     SUBSCRIPTION_DAYS = "subscription_days"
@@ -1175,6 +1181,9 @@ class RayPrizeClaim(Base):
     prize_code = Column(String(32), nullable=False)    # код приза из каталога
     prize_title = Column(String(128), nullable=False)  # название на момент заявки
     cost_rays = Column(Integer, nullable=False)
+    # TG-контакт из формы кабинета сайта (в боте не заполняется —
+    # там контакт и так известен из telegram_id/username).
+    contact = Column(String(255), nullable=True)
 
     status = Column(
         String(20), nullable=False,
@@ -1190,6 +1199,42 @@ class RayPrizeClaim(Base):
     cancelled_at = Column(DateTime, nullable=True)
 
     user = relationship("User", foreign_keys=[user_id])
+
+
+class WithdrawalRequest(Base):
+    """Заявка на вывод реферальных рублей (кабинет сайта).
+
+    Сумма списывается с баланса в момент создания (debit_transaction_id) и
+    возвращается при отклонении (refund_transaction_id). Обрабатывается
+    админом вручную из TG-уведомления (кнопки «Выплачено»/«Отклонить»).
+    """
+    __tablename__ = "withdrawal_requests"
+
+    id = Column(Integer, primary_key=True, index=True)  # публичный «№ заявки»
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    amount_kopeks = Column(Integer, nullable=False)
+    # Реквизиты для выплаты (TG-юзернейм для связи).
+    details = Column(String(255), nullable=False)
+
+    status = Column(
+        String(20), nullable=False,
+        default=WithdrawalStatus.PENDING.value, index=True,
+    )
+
+    debit_transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    refund_transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    # Telegram id админа, обработавшего заявку.
+    processed_by = Column(BigInteger, nullable=True)
+
+    created_at = Column(DateTime, default=func.now())
+    processed_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+    @property
+    def amount_rubles(self) -> float:
+        return self.amount_kopeks / 100
     spend_transaction = relationship("RayTransaction", foreign_keys=[spend_transaction_id])
     refund_transaction = relationship("RayTransaction", foreign_keys=[refund_transaction_id])
 

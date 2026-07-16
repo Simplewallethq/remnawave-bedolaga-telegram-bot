@@ -7,9 +7,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.database.crud.referral import (
@@ -20,7 +23,15 @@ from app.database.crud.transaction import (
     get_user_transactions,
     get_user_transactions_count,
 )
-from app.database.models import Subscription, TransactionType, User
+from app.database.models import (
+    RayTransaction,
+    ReferralEarning,
+    Subscription,
+    Transaction,
+    TransactionType,
+    User,
+)
+from app.utils.user_utils import get_effective_referral_commission_percent
 from app.services.plan_pricing_service import (
     get_lowest_monthly_price,
     list_active_plans,
@@ -66,6 +77,9 @@ def build_user_profile(user: User) -> Dict[str, Any]:
         "balanceRub": round(user.balance_kopeks / 100, 2),
         "email": user.email,
         "authSource": user.auth_source,
+        "tgUsername": user.username or None,
+        "tgId": user.telegram_id,
+        "firstName": user.first_name or None,
     }
 
 
@@ -273,21 +287,48 @@ def _referral_link(user: User) -> str:
     return f"?ref={code}"
 
 
+def _friend_display_name(friend: Optional[User]) -> Optional[str]:
+    """Имя реферала для фронта. Email не отдаём: у веб-юзеров full_name
+    падает в email — это утечка чужого контакта рефереру."""
+    if friend is None:
+        return None
+    parts = [p for p in (friend.first_name, friend.last_name) if p]
+    if parts:
+        return " ".join(parts)
+    if friend.username:
+        return friend.username
+    return None
+
+
 async def build_referral(db: AsyncSession, user: User) -> Dict[str, Any]:
     stats = await get_user_referral_stats(db, user.id)
     invited = stats.get("invited_count", 0) or 0
+    active = stats.get("active_referrals", 0) or 0
     earned_kopeks = stats.get("total_earned_kopeks", 0) or 0
     earned_rub = round(earned_kopeks / 100, 2)
     reward_per_friend = round(earned_rub / invited, 2) if invited else 0
+
+    from app.services.withdrawal_service import get_withdrawal_summary
+
+    summary = await get_withdrawal_summary(db, user, earned_kopeks=earned_kopeks)
 
     return {
         "code": user.referral_code,
         "link": _referral_link(user),
         "invited": invited,
-        "activeReferrals": stats.get("active_referrals", 0) or 0,
+        "activeReferrals": active,
+        # Фронт (Referrals.jsx) читает activeInvited — дубль для совместимости.
+        "activeInvited": active,
         "earnedRub": earned_rub,
         "rewardPerFriendRub": reward_per_friend,
-        "commissionPercent": settings.REFERRAL_COMMISSION_PERCENT,
+        "commissionPercent": get_effective_referral_commission_percent(user),
+        "rays": user.rays_balance or 0,
+        "raysLifetime": user.rays_lifetime_earned or 0,
+        "balanceRub": summary["available_rub"],
+        "pendingWithdrawalRub": summary["pending_rub"],
+        "withdrawnRub": summary["withdrawn_rub"],
+        "minWithdrawalRub": summary["min_rub"],
+        "withdrawalEnabled": summary["enabled"],
     }
 
 
@@ -295,21 +336,182 @@ async def build_referral_payouts(
     db: AsyncSession, user: User, limit: int = 50, offset: int = 0
 ) -> List[Dict[str, Any]]:
     earnings = await get_referral_earnings_by_user(db, user.id, limit=limit, offset=offset)
+
+    # Лучи за те же события: RayTransaction связан с транзакцией оплаты
+    # реферала через source_transaction_id (уникален — идемпотентность).
+    tx_ids = [e.referral_transaction_id for e in earnings if e.referral_transaction_id]
+    rays_by_tx: Dict[int, int] = {}
+    if tx_ids:
+        rows = await db.execute(
+            select(RayTransaction.source_transaction_id, RayTransaction.amount).where(
+                RayTransaction.user_id == user.id,
+                RayTransaction.amount > 0,
+                RayTransaction.source_transaction_id.in_(tx_ids),
+            )
+        )
+        for src_id, amount in rows.all():
+            rays_by_tx[src_id] = rays_by_tx.get(src_id, 0) + amount
+
     payouts: List[Dict[str, Any]] = []
     for e in earnings:
-        # Не трогаем referral.subscription — связь не загружена eager,
-        # ленивый доступ вне async-сессии даёт MissingGreenlet. planName опционально.
-        plan_name = None
+        # referral и referral_transaction загружены eager (crud/referral.py);
+        # referral.subscription НЕ загружен — трогать нельзя (MissingGreenlet).
+        friend = e.referral
+        tx = e.referral_transaction
         payouts.append(
             {
                 "id": f"rp_{e.id}",
                 "friendIndex": e.referral_id,
-                "planName": plan_name,
+                "friendName": _friend_display_name(friend),
+                "friendUsername": friend.username if friend else None,
+                "planName": None,
                 "amount": round(e.amount_kopeks / 100, 2),
+                "friendPaidRub": round(tx.amount_kopeks / 100, 2) if tx else None,
+                "raysEarned": rays_by_tx.get(e.referral_transaction_id, 0),
                 "date": e.created_at.isoformat() if e.created_at else None,
             }
         )
     return payouts
+
+
+async def build_referral_friends(
+    db: AsyncSession, user: User, limit: int = 100, offset: int = 0
+) -> List[Dict[str, Any]]:
+    """Приглашённые друзья с итогами: сколько друг заплатил, сколько реферер
+    получил с него рублей (комиссии) и лучей."""
+    rows = await db.execute(
+        select(User)
+        .options(selectinload(User.subscription))
+        .where(User.referred_by_id == user.id)
+        .order_by(User.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    friends = rows.scalars().all()
+
+    agg = await db.execute(
+        select(
+            ReferralEarning.referral_id,
+            func.coalesce(func.sum(ReferralEarning.amount_kopeks), 0),
+            func.coalesce(func.sum(Transaction.amount_kopeks), 0),
+        )
+        .outerjoin(Transaction, ReferralEarning.referral_transaction_id == Transaction.id)
+        .where(ReferralEarning.user_id == user.id)
+        .group_by(ReferralEarning.referral_id)
+    )
+    earn_by_friend = {rid: (earned or 0, paid or 0) for rid, earned, paid in agg.all()}
+
+    rays_rows = await db.execute(
+        select(
+            RayTransaction.referral_id,
+            func.coalesce(func.sum(RayTransaction.amount), 0),
+        )
+        .where(
+            RayTransaction.user_id == user.id,
+            RayTransaction.amount > 0,
+            RayTransaction.referral_id.isnot(None),
+        )
+        .group_by(RayTransaction.referral_id)
+    )
+    rays_by_friend = dict(rays_rows.all())
+
+    items: List[Dict[str, Any]] = []
+    for f in friends:
+        earned_kopeks, paid_kopeks = earn_by_friend.get(f.id, (0, 0))
+        sub = f.subscription
+        items.append(
+            {
+                "id": f"rf_{f.id}",
+                "name": _friend_display_name(f),
+                "username": f.username or None,
+                "createdAt": f.created_at.isoformat() if f.created_at else None,
+                "hasSubscription": bool(sub and sub.actual_status == "active"),
+                "hasPaid": bool(earned_kopeks) or bool(f.has_had_paid_subscription),
+                "paidTotalRub": round(paid_kopeks / 100, 2),
+                "earnedRub": round(earned_kopeks / 100, 2),
+                "raysEarned": int(rays_by_friend.get(f.id, 0)),
+            }
+        )
+    return items
+
+
+# ── Магазин лучей ─────────────────────────────────────────────────────────
+
+# Мап код приза (бэк, RAY_PRIZES) ↔ id приза (фронт, shopCatalog.js).
+# Цены и состав совпадают 1:1; фронт по id подставляет картинки и оформление.
+_PRIZE_ID_BY_CODE = {
+    "plus_6m": "pz_sub_plus_6",
+    "pro_1y": "pz_sub_pro_12",
+    "pro_2y": "pz_sub_pro_24",
+    "speaker": "pz_jbl",
+    "airpods": "pz_airpods",
+    "watch": "pz_watch",
+    "iphone": "pz_iphone",
+    "macbook": "pz_macbook",
+}
+_PRIZE_CODE_BY_ID = {v: k for k, v in _PRIZE_ID_BY_CODE.items()}
+
+# TG-юзернейм для заявки на физический приз (форма кабинета).
+SHOP_CONTACT_RE = re.compile(r"^@?[a-zA-Z0-9_]{4,64}$")
+
+# Статусы заявки: бэк (RayPrizeClaimStatus) → фронт (ClaimStatus).
+_CLAIM_STATUS_MAP = {
+    "pending": "pending",
+    "completed": "fulfilled",
+    "cancelled": "rejected",
+}
+
+
+def get_prize_by_cabinet_id(prize_id: str):
+    """RayPrize по фронтовому id (pz_*) либо по коду бэка (plus_6m)."""
+    from app.services.rays_shop_service import RAY_PRIZES
+
+    code = _PRIZE_CODE_BY_ID.get(prize_id, prize_id)
+    for prize in RAY_PRIZES:
+        if prize.code == code:
+            return prize
+    return None
+
+
+def build_shop(user: User) -> Dict[str, Any]:
+    from app.services.rays_shop_service import PRIZE_KIND_SUBSCRIPTION, RAY_PRIZES
+
+    tiers = sorted([
+        (settings.RAYS_TIER_1_MIN_DAYS, settings.RAYS_TIER_1_AMOUNT),
+        (settings.RAYS_TIER_2_MIN_DAYS, settings.RAYS_TIER_2_AMOUNT),
+        (settings.RAYS_TIER_3_MIN_DAYS, settings.RAYS_TIER_3_AMOUNT),
+    ])
+
+    return {
+        "enabled": settings.is_rays_shop_enabled(),
+        "rays": user.rays_balance or 0,
+        "raysLifetime": user.rays_lifetime_earned or 0,
+        "earnRules": [
+            {"months": min_days // 30, "rays": amount}
+            for min_days, amount in tiers
+        ],
+        "prizes": [
+            {
+                "id": _PRIZE_ID_BY_CODE.get(p.code, p.code),
+                "code": p.code,
+                "kind": "subscription" if p.kind == PRIZE_KIND_SUBSCRIPTION else "goods",
+                "rays": p.cost,
+                "name": p.catalog_title or p.title,
+            }
+            for p in RAY_PRIZES
+        ],
+    }
+
+
+def build_prize_claim(claim) -> Dict[str, Any]:
+    return {
+        "id": f"cl_{claim.id}",
+        "prizeId": _PRIZE_ID_BY_CODE.get(claim.prize_code, claim.prize_code),
+        "rays": claim.cost_rays,
+        "status": _CLAIM_STATUS_MAP.get(claim.status, claim.status),
+        "contact": claim.contact,
+        "createdAt": claim.created_at.isoformat() if claim.created_at else None,
+    }
 
 
 # ── Устройства (remnawave HWID) ──────────────────────────────────────────

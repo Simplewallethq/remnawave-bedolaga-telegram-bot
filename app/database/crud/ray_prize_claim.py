@@ -18,6 +18,7 @@ async def create_prize_claim(
     prize_title: str,
     cost_rays: int,
     spend_transaction_id: Optional[int] = None,
+    contact: Optional[str] = None,
     commit: bool = True,
 ) -> RayPrizeClaim:
     claim = RayPrizeClaim(
@@ -27,6 +28,7 @@ async def create_prize_claim(
         cost_rays=cost_rays,
         status=RayPrizeClaimStatus.PENDING.value,
         spend_transaction_id=spend_transaction_id,
+        contact=contact,
     )
     db.add(claim)
     if commit:

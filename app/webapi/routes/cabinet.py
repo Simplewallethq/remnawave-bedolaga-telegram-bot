@@ -41,6 +41,7 @@ from app.database.crud.user import (
     get_user_by_id,
     get_user_by_referral_code,
 )
+from app.database.crud.withdrawal import get_user_withdrawals
 from app.database.models import (
     PaymentMethod,
     SubscriptionStatus,
@@ -48,7 +49,7 @@ from app.database.models import (
     User,
     UserStatus,
 )
-from app.services import cabinet_service
+from app.services import cabinet_service, withdrawal_service
 from app.services.cabinet_auth_service import cabinet_auth_service
 from app.services.cabinet_notification_service import cabinet_notification_hub
 from app.services.payment_service import PaymentService
@@ -74,8 +75,10 @@ from app.webapi.schemas.cabinet import (
     PurchaseRequest,
     RegisterOtpRequest,
     RegisterRequest,
+    ShopRedeemRequest,
     TelegramLoginRequest,
     TopupRequest,
+    WithdrawalCreateRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -804,6 +807,154 @@ async def get_referral_payouts(
     user: User = Depends(get_current_cabinet_user),
 ) -> Dict[str, Any]:
     return {"payouts": await cabinet_service.build_referral_payouts(db, user, limit=limit, offset=offset)}
+
+
+@router.get("/referral/friends")
+async def get_referral_friends(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_cabinet_user),
+) -> Dict[str, Any]:
+    return {"friends": await cabinet_service.build_referral_friends(db, user, limit=limit, offset=offset)}
+
+
+# ── Вывод реферальных рублей ─────────────────────────────────────────────
+
+@router.get("/referral/withdrawals")
+async def get_referral_withdrawals(
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_cabinet_user),
+) -> Dict[str, Any]:
+    withdrawals = await get_user_withdrawals(db, user.id, limit=limit)
+    return {"withdrawals": [withdrawal_service.build_withdrawal(w) for w in withdrawals]}
+
+
+@router.post("/referral/withdrawals")
+async def create_referral_withdrawal(
+    payload: WithdrawalCreateRequest,
+    db: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_cabinet_user),
+) -> Dict[str, Any]:
+    amount_kopeks = int(round(payload.amount * 100))
+    try:
+        withdrawal = await withdrawal_service.create_withdrawal(
+            db, user, amount_kopeks=amount_kopeks, details=payload.details,
+        )
+    except withdrawal_service.WithdrawalError as exc:
+        raise HTTPException(exc.http_status, detail=exc.code)
+
+    return {
+        "withdrawal": withdrawal_service.build_withdrawal(withdrawal),
+        "referral": await cabinet_service.build_referral(db, user),
+    }
+
+
+# ── Магазин лучей ─────────────────────────────────────────────────────────
+
+def _ensure_shop_enabled() -> None:
+    if not settings.is_rays_shop_enabled():
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="shop_disabled")
+
+
+@router.get("/shop")
+async def get_shop(
+    user: User = Depends(get_current_cabinet_user),
+) -> Dict[str, Any]:
+    _ensure_shop_enabled()
+    return cabinet_service.build_shop(user)
+
+
+@router.get("/shop/claims")
+async def get_shop_claims(
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_cabinet_user),
+) -> Dict[str, Any]:
+    _ensure_shop_enabled()
+    from app.database.crud.ray_prize_claim import get_user_claims
+
+    claims = await get_user_claims(db, user.id, limit=limit)
+    return {"claims": [cabinet_service.build_prize_claim(c) for c in claims]}
+
+
+@router.post("/shop/redeem")
+async def redeem_shop_prize(
+    payload: ShopRedeemRequest,
+    db: AsyncSession = Depends(get_db_session),
+    user: User = Depends(get_current_cabinet_user),
+) -> Dict[str, Any]:
+    _ensure_shop_enabled()
+    from sqlalchemy import select
+
+    from app.services.rays_shop_service import (
+        PRIZE_KIND_SUBSCRIPTION,
+        create_physical_prize_claim,
+        redeem_subscription_prize,
+    )
+
+    prize = cabinet_service.get_prize_by_cabinet_id(payload.prize_id)
+    if prize is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="prize_not_found")
+
+    # Блокируем строку пользователя: параллельные redeem не должны оба пройти
+    # проверку баланса лучей (subtract_user_rays проверяет ещё раз, но с
+    # блокировкой отказ детерминированный и до побочных действий).
+    locked_user = (
+        await db.execute(select(User).where(User.id == user.id).with_for_update())
+    ).scalar_one()
+
+    if (locked_user.rays_balance or 0) < prize.cost:
+        raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, detail="insufficient_rays")
+
+    if prize.kind == PRIZE_KIND_SUBSCRIPTION:
+        subscription = await redeem_subscription_prize(db, locked_user, prize)
+        if subscription is None:
+            # Лучей хватало (проверено под блокировкой) — значит, недоступен план.
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="prize_unavailable")
+        # Цифровые призы не создают строк заявок (как в боте) — отдаём
+        # синтетическую выполненную заявку для тоста на фронте.
+        now = datetime.utcnow()
+        claim_payload = {
+            "id": f"cl_sub_{int(now.timestamp())}",
+            "prizeId": payload.prize_id,
+            "rays": prize.cost,
+            "status": "fulfilled",
+            "createdAt": now.isoformat(),
+        }
+        return {"claim": claim_payload, "rays": locked_user.rays_balance or 0}
+
+    # Физический приз — нужна заявка с контактом.
+    contact = (payload.contact or "").strip()
+    if not contact:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="contact_required")
+    if not cabinet_service.SHOP_CONTACT_RE.match(contact):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="contact_invalid")
+
+    bot = None
+    try:
+        if settings.BOT_TOKEN:
+            from aiogram import Bot
+
+            bot = Bot(token=settings.BOT_TOKEN)
+        claim = await create_physical_prize_claim(
+            db, locked_user, prize, bot=bot, contact=contact,
+        )
+    finally:
+        if bot is not None:
+            try:
+                await bot.session.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    if claim is None:
+        raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, detail="insufficient_rays")
+
+    return {
+        "claim": cabinet_service.build_prize_claim(claim),
+        "rays": locked_user.rays_balance or 0,
+    }
 
 
 # ── Уведомления (лента + SSE) ─────────────────────────────────────────────

@@ -45,6 +45,8 @@ class CabinetNotificationType:
     TICKET_REPLY = "ticket_reply"
     BROADCAST = "broadcast"
     PROMO_OFFER = "promo_offer"
+    WITHDRAWAL_PAID = "withdrawal_paid"
+    WITHDRAWAL_REJECTED = "withdrawal_rejected"
 
 
 # Русские title/body — fallback для фронта (основной рендер — по type+payload
@@ -96,6 +98,14 @@ _DEFAULT_TEXTS: Dict[str, tuple] = {
     ),
     CabinetNotificationType.BROADCAST: ("Объявление", None),
     CabinetNotificationType.PROMO_OFFER: ("Специальное предложение", None),
+    CabinetNotificationType.WITHDRAWAL_PAID: (
+        "Выплата отправлена",
+        "Заявка на вывод средств выполнена.",
+    ),
+    CabinetNotificationType.WITHDRAWAL_REJECTED: (
+        "Заявка на вывод отклонена",
+        "Средства возвращены на баланс.",
+    ),
 }
 
 _CLOSE_SENTINEL: Dict[str, Any] = {"event": "close"}

@@ -6714,6 +6714,107 @@ async def create_ray_prize_claims_table() -> bool:
         return False
 
 
+async def add_ray_prize_claim_contact_column() -> bool:
+    """Добавляет ray_prize_claims.contact — TG-контакт из формы кабинета сайта."""
+    try:
+        contact_exists = await check_column_exists('ray_prize_claims', 'contact')
+        if contact_exists:
+            logger.info("ℹ️ Колонка ray_prize_claims.contact уже существует")
+            return True
+
+        async with engine.begin() as conn:
+            await conn.execute(text("ALTER TABLE ray_prize_claims ADD COLUMN contact VARCHAR(255) NULL"))
+            logger.info("✅ Добавлена колонка ray_prize_claims.contact")
+
+        return True
+
+    except Exception as error:
+        logger.error(f"Ошибка добавления колонки ray_prize_claims.contact: {error}")
+        return False
+
+
+async def create_withdrawal_requests_table() -> bool:
+    """Создаёт таблицу заявок на вывод реферальных рублей withdrawal_requests."""
+    table_exists = await check_table_exists('withdrawal_requests')
+    if table_exists:
+        logger.info("Таблица withdrawal_requests уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE withdrawal_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    amount_kopeks INTEGER NOT NULL,
+                    details VARCHAR(255) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    debit_transaction_id INTEGER NULL,
+                    refund_transaction_id INTEGER NULL,
+                    processed_by BIGINT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    processed_at DATETIME NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id),
+                    FOREIGN KEY(debit_transaction_id) REFERENCES transactions(id),
+                    FOREIGN KEY(refund_transaction_id) REFERENCES transactions(id)
+                );
+                CREATE INDEX ix_withdrawal_requests_user_id ON withdrawal_requests(user_id);
+                CREATE INDEX ix_withdrawal_requests_status ON withdrawal_requests(status);
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS withdrawal_requests (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    amount_kopeks INTEGER NOT NULL,
+                    details VARCHAR(255) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    debit_transaction_id INTEGER NULL REFERENCES transactions(id),
+                    refund_transaction_id INTEGER NULL REFERENCES transactions(id),
+                    processed_by BIGINT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    processed_at TIMESTAMP NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_withdrawal_requests_user_id ON withdrawal_requests(user_id);
+                CREATE INDEX IF NOT EXISTS ix_withdrawal_requests_status ON withdrawal_requests(status);
+                """
+            elif db_type == 'mysql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS withdrawal_requests (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    amount_kopeks INT NOT NULL,
+                    details VARCHAR(255) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    debit_transaction_id INT NULL,
+                    refund_transaction_id INT NULL,
+                    processed_by BIGINT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    processed_at DATETIME NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id),
+                    FOREIGN KEY(debit_transaction_id) REFERENCES transactions(id),
+                    FOREIGN KEY(refund_transaction_id) REFERENCES transactions(id),
+                    INDEX ix_withdrawal_requests_user_id (user_id),
+                    INDEX ix_withdrawal_requests_status (status)
+                );
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица withdrawal_requests успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы withdrawal_requests: {e}")
+        return False
+
+
 async def run_universal_migration():
     logger.info("=== НАЧАЛО УНИВЕРСАЛЬНОЙ МИГРАЦИИ ===")
     
@@ -7373,6 +7474,20 @@ async def run_universal_migration():
             logger.info("✅ Таблица ray_prize_claims готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей ray_prize_claims")
+
+        logger.info("=== КОЛОНКА CONTACT В RAY_PRIZE_CLAIMS ===")
+        claim_contact_ready = await add_ray_prize_claim_contact_column()
+        if claim_contact_ready:
+            logger.info("✅ Колонка ray_prize_claims.contact готова")
+        else:
+            logger.warning("⚠️ Проблемы с колонкой ray_prize_claims.contact")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ WITHDRAWAL_REQUESTS ===")
+        withdrawal_requests_ready = await create_withdrawal_requests_table()
+        if withdrawal_requests_ready:
+            logger.info("✅ Таблица withdrawal_requests готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей withdrawal_requests")
 
         async with engine.begin() as conn:
             total_subs = await conn.execute(text("SELECT COUNT(*) FROM subscriptions"))

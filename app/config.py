@@ -185,6 +185,8 @@ class Settings(BaseSettings):
     REFERRAL_TERMS_URL: Optional[str] = None
     # Порог вывода реферальных денег на карту, ₽ (упоминается в текстах экрана).
     REFERRAL_WITHDRAWAL_MIN_RUBLES: int = 3000
+    # Вывод реферальных рублей через кабинет сайта (заявка → ручная выплата админом).
+    REFERRAL_WITHDRAWAL_ENABLED: bool = True
 
     # Конкурсы (глобальный флаг, будет расширяться под разные типы)
     CONTESTS_ENABLED: bool = False

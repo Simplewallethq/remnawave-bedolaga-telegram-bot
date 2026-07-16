@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RegisterRequest(BaseModel):
@@ -63,3 +63,25 @@ class PurchaseRequest(BaseModel):
 
 class AutoRenewRequest(BaseModel):
     enabled: bool
+
+
+class WithdrawalCreateRequest(BaseModel):
+    """Заявка на вывод реферальных рублей."""
+
+    amount: float = Field(..., gt=0, description="Сумма вывода в рублях")
+    details: str = Field(
+        ..., min_length=4, max_length=255,
+        description="Реквизиты/контакт для выплаты (TG-юзернейм)",
+    )
+
+
+class ShopRedeemRequest(BaseModel):
+    """Обмен лучей на приз. Фронт шлёт camelCase (prizeId)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    prize_id: str = Field(..., alias="prizeId", max_length=64)
+    contact: Optional[str] = Field(
+        default=None, max_length=255,
+        description="TG-контакт (обязателен для физических призов)",
+    )

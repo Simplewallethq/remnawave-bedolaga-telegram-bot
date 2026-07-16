@@ -198,8 +198,12 @@ async def create_physical_prize_claim(
     db_user: User,
     prize: RayPrize,
     bot: Optional[Bot] = None,
+    contact: Optional[str] = None,
 ) -> Optional[RayPrizeClaim]:
-    """Резервирует лучи и создаёт заявку на технику. None — нехватка лучей."""
+    """Резервирует лучи и создаёт заявку на технику. None — нехватка лучей.
+
+    contact — TG-контакт из формы кабинета сайта (в боте не передаётся).
+    """
     ray_tx = await subtract_user_rays(
         db, db_user, prize.cost,
         type=RayTransactionType.SPEND,
@@ -217,6 +221,7 @@ async def create_physical_prize_claim(
             prize_title=prize.title,
             cost_rays=prize.cost,
             spend_transaction_id=ray_tx.id,
+            contact=contact,
             commit=False,
         )
         await db.commit()
@@ -294,6 +299,10 @@ async def _notify_admins_new_claim(bot: Bot, db_user: User, claim: RayPrizeClaim
         from app.services.admin_notification_service import AdminNotificationService
 
         username = f"@{db_user.username}" if db_user.username else "—"
+        contact_line = (
+            f"📮 Контакт из кабинета: {html.escape(claim.contact)}\n"
+            if claim.contact else ""
+        )
         text = (
             "🎁 <b>НОВАЯ ЗАЯВКА НА ПРИЗ</b>\n\n"
             f"📦 Приз: <b>{html.escape(claim.prize_title)}</b>\n"
@@ -301,7 +310,8 @@ async def _notify_admins_new_claim(bot: Bot, db_user: User, claim: RayPrizeClaim
             f"🧾 Заявка: <b>№{claim.id}</b>\n\n"
             f"👤 Пользователь: {html.escape(db_user.full_name or '')}\n"
             f"🆔 Telegram ID: <code>{db_user.telegram_id}</code>\n"
-            f"📱 Username: {html.escape(username)}\n\n"
+            f"📱 Username: {html.escape(username)}\n"
+            f"{contact_line}\n"
             "Свяжитесь с пользователем для уточнения доставки."
         )
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
