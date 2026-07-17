@@ -1040,16 +1040,161 @@ async def _auto_tariff_purchase(
     return True
 
 
+async def _auto_tariff_purchase_from_snapshot(
+    db: AsyncSession,
+    user: User,
+    snapshot: dict,
+    *,
+    bot: Optional[Bot] = None,
+) -> bool:
+    """Активация тарифа по зафиксированной в счёте разбивке (частичная оплата).
+
+    Числа берутся из snapshot без пересчёта цены и повторной валидации оффера:
+    пользователь получает ровно ту цену, на которую ему выставили счёт, даже если
+    скидка истекла, пока счёт висел неоплаченным. Оффер расходуется здесь —
+    в момент финальной активации, а не при выставлении счёта.
+    """
+    from app.database.crud.user import get_user_by_id
+    from app.handlers.subscription.tariffs import (
+        _mark_tariff_offer_claimed,
+        _resolve_active_subscription,
+        finalize_tariff_purchase,
+    )
+    from app.services.plan_pricing_service import get_plan_by_id
+
+    plan_id = _safe_int(snapshot.get("plan_id"))
+    period_days = _safe_int(snapshot.get("period_days"))
+    price = _safe_int(snapshot.get("final_price_kopeks"))
+    if plan_id <= 0 or period_days <= 0 or price <= 0:
+        logger.warning(
+            "🔁 Частичная оплата: некорректный snapshot у пользователя %s: %s",
+            user.telegram_id, snapshot,
+        )
+        return False
+
+    fresh_user = await get_user_by_id(db, user.id)
+    if fresh_user is None:
+        return False
+    user = fresh_user
+
+    plan = await get_plan_by_id(db, plan_id)
+    if not plan or not plan.is_active:
+        logger.warning("🔁 Частичная оплата: план %s недоступен", plan_id)
+        return False
+
+    # У пользователя уже есть активная платная подписка (например, второй счёт
+    # по той же корзине) — не перепокупаем, деньги остаются на балансе.
+    active_sub = await _resolve_active_subscription(user)
+    if active_sub and not active_sub.is_trial:
+        logger.info(
+            "🔁 Частичная оплата: у пользователя %s уже активная подписка, пропуск",
+            user.telegram_id,
+        )
+        return False
+
+    # Баланс потратили, пока счёт висел (редкий кейс): стандартный fallback —
+    # доплата остаётся на балансе, провайдер отправит «Вернуться к оформлению».
+    if user.balance_kopeks < price:
+        logger.info(
+            "🔁 Частичная оплата: недостаточно средств у %s (%s < %s)",
+            user.telegram_id, user.balance_kopeks, price,
+        )
+        return False
+
+    try:
+        result = await finalize_tariff_purchase(db, user, plan, period_days, price, bot=bot)
+    except Exception as error:  # pragma: no cover - defensive logging
+        logger.error(
+            "❌ Частичная оплата: ошибка оформления для пользователя %s: %s",
+            user.telegram_id, error, exc_info=True,
+        )
+        return False
+    if result is None:
+        return False
+    subscription, transaction, was_trial_conversion = result
+
+    offer_id = _safe_int(snapshot.get("offer_id"))
+    if offer_id > 0:
+        try:
+            from app.database.crud.discount_offer import get_offer_by_id
+
+            offer = await get_offer_by_id(db, offer_id)
+            if offer is not None:
+                await _mark_tariff_offer_claimed(
+                    db,
+                    offer,
+                    plan_code=plan.code,
+                    period_days=period_days,
+                    base_price_kopeks=_safe_int(
+                        snapshot.get("base_price_kopeks"), price
+                    ),
+                    price_kopeks=price,
+                )
+        except Exception as error:
+            logger.warning(
+                "🔁 Частичная оплата: не удалось отметить оффер %s использованным: %s",
+                offer_id, error,
+            )
+
+    await record_subscription_purchase_event(
+        db,
+        user_id=user.id,
+        subscription_id=subscription.id,
+        transaction_id=transaction.id,
+        amount_kopeks=transaction.amount_kopeks,
+        occurred_at=transaction.completed_at or transaction.created_at,
+        period_days=period_days,
+        was_trial_conversion=was_trial_conversion,
+        payment_method=transaction.payment_method,
+        source="auto_tariff",
+        starts_at=subscription.start_date,
+        ends_at=subscription.end_date,
+    )
+
+    # Корзину удаляем только если она про эту же покупку — не затираем более
+    # новую корзину, собранную пока счёт ждал оплаты.
+    try:
+        cart_data = await user_cart_service.get_user_cart(user.id) or {}
+        if (
+            cart_data.get("cart_mode") == "tariff"
+            and _safe_int(cart_data.get("plan_id")) == plan_id
+            and _safe_int(cart_data.get("period_days")) == period_days
+        ):
+            await user_cart_service.delete_user_cart(user.id)
+            await clear_subscription_checkout_draft(user.id)
+    except Exception:
+        pass
+
+    if bot:
+        period_label = format_period_description(period_days, getattr(user, "language", "ru"))
+        await _notify_auto_tariff_success(bot, user, period_label)
+
+    logger.info(
+        "✅ Частичная оплата: тариф %s/%sд оформлен для пользователя %s (цена %s, счёт %s)",
+        plan.code, period_days, user.telegram_id,
+        price, _safe_int(snapshot.get("invoice_amount_kopeks")),
+    )
+    return True
+
+
 async def auto_purchase_saved_cart_after_topup(
     db: AsyncSession,
     user: User,
     *,
     bot: Optional[Bot] = None,
+    checkout_snapshot: Optional[dict] = None,
 ) -> bool:
     """Attempts to automatically purchase a subscription from a saved cart."""
 
     if not user or not getattr(user, "id", None):
         return False
+
+    # Счёт с зафиксированной разбивкой (частичная оплата тарифа) самодостаточен:
+    # активируем по его числам даже если Redis-корзина уже истекла.
+    if checkout_snapshot and checkout_snapshot.get("kind") == "tariff_purchase":
+        return await _auto_tariff_purchase_from_snapshot(
+            db, user, checkout_snapshot, bot=bot
+        )
 
     cart_data = await user_cart_service.get_user_cart(user.id)
     if not cart_data:

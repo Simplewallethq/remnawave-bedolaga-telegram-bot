@@ -147,6 +147,16 @@ class TelegramStarsMixin:
                     telegram_payment_charge_id=telegram_payment_charge_id,
                 )
 
+            # Токен snapshot'а частичной оплаты тарифа — хвост "_ts{token}" в payload.
+            checkout_snapshot = None
+            if payload and "_ts" in payload:
+                from app.services.tariff_partial_payment_service import (
+                    pop_snapshot_for_stars,
+                )
+
+                token = payload.rsplit("_ts", 1)[-1]
+                checkout_snapshot = await pop_snapshot_for_stars(user_id, token)
+
             return await self._finalize_stars_balance_topup(
                 db=db,
                 user=user,
@@ -154,6 +164,7 @@ class TelegramStarsMixin:
                 amount_kopeks=amount_kopeks,
                 stars_amount=stars_amount,
                 telegram_payment_charge_id=telegram_payment_charge_id,
+                checkout_snapshot=checkout_snapshot,
             )
 
         except Exception as error:
@@ -429,6 +440,7 @@ class TelegramStarsMixin:
         amount_kopeks: int,
         stars_amount: int,
         telegram_payment_charge_id: str,
+        checkout_snapshot: Optional[dict] = None,
     ) -> bool:
         """Начисляет баланс пользователю после оплаты Stars и запускает автопокупку."""
 
@@ -533,12 +545,13 @@ class TelegramStarsMixin:
             from app.services.user_cart_service import user_cart_service
 
             has_saved_cart = await user_cart_service.has_user_cart(user.id)
-            if has_saved_cart:
+            if has_saved_cart or checkout_snapshot:
                 try:
                     auto_purchase_success = await auto_purchase_saved_cart_after_topup(
                         db,
                         user,
                         bot=getattr(self, "bot", None),
+                        checkout_snapshot=checkout_snapshot,
                     )
                 except Exception as auto_error:  # pragma: no cover - диагностический лог
                     logger.error(

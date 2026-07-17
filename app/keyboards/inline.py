@@ -1700,6 +1700,58 @@ def get_payment_methods_keyboard(amount_kopeks: int, language: str = DEFAULT_LAN
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+
+def get_partial_payment_methods_keyboard(
+    shortfall_kopeks: int,
+    language: str = DEFAULT_LANGUAGE,
+    back_callback: str = "subscription_tariffs",
+) -> InlineKeyboardMarkup:
+    """Способы доплаты при частичной оплате тарифа с баланса.
+
+    Строится поверх get_payment_methods_keyboard: сумма каждого метода
+    поднимается до его минимума (излишек ляжет на баланс), Tribute исключается
+    (не умеет счёт на фиксированную сумму).
+    """
+    from app.services.tariff_partial_payment_service import clamp_invoice_amount
+
+    texts = get_texts(language)
+    base = get_payment_methods_keyboard(max(1, int(shortfall_kopeks)), language)
+
+    rows = []
+    for row in base.inline_keyboard:
+        new_row = []
+        for button in row:
+            data = button.callback_data or ""
+            if not data.startswith("topup_amount|"):
+                if data == "balance_topup_reset":
+                    button = InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)
+                new_row.append(button)
+                continue
+            try:
+                _, method, _ = data.split("|", 2)
+            except ValueError:
+                new_row.append(button)
+                continue
+            if method == "tribute":
+                continue
+            invoice_kopeks = clamp_invoice_amount(method, shortfall_kopeks)
+            text = button.text
+            if invoice_kopeks != shortfall_kopeks:
+                text += texts.t(
+                    "TARIFF_PARTIAL_MIN_INVOICE_SUFFIX", " · счёт {amount}₽"
+                ).format(amount=int(round(invoice_kopeks / 100)))
+            new_row.append(
+                InlineKeyboardButton(
+                    text=text,
+                    callback_data=f"topup_amount|{method}|{invoice_kopeks}",
+                )
+            )
+        if new_row:
+            rows.append(new_row)
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def get_yookassa_payment_keyboard(
     payment_id: str, 
     amount_kopeks: int, 

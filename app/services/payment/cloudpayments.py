@@ -15,6 +15,11 @@ from app.database.models import PaymentMethod, TransactionType
 from app.services.subscription_auto_purchase_service import (
     auto_purchase_saved_cart_after_topup,
 )
+from app.services.tariff_partial_payment_service import (
+    SNAPSHOT_METADATA_KEY,
+    build_invoice_checkout_snapshot,
+    extract_checkout_snapshot,
+)
 from app.services.cloudpayments_service import CloudPaymentsAPIError, CloudPaymentsService
 from app.utils.user_utils import format_referrer_info
 
@@ -95,6 +100,9 @@ class CloudPaymentsPaymentMixin:
             "language": language or settings.DEFAULT_LANGUAGE,
             "telegram_id": telegram_id,
         }
+        snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
+        if snapshot:
+            metadata[SNAPSHOT_METADATA_KEY] = snapshot
 
         # Create local payment record
         local_payment = await payment_module.create_cloudpayments_payment(
@@ -253,6 +261,7 @@ class CloudPaymentsPaymentMixin:
         try:
             auto_purchase_success = await auto_purchase_saved_cart_after_topup(
                 db, user, bot=getattr(self, "bot", None),
+                checkout_snapshot=extract_checkout_snapshot(payment),
             )
         except Exception as error:
             logger.exception("Ошибка автопокупки после CloudPayments: %s", error)

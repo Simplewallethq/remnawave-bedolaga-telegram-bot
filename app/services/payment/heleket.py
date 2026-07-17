@@ -13,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database.models import PaymentMethod, TransactionType
+from app.services.tariff_partial_payment_service import (
+    SNAPSHOT_METADATA_KEY,
+    build_invoice_checkout_snapshot,
+    extract_checkout_snapshot,
+)
 from app.utils.user_utils import format_referrer_info
 
 logger = logging.getLogger(__name__)
@@ -84,6 +89,9 @@ class HeleketPaymentMixin:
             "language": language or settings.DEFAULT_LANGUAGE,
             "created_at": datetime.utcnow().isoformat(),
         }
+        snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
+        if snapshot:
+            metadata[SNAPSHOT_METADATA_KEY] = snapshot
 
         try:
             response = await self.heleket_service.create_payment(payload)  # type: ignore[union-attr]
@@ -367,6 +375,32 @@ class HeleketPaymentMixin:
             await db.commit()
             await db.refresh(user)
 
+        # Автопокупка из сохранённой корзины / по snapshot частичной оплаты —
+        # как у остальных провайдеров.
+        auto_purchase_success = False
+        try:
+            from app.services.subscription_auto_purchase_service import (
+                auto_purchase_saved_cart_after_topup,
+            )
+            from app.services.user_cart_service import user_cart_service
+
+            checkout_snapshot = extract_checkout_snapshot(updated_payment)
+            has_saved_cart = await user_cart_service.has_user_cart(user.id)
+            if has_saved_cart or checkout_snapshot:
+                auto_purchase_success = await auto_purchase_saved_cart_after_topup(
+                    db,
+                    user,
+                    bot=getattr(self, "bot", None),
+                    checkout_snapshot=checkout_snapshot,
+                )
+        except Exception as auto_error:
+            logger.error(
+                "Ошибка автоматической покупки подписки для пользователя %s: %s",
+                user.id,
+                auto_error,
+                exc_info=True,
+            )
+
         if getattr(self, "bot", None):
             topup_status = "🆕 Первое пополнение" if was_first_topup else "🔄 Пополнение"
             referrer_info = format_referrer_info(user)
@@ -391,6 +425,10 @@ class HeleketPaymentMixin:
                 logger.error("Ошибка отправки админ-уведомления Heleket: %s", error)
 
             try:
+                if auto_purchase_success:
+                    # Подписка уже активирована автопокупкой — generic-сообщение
+                    # о пополнении не отправляем.
+                    return updated_payment
                 keyboard = await self.build_topup_success_keyboard(user)
 
                 exchange_rate_value = updated_payment.exchange_rate or 0

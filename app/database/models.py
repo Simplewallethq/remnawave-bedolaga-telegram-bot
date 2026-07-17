@@ -180,7 +180,8 @@ class CryptoBotPayment(Base):
     status = Column(String(50), nullable=False)
     description = Column(Text, nullable=True)
     payload = Column(Text, nullable=True)
-    
+    metadata_json = Column(JSON, nullable=True)
+
     bot_invoice_url = Column(Text, nullable=True)
     mini_app_invoice_url = Column(Text, nullable=True)
     web_app_invoice_url = Column(Text, nullable=True)
@@ -1199,6 +1200,12 @@ class RayPrizeClaim(Base):
     cancelled_at = Column(DateTime, nullable=True)
 
     user = relationship("User", foreign_keys=[user_id])
+    spend_transaction = relationship("RayTransaction", foreign_keys=[spend_transaction_id])
+    refund_transaction = relationship("RayTransaction", foreign_keys=[refund_transaction_id])
+
+    @property
+    def is_pending(self) -> bool:
+        return self.status == RayPrizeClaimStatus.PENDING.value
 
 
 class WithdrawalRequest(Base):
@@ -1235,12 +1242,10 @@ class WithdrawalRequest(Base):
     @property
     def amount_rubles(self) -> float:
         return self.amount_kopeks / 100
-    spend_transaction = relationship("RayTransaction", foreign_keys=[spend_transaction_id])
-    refund_transaction = relationship("RayTransaction", foreign_keys=[refund_transaction_id])
 
     @property
     def is_pending(self) -> bool:
-        return self.status == RayPrizeClaimStatus.PENDING.value
+        return self.status == WithdrawalStatus.PENDING.value
 
 
 class SubscriptionConversion(Base):

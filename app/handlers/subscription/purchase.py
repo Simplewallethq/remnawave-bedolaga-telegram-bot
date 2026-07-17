@@ -949,6 +949,14 @@ async def return_to_saved_cart(
         await callback.answer("❌ Сохраненная корзина не найдена", show_alert=True)
         return
 
+    # Тарифная intent-корзина рендерится своим экраном (à-la-carte summary
+    # не умеет тарифы) — разбивка пересчитается от актуального баланса.
+    if cart_data.get("cart_mode") == "tariff":
+        from app.handlers.subscription.tariffs import show_tariff_saved_cart
+
+        await show_tariff_saved_cart(callback, db_user, db, cart_data)
+        return
+
     texts = get_texts(db_user.language)
 
     preserved_metadata_keys = {

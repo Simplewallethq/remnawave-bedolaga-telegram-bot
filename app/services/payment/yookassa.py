@@ -20,6 +20,11 @@ from app.database.models import PaymentMethod, TransactionType
 from app.services.subscription_auto_purchase_service import (
     auto_purchase_saved_cart_after_topup,
 )
+from app.services.tariff_partial_payment_service import (
+    SNAPSHOT_METADATA_KEY,
+    build_invoice_checkout_snapshot,
+    extract_checkout_snapshot,
+)
 from app.utils.user_utils import format_referrer_info
 
 logger = logging.getLogger(__name__)
@@ -135,6 +140,13 @@ class YooKassaPaymentMixin:
                 )
                 return None
 
+            # Snapshot разбивки — только в локальную запись: у remote metadata
+            # YooKassa лимит 16 ключей / 512 символов на значение.
+            local_metadata = dict(payment_metadata)
+            snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
+            if snapshot:
+                local_metadata[SNAPSHOT_METADATA_KEY] = snapshot
+
             yookassa_created_at: Optional[datetime] = None
             if yookassa_response.get("created_at"):
                 try:
@@ -155,7 +167,7 @@ class YooKassaPaymentMixin:
                 description=description,
                 status=yookassa_response["status"],
                 confirmation_url=yookassa_response.get("confirmation_url"),
-                metadata_json=payment_metadata,
+                metadata_json=local_metadata,
                 payment_method_type=None,
                 yookassa_created_at=yookassa_created_at,
                 test_mode=yookassa_response.get("test_mode", False),
@@ -229,6 +241,11 @@ class YooKassaPaymentMixin:
                 )
                 return None
 
+            local_metadata = dict(payment_metadata)
+            snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
+            if snapshot:
+                local_metadata[SNAPSHOT_METADATA_KEY] = snapshot
+
             local_payment = await payment_module.create_yookassa_payment(
                 db=db,
                 user_id=user_id,
@@ -238,7 +255,7 @@ class YooKassaPaymentMixin:
                 description=description,
                 status=yookassa_response["status"],
                 confirmation_url=yookassa_response.get("confirmation_url"),  # Используем confirmation URL
-                metadata_json=payment_metadata,
+                metadata_json=local_metadata,
                 payment_method_type="bank_card",
                 yookassa_created_at=None,
                 test_mode=yookassa_response.get("test_mode", False),
@@ -697,6 +714,7 @@ class YooKassaPaymentMixin:
                     logger.info(f"Проверяем наличие сохраненной корзины для пользователя {user.id}")
                     from app.services.user_cart_service import user_cart_service
                     try:
+                        checkout_snapshot = extract_checkout_snapshot(payment)
                         has_saved_cart = await user_cart_service.has_user_cart(user.id)
                         logger.info(
                             "Результат проверки корзины для пользователя %s: %s",
@@ -704,12 +722,13 @@ class YooKassaPaymentMixin:
                             has_saved_cart,
                         )
 
-                        if has_saved_cart:
+                        if has_saved_cart or checkout_snapshot:
                             try:
                                 auto_purchase_success = await auto_purchase_saved_cart_after_topup(
                                     db,
                                     user,
                                     bot=getattr(self, "bot", None),
+                                    checkout_snapshot=checkout_snapshot,
                                 )
                             except Exception as auto_error:
                                 logger.error(

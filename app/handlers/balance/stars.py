@@ -103,10 +103,25 @@ async def process_stars_payment_amount(
         stars_rate = settings.get_stars_rate()
 
         payment_service = PaymentService(message.bot)
+
+        # Частичная оплата тарифа: фиксируем разбивку и уносим токен в payload
+        # инвойса (у Stars нет своей записи платежа с metadata).
+        from app.services.tariff_partial_payment_service import (
+            build_invoice_checkout_snapshot,
+            stash_snapshot_for_stars,
+        )
+
+        stars_payload = f"balance_{db_user.id}_{amount_kopeks}"
+        snapshot = await build_invoice_checkout_snapshot(db_user.id, amount_kopeks)
+        if snapshot:
+            token = await stash_snapshot_for_stars(db_user.id, snapshot)
+            if token:
+                stars_payload += f"_ts{token}"
+
         invoice_link = await payment_service.create_stars_invoice(
             amount_kopeks=amount_kopeks,
             description=f"Пополнение баланса на {texts.format_price(amount_kopeks)}",
-            payload=f"balance_{db_user.id}_{amount_kopeks}"
+            payload=stars_payload
         )
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[

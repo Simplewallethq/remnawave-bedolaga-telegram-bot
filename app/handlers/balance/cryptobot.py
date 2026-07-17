@@ -160,7 +160,8 @@ async def process_cryptobot_payment_amount(
             amount_usd=amount_usd,
             asset=settings.CRYPTOBOT_DEFAULT_ASSET,
             description=f"Пополнение баланса на {amount_rubles:.0f} ₽ ({amount_usd:.2f} USD)",
-            payload=f"balance_{db_user.id}_{amount_kopeks}"
+            payload=f"balance_{db_user.id}_{amount_kopeks}",
+            amount_kopeks=amount_kopeks,
         )
         
         if not payment_result:

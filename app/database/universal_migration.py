@@ -1947,6 +1947,34 @@ async def ensure_user_promo_offer_discount_columns():
         return False
 
 
+async def ensure_cryptobot_payment_metadata_column() -> bool:
+    """cryptobot_payments.metadata_json — snapshot разбивки частичной оплаты тарифа."""
+    try:
+        if await check_column_exists('cryptobot_payments', 'metadata_json'):
+            return True
+
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+            if db_type == 'sqlite':
+                column_def = 'JSON NULL'
+            elif db_type == 'postgresql':
+                column_def = 'JSON NULL'
+            elif db_type == 'mysql':
+                column_def = 'JSON NULL'
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            await conn.execute(text(
+                f"ALTER TABLE cryptobot_payments ADD COLUMN metadata_json {column_def}"
+            ))
+
+        logger.info("✅ Колонка cryptobot_payments.metadata_json добавлена")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления cryptobot_payments.metadata_json: {e}")
+        return False
+
+
 async def add_user_tariff_pricing_cohort_override_column() -> bool:
     try:
         if await check_column_exists('users', 'tariff_pricing_cohort_override'):
@@ -7038,6 +7066,12 @@ async def run_universal_migration():
             logger.info("✅ Колонки пользовательских промо-скидок готовы")
         else:
             logger.warning("⚠️ Не удалось обновить пользовательские промо-скидки")
+
+        cryptobot_metadata_ready = await ensure_cryptobot_payment_metadata_column()
+        if cryptobot_metadata_ready:
+            logger.info("✅ Колонка metadata_json в cryptobot_payments готова")
+        else:
+            logger.warning("⚠️ Не удалось добавить metadata_json в cryptobot_payments")
 
         effect_types_updated = await migrate_discount_offer_effect_types()
         if effect_types_updated:

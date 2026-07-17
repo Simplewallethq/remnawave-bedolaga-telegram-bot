@@ -15,6 +15,11 @@ from app.database.models import PaymentMethod, TransactionType
 from app.services.subscription_auto_purchase_service import (
     auto_purchase_saved_cart_after_topup,
 )
+from app.services.tariff_partial_payment_service import (
+    SNAPSHOT_METADATA_KEY,
+    build_invoice_checkout_snapshot,
+    extract_checkout_snapshot,
+)
 from app.services.wata_service import WataAPIError, WataService
 from app.utils.user_utils import format_referrer_info
 
@@ -135,6 +140,9 @@ class WataPaymentMixin:
             "response": response,
             "language": language or settings.DEFAULT_LANGUAGE,
         }
+        snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
+        if snapshot:
+            metadata[SNAPSHOT_METADATA_KEY] = snapshot
 
         local_payment = await payment_module.create_wata_payment(
             db=db,
@@ -529,13 +537,15 @@ class WataPaymentMixin:
             from app.services.user_cart_service import user_cart_service
             from aiogram import types
 
+            checkout_snapshot = extract_checkout_snapshot(payment)
             has_saved_cart = await user_cart_service.has_user_cart(user.id)
-            if has_saved_cart:
+            if has_saved_cart or checkout_snapshot:
                 try:
                     auto_purchase_success = await auto_purchase_saved_cart_after_topup(
                         db,
                         user,
                         bot=getattr(self, "bot", None),
+                        checkout_snapshot=checkout_snapshot,
                     )
                 except Exception as auto_error:
                     logger.error(

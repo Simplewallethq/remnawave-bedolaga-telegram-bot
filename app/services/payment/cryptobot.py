@@ -16,6 +16,11 @@ from app.database.models import PaymentMethod, TransactionType
 from app.services.subscription_auto_purchase_service import (
     auto_purchase_saved_cart_after_topup,
 )
+from app.services.tariff_partial_payment_service import (
+    SNAPSHOT_METADATA_KEY,
+    build_invoice_checkout_snapshot,
+    extract_checkout_snapshot,
+)
 from app.services.subscription_renewal_service import (
     SubscriptionRenewalChargeError,
     SubscriptionRenewalPricing,
@@ -72,6 +77,7 @@ class CryptoBotPaymentMixin:
         asset: str = "USDT",
         description: str = "Пополнение баланса",
         payload: Optional[str] = None,
+        amount_kopeks: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """Создаёт invoice в CryptoBot и сохраняет локальную запись."""
         if not getattr(self, "cryptobot_service", None):
@@ -80,6 +86,12 @@ class CryptoBotPaymentMixin:
 
         try:
             amount_str = f"{amount_usd:.2f}"
+
+            metadata_json = None
+            if amount_kopeks:
+                snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
+                if snapshot:
+                    metadata_json = {SNAPSHOT_METADATA_KEY: snapshot}
 
             invoice_data = await self.cryptobot_service.create_invoice(
                 amount=amount_str,
@@ -107,6 +119,7 @@ class CryptoBotPaymentMixin:
                 bot_invoice_url=invoice_data.get("bot_invoice_url"),
                 mini_app_invoice_url=invoice_data.get("mini_app_invoice_url"),
                 web_app_invoice_url=invoice_data.get("web_app_invoice_url"),
+                metadata_json=metadata_json,
             )
 
             logger.info(
@@ -356,14 +369,16 @@ class CryptoBotPaymentMixin:
                     from app.services.user_cart_service import user_cart_service
                     from aiogram import types
 
+                    checkout_snapshot = extract_checkout_snapshot(updated_payment)
                     has_saved_cart = await user_cart_service.has_user_cart(user.id)
                     auto_purchase_success = False
-                    if has_saved_cart:
+                    if has_saved_cart or checkout_snapshot:
                         try:
                             auto_purchase_success = await auto_purchase_saved_cart_after_topup(
                                 db,
                                 user,
                                 bot=bot_instance,
+                                checkout_snapshot=checkout_snapshot,
                             )
                         except Exception as auto_error:
                             logger.error(

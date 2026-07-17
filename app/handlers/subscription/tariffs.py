@@ -109,6 +109,7 @@ async def _save_tariff_intent_cart(
     offer_id: Optional[int] = None,
     price_override_kopeks: Optional[int] = None,
     offer_type: Optional[str] = None,
+    base_price_kopeks: Optional[int] = None,
 ) -> None:
     """Persist an intent cart so the tariff purchase auto-completes after a balance top-up.
 
@@ -117,6 +118,7 @@ async def _save_tariff_intent_cart(
     tariff_op is one of: purchase | renew | upgrade.
     """
     from app.services.user_cart_service import user_cart_service
+    from app.services.tariff_partial_payment_service import build_partial_breakdown
 
     cart_data = {
         "cart_mode": "tariff",
@@ -135,6 +137,12 @@ async def _save_tariff_intent_cart(
                 "price_override_kopeks": price_override_kopeks,
             }
         )
+    if tariff_op == "purchase":
+        partial = build_partial_breakdown(
+            db_user.balance_kopeks, total_price, base_price_kopeks
+        )
+        if partial:
+            cart_data["partial_payment"] = partial
 
     try:
         await user_cart_service.save_user_cart(db_user.id, cart_data, ttl=3600)
@@ -875,44 +883,20 @@ async def confirm_tier_upgrade(
     await show_subscription_info(callback, db_user, db)
 
 
-async def start_tariff_purchase(
-    callback: types.CallbackQuery,
-    db_user: User,
+async def _resolve_tariff_purchase_price(
     db: AsyncSession,
-):
-    """Step 3 — user picked plan+period; create subscription for users without one."""
-    texts = get_texts(db_user.language)
-    parts = callback.data.split(":")
-    if len(parts) != 3:
-        await callback.answer("bad_callback", show_alert=False)
-        return
-    plan_code, period_str = parts[1], parts[2]
-    try:
-        period_days = int(period_str)
-    except ValueError:
-        await callback.answer("bad_callback", show_alert=False)
-        return
-    if period_days not in SUPPORTED_PERIOD_DAYS:
-        await callback.answer("bad_period", show_alert=False)
-        return
-
-    plan = await get_plan_by_code(db, plan_code)
-    if not plan or not plan.is_active:
-        await callback.answer(
-            texts.t("TARIFFS_PLAN_NOT_FOUND", "Тариф не найден."),
-            show_alert=True,
-        )
-        return
-
+    db_user: User,
+    plan: SubscriptionPlan,
+    period_days: int,
+) -> Optional[tuple]:
+    """Resolve the purchase price with offer overrides applied (hot-invoice →
+    expired-sub → fixed-price). Returns (base_price, price, offer_price, offer,
+    offer_type) or None when the plan has no configured price."""
     base_price_kopeks = await get_plan_price(
         db, plan.id, period_days, cohort=resolve_pricing_cohort(db_user)
     )
     if base_price_kopeks is None:
-        await callback.answer(
-            texts.t("TARIFFS_PRICES_MISSING", "Цены для этого тарифа не настроены."),
-            show_alert=True,
-        )
-        return
+        return None
 
     price_kopeks = base_price_kopeks
     offer_price, offer, offer_type = await _get_hot_invoice_tariff_offer(
@@ -946,6 +930,47 @@ async def start_tariff_purchase(
             if offer_price is not None:
                 price_kopeks = offer_price
 
+    return base_price_kopeks, price_kopeks, offer_price, offer, offer_type
+
+
+async def start_tariff_purchase(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    """Step 3 — user picked plan+period; create subscription for users without one."""
+    texts = get_texts(db_user.language)
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.answer("bad_callback", show_alert=False)
+        return
+    plan_code, period_str = parts[1], parts[2]
+    try:
+        period_days = int(period_str)
+    except ValueError:
+        await callback.answer("bad_callback", show_alert=False)
+        return
+    if period_days not in SUPPORTED_PERIOD_DAYS:
+        await callback.answer("bad_period", show_alert=False)
+        return
+
+    plan = await get_plan_by_code(db, plan_code)
+    if not plan or not plan.is_active:
+        await callback.answer(
+            texts.t("TARIFFS_PLAN_NOT_FOUND", "Тариф не найден."),
+            show_alert=True,
+        )
+        return
+
+    resolved = await _resolve_tariff_purchase_price(db, db_user, plan, period_days)
+    if resolved is None:
+        await callback.answer(
+            texts.t("TARIFFS_PRICES_MISSING", "Цены для этого тарифа не настроены."),
+            show_alert=True,
+        )
+        return
+    base_price_kopeks, price_kopeks, offer_price, offer, offer_type = resolved
+
     active_sub = await _resolve_active_subscription(db_user)
     if active_sub and active_sub.plan_id == plan.id:
         # Buying current tier from the tariffs page == renewal at current tier.
@@ -957,7 +982,6 @@ async def start_tariff_purchase(
         return
 
     if db_user.balance_kopeks < price_kopeks:
-        missing = price_kopeks - db_user.balance_kopeks
         await _save_tariff_intent_cart(
             db_user,
             tariff_op="purchase",
@@ -967,7 +991,18 @@ async def start_tariff_purchase(
             offer_id=getattr(offer, "id", None),
             price_override_kopeks=offer_price,
             offer_type=offer_type,
+            base_price_kopeks=base_price_kopeks,
         )
+        if db_user.balance_kopeks > 0:
+            # Частичная оплата: скидка уже применена к цене, баланс зачитывается
+            # к сниженной цене, счёт выставляется на разницу.
+            await _render_tariff_partial_breakdown(
+                callback, db_user, plan, period_days,
+                base_price_kopeks=base_price_kopeks,
+                price_kopeks=price_kopeks,
+            )
+            return
+        missing = price_kopeks - db_user.balance_kopeks
         await callback.message.edit_text(
             texts.t(
                 "ADDON_INSUFFICIENT_FUNDS_MESSAGE",
@@ -1021,6 +1056,243 @@ async def start_tariff_purchase(
     from app.handlers.subscription.purchase import show_subscription_info
     callback.data = "menu_subscription"
     await show_subscription_info(callback, db_user, db)
+
+
+async def _render_tariff_partial_breakdown(
+    callback: types.CallbackQuery,
+    db_user: User,
+    plan: SubscriptionPlan,
+    period_days: int,
+    *,
+    base_price_kopeks: int,
+    price_kopeks: int,
+) -> None:
+    """Экран разбивки частичной оплаты: тариф, скидка, зачёт баланса, доплата."""
+    texts = get_texts(db_user.language)
+    shortfall = price_kopeks - db_user.balance_kopeks
+
+    lines = [
+        texts.t("TARIFF_PARTIAL_TITLE", "🧾 <b>Оформление подписки</b>"),
+        "",
+        texts.t(
+            "TARIFF_PARTIAL_PLAN_LINE", "Тариф: <b>{name}, {period}</b> — {price}"
+        ).format(
+            name=plan.display_name,
+            period=_period_label(period_days, texts),
+            price=_format_rub_short(base_price_kopeks),
+        ),
+    ]
+    if price_kopeks < base_price_kopeks:
+        lines.append(
+            texts.t(
+                "TARIFF_PARTIAL_DISCOUNT_LINE", "🔥 Скидка: −{discount} → <b>{price}</b>"
+            ).format(
+                discount=_format_rub_short(base_price_kopeks - price_kopeks),
+                price=_format_rub_short(price_kopeks),
+            )
+        )
+    lines += [
+        "",
+        texts.t(
+            "TARIFF_PARTIAL_BALANCE_LINE", "💰 С баланса спишется: <b>{amount}</b>"
+        ).format(amount=_format_rub_short(db_user.balance_kopeks)),
+        texts.t(
+            "TARIFF_PARTIAL_SHORTFALL_LINE", "💳 К доплате: <b>{amount}</b>"
+        ).format(amount=_format_rub_short(shortfall)),
+        "",
+        texts.t(
+            "TARIFF_PARTIAL_HINT",
+            "Баланс спишется только после успешной доплаты. "
+            "Если доплату не завершить — баланс останется нетронутым.",
+        ),
+    ]
+
+    keyboard = types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(
+                    text=texts.t(
+                        "TARIFF_PARTIAL_PAY_BUTTON", "💳 Оплатить {amount}"
+                    ).format(amount=_format_rub_short(shortfall)),
+                    callback_data=f"tariff_pay_partial:{plan.code}:{period_days}",
+                )
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text=texts.BACK,
+                    callback_data=f"tariff_select:{plan.code}",
+                )
+            ],
+        ]
+    )
+
+    message_text = "\n".join(lines)
+    try:
+        await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(message_text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+async def show_tariff_partial_payment_methods(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    """Кнопка «Оплатить X₽» на экране разбивки: выбор способа доплаты.
+
+    Пересчитывает цену и баланс на момент нажатия (скидка могла истечь, баланс —
+    измениться) и пересохраняет intent-корзину, чтобы счёт зафиксировал
+    актуальную разбивку.
+    """
+    texts = get_texts(db_user.language)
+    parts = (callback.data or "").split(":")
+    if len(parts) != 3:
+        await callback.answer("bad_callback", show_alert=False)
+        return
+    plan_code, period_str = parts[1], parts[2]
+    try:
+        period_days = int(period_str)
+    except ValueError:
+        await callback.answer("bad_callback", show_alert=False)
+        return
+
+    plan = await get_plan_by_code(db, plan_code)
+    if not plan or not plan.is_active:
+        await callback.answer(
+            texts.t("TARIFFS_PLAN_NOT_FOUND", "Тариф не найден."),
+            show_alert=True,
+        )
+        return
+
+    resolved = await _resolve_tariff_purchase_price(db, db_user, plan, period_days)
+    if resolved is None:
+        await callback.answer(
+            texts.t("TARIFFS_PRICES_MISSING", "Цены для этого тарифа не настроены."),
+            show_alert=True,
+        )
+        return
+    base_price_kopeks, price_kopeks, offer_price, offer, offer_type = resolved
+
+    # Баланса уже хватает или он обнулился — маршрутизируем через обычный
+    # покупочный обработчик (полная оплата с баланса / старый экран пополнения).
+    if db_user.balance_kopeks <= 0 or db_user.balance_kopeks >= price_kopeks:
+        callback.data = f"tariff_buy:{plan.code}:{period_days}"
+        await start_tariff_purchase(callback, db_user, db)
+        return
+
+    await _save_tariff_intent_cart(
+        db_user,
+        tariff_op="purchase",
+        plan=plan,
+        period_days=period_days,
+        total_price=price_kopeks,
+        offer_id=getattr(offer, "id", None),
+        price_override_kopeks=offer_price,
+        offer_type=offer_type,
+        base_price_kopeks=base_price_kopeks,
+    )
+
+    from app.keyboards.inline import get_partial_payment_methods_keyboard
+    from app.services.tariff_partial_payment_service import get_provider_min_kopeks
+
+    shortfall = price_kopeks - db_user.balance_kopeks
+    keyboard = get_partial_payment_methods_keyboard(
+        shortfall,
+        db_user.language,
+        back_callback=f"tariff_buy:{plan.code}:{period_days}",
+    )
+
+    message_text = texts.t(
+        "TARIFF_PARTIAL_METHODS_MESSAGE",
+        "💳 <b>Доплата {amount}</b>\n\n"
+        "Выберите способ оплаты. После успешной оплаты подписка активируется "
+        "автоматически: {balance} спишется с баланса, {amount} — со счёта.",
+    ).format(
+        amount=_format_rub_short(shortfall),
+        balance=_format_rub_short(db_user.balance_kopeks),
+    )
+    if any(
+        get_provider_min_kopeks(m) > shortfall
+        for m in ("yookassa", "mulenpay", "pal24", "platega", "wata", "cloudpayments", "cryptobot", "heleket")
+    ):
+        message_text += "\n\n" + texts.t(
+            "TARIFF_PARTIAL_MIN_NOTE",
+            "⚠️ У некоторых способов минимальная сумма счёта больше доплаты — "
+            "в этом случае счёт выставляется на минимум, а излишек останется на балансе.",
+        )
+
+    try:
+        await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(message_text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+async def show_tariff_saved_cart(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+    cart_data: dict,
+):
+    """«Вернуться к оформлению» для тарифной intent-корзины: показываем сохранённый
+    тариф и отправляем обратно в start_tariff_purchase — там разбивка пересчитается
+    от актуального баланса."""
+    texts = get_texts(db_user.language)
+    plan_code = cart_data.get("plan_code")
+    period_days = int(cart_data.get("period_days") or 0)
+
+    plan = await get_plan_by_code(db, plan_code) if plan_code else None
+    if not plan or not plan.is_active or period_days <= 0:
+        from app.services.user_cart_service import user_cart_service
+
+        await user_cart_service.delete_user_cart(db_user.id)
+        await callback.answer(
+            texts.t("TARIFFS_PLAN_NOT_FOUND", "Тариф не найден."),
+            show_alert=True,
+        )
+        return
+
+    message_text = texts.t(
+        "TARIFF_SAVED_CART_MESSAGE",
+        "🛒 <b>Восстановленная корзина</b>\n\n"
+        "Тариф: <b>{name}, {period}</b>\n"
+        "На балансе: {balance}\n\n"
+        "Продолжите оформление — сумма к оплате пересчитается от текущего баланса.",
+    ).format(
+        name=plan.display_name,
+        period=_period_label(period_days, texts),
+        balance=_format_rub_short(db_user.balance_kopeks),
+    )
+
+    keyboard = types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(
+                    text=texts.t("TARIFF_SAVED_CART_RESUME", "▶️ Продолжить оформление"),
+                    callback_data=f"tariff_buy:{plan.code}:{period_days}",
+                )
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text=texts.t("TARIFF_SAVED_CART_CLEAR", "🗑️ Очистить корзину"),
+                    callback_data="clear_saved_cart",
+                )
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text=texts.BACK,
+                    callback_data="subscription_tariffs",
+                )
+            ],
+        ]
+    )
+
+    try:
+        await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(message_text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
 
 
 async def claim_cold_solo_offer(
@@ -1567,6 +1839,10 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         start_tariff_purchase,
         F.data.startswith("tariff_buy:"),
+    )
+    dp.callback_query.register(
+        show_tariff_partial_payment_methods,
+        F.data.startswith("tariff_pay_partial:"),
     )
     dp.callback_query.register(
         confirm_tier_upgrade,

@@ -21,9 +21,10 @@ async def create_cryptobot_payment(
     payload: Optional[str] = None,
     bot_invoice_url: Optional[str] = None,
     mini_app_invoice_url: Optional[str] = None,
-    web_app_invoice_url: Optional[str] = None
+    web_app_invoice_url: Optional[str] = None,
+    metadata_json: Optional[dict] = None
 ) -> CryptoBotPayment:
-    
+
     payment = CryptoBotPayment(
         user_id=user_id,
         invoice_id=invoice_id,
@@ -34,7 +35,8 @@ async def create_cryptobot_payment(
         payload=payload,
         bot_invoice_url=bot_invoice_url,
         mini_app_invoice_url=mini_app_invoice_url,
-        web_app_invoice_url=web_app_invoice_url
+        web_app_invoice_url=web_app_invoice_url,
+        metadata_json=metadata_json
     )
     
     db.add(payment)
