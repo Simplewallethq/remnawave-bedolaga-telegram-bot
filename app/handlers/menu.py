@@ -220,7 +220,8 @@ async def show_main_menu(
         keyboard=keyboard,
         parse_mode="HTML",
         force_text=settings.is_text_main_menu_mode(),
-        photo_path=image_path
+        photo_path=image_path,
+        disable_web_page_preview=True,
     )
     if not skip_callback_answer:
         await callback.answer()
@@ -1105,7 +1106,7 @@ async def get_main_menu_text(user, texts, db: AsyncSession):
     has_active_subscription = is_active and not is_trial
     trial_used = (subscription is not None)
 
-    base_text = texts.t("MAIN_MENU_TITLE", "Главное меню\n\n")
+    base_text = ""
 
     date_fmt = "%d.%m.%Y"
 
@@ -1130,9 +1131,17 @@ async def get_main_menu_text(user, texts, db: AsyncSession):
     else:
         base_text += texts.t("MAIN_MENU_NO_SUBSCRIPTION", "Подписка: 🔴Истекла")
 
-    # Временно убрано напоминание о подписке на канал
-    # base_text += texts.t("MAIN_MENU_CHANNEL_HINT", "\n\n🔔 Подпишитесь на <a href=\"https://t.me/vpnleto\">наш канал</a> чтобы быть в курсе новостей и акций.\n\nВыберите действие:")
-    base_text += "\n\nВыберите действие:"
+    base_text += texts.t(
+        "MAIN_MENU_CHANNEL_HINT",
+        "\n\n<a href=\"https://t.me/vpnleto\">➡️</a> "
+        "<a href=\"https://t.me/vpnleto\">Подпишись на наш канал</a> — там много интересного",
+    )
+    base_text += texts.t(
+        "MAIN_MENU_LEGAL_LINKS",
+        "\n\n<a href=\"https://telegra.ph/Politika-konfidencialnosti-07-20-101\">Политика конфиденциальности</a>"
+        " | "
+        "<a href=\"https://telegra.ph/Polzovatelskoe-soglashenie-07-20-32\">Пользовательское соглашение</a>",
+    )
 
     return base_text
 

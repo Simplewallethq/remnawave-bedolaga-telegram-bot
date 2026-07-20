@@ -6065,7 +6065,7 @@ _SUBSCRIPTION_PLAN_SEED = [
         "description_md": (
             "Solo\n"
             "• 1 устройство\n"
-            "• полный VPN и все обходы\n"
+            "• полный VPN, доступ ко всем сервисам\n"
             "• ♾️ трафик"
         ),
         "prices": [
@@ -6093,7 +6093,7 @@ _SUBSCRIPTION_PLAN_SEED = [
         "description_md": (
             "Plus\n"
             "• 3 устройства\n"
-            "• полный VPN и все обходы\n"
+            "• полный VPN, доступ ко всем сервисам\n"
             "• ♾️ трафик"
         ),
         "prices": [
@@ -6121,7 +6121,7 @@ _SUBSCRIPTION_PLAN_SEED = [
         "description_md": (
             "Pro\n"
             "• 10 устройств\n"
-            "• полный VPN и все обходы\n"
+            "• полный VPN, доступ ко всем сервисам\n"
             "• ♾️ трафик\n"
             "• приоритетные серверы и поддержка"
         ),
@@ -6296,6 +6296,27 @@ async def update_plus_plan_device_limit_to_three() -> bool:
         return True
     except Exception as e:
         logger.error(f"Ошибка обновления лимита устройств тарифа Plus: {e}")
+        return False
+
+
+async def update_plan_descriptions_vpn_wording() -> bool:
+    """One-off wording fix in plan descriptions:
+    «полный VPN и все обходы» → «полный VPN, доступ ко всем сервисам».
+    Idempotent: REPLACE only touches rows that still contain the old phrase.
+    """
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(text(
+                "UPDATE subscription_plans "
+                "SET description_md = REPLACE(description_md, "
+                "'полный VPN и все обходы', 'полный VPN, доступ ко всем сервисам') "
+                "WHERE description_md LIKE '%полный VPN и все обходы%'"
+            ))
+            if result.rowcount:
+                logger.info(f"  → Описания тарифов обновлены: {result.rowcount}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка обновления описаний тарифов: {e}")
         return False
 
 
@@ -7452,6 +7473,12 @@ async def run_universal_migration():
                 logger.info("✅ Тариф Plus: лимит устройств актуален (3)")
             else:
                 logger.warning("⚠️ Проблемы с обновлением лимита устройств Plus")
+
+            logger.info("=== ОБНОВЛЕНИЕ ФОРМУЛИРОВКИ ОПИСАНИЙ ТАРИФОВ ===")
+            if await update_plan_descriptions_vpn_wording():
+                logger.info("✅ Формулировка описаний тарифов актуальна")
+            else:
+                logger.warning("⚠️ Проблемы с обновлением описаний тарифов")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ ADVERTISING_CAMPAIGNS ===")
         ad_campaigns_ready = await create_advertising_campaigns_table()

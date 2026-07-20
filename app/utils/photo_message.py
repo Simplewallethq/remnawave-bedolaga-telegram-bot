@@ -42,12 +42,18 @@ def _get_language(callback: types.CallbackQuery) -> str | None:
     return None
 
 
-def _build_base_kwargs(keyboard: types.InlineKeyboardMarkup | None, parse_mode: str | None):
+def _build_base_kwargs(
+    keyboard: types.InlineKeyboardMarkup | None,
+    parse_mode: str | None,
+    disable_web_page_preview: bool = False,
+):
     kwargs: dict[str, object] = {}
     if parse_mode is not None:
         kwargs["parse_mode"] = parse_mode
     if keyboard is not None:
         kwargs["reply_markup"] = keyboard
+    if disable_web_page_preview:
+        kwargs["disable_web_page_preview"] = True
     return kwargs
 
 
@@ -57,9 +63,10 @@ async def _answer_text(
     keyboard: types.InlineKeyboardMarkup | None,
     parse_mode: str | None,
     error: TelegramBadRequest | None = None,
+    disable_web_page_preview: bool = False,
 ) -> None:
     language = _get_language(callback)
-    kwargs = _build_base_kwargs(keyboard, parse_mode)
+    kwargs = _build_base_kwargs(keyboard, parse_mode, disable_web_page_preview)
 
     if error and is_privacy_restricted_error(error):
         caption = append_privacy_hint(caption, language)
@@ -81,6 +88,7 @@ async def edit_or_answer_photo(
     *,
     force_text: bool = False,
     photo_path: str | None = None,
+    disable_web_page_preview: bool = False,
 ) -> None:
     resolved_parse_mode = parse_mode or "HTML"
     # Если режим логотипа выключен или требуется текстовое сообщение — работаем текстом
@@ -88,19 +96,29 @@ async def edit_or_answer_photo(
         try:
             if callback.message.photo:
                 await callback.message.delete()
-                await _answer_text(callback, caption, keyboard, resolved_parse_mode)
+                await _answer_text(
+                    callback, caption, keyboard, resolved_parse_mode,
+                    disable_web_page_preview=disable_web_page_preview,
+                )
             else:
+                edit_kwargs: dict[str, object] = {}
+                if disable_web_page_preview:
+                    edit_kwargs["disable_web_page_preview"] = True
                 await callback.message.edit_text(
                     caption,
                     reply_markup=keyboard,
                     parse_mode=resolved_parse_mode,
+                    **edit_kwargs,
                 )
         except TelegramBadRequest as error:
             try:
                 await callback.message.delete()
             except Exception:
                 pass
-            await _answer_text(callback, caption, keyboard, resolved_parse_mode, error)
+            await _answer_text(
+                callback, caption, keyboard, resolved_parse_mode, error,
+                disable_web_page_preview=disable_web_page_preview,
+            )
         return
 
     # Если текст слишком длинный для caption — отправим как текст
@@ -108,9 +126,15 @@ async def edit_or_answer_photo(
         try:
             if callback.message.photo:
                 await callback.message.delete()
-            await _answer_text(callback, caption, keyboard, resolved_parse_mode)
+            await _answer_text(
+                callback, caption, keyboard, resolved_parse_mode,
+                disable_web_page_preview=disable_web_page_preview,
+            )
         except TelegramBadRequest as error:
-            await _answer_text(callback, caption, keyboard, resolved_parse_mode, error)
+            await _answer_text(
+                callback, caption, keyboard, resolved_parse_mode, error,
+                disable_web_page_preview=disable_web_page_preview,
+            )
         return
 
     if photo_path:

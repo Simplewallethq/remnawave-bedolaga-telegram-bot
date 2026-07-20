@@ -1031,6 +1031,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
                 menu_text,
                 reply_markup=keyboard,
                 parse_mode="HTML",
+                disable_web_page_preview=True,
             )
 
         if pinned_message and not pinned_message.send_before_menu:
@@ -1696,7 +1697,8 @@ async def complete_registration_from_callback(
             await callback.message.answer(
                 menu_text,
                 reply_markup=keyboard,
-                parse_mode="HTML"
+                parse_mode="HTML",
+                disable_web_page_preview=True,
             )
             await _send_pinned_message(callback.bot, db, existing_user)
         except Exception as e:
@@ -1984,7 +1986,8 @@ async def complete_registration(
             await message.answer(
                 menu_text,
                 reply_markup=keyboard,
-                parse_mode="HTML"
+                parse_mode="HTML",
+                disable_web_page_preview=True,
             )
             await _send_pinned_message(message.bot, db, existing_user)
         except Exception as e:
@@ -2411,6 +2414,7 @@ async def required_sub_channel_check(
                     text=menu_text,
                     reply_markup=keyboard,
                     parse_mode="HTML",
+                    disable_web_page_preview=True,
                 )
             await _send_pinned_message(bot, db, user)
         else:

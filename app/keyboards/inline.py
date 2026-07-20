@@ -694,7 +694,7 @@ def get_info_menu_keyboard(
         buttons.append([
             InlineKeyboardButton(
                 text=texts.t("MENU_PRIVACY_POLICY", "🛡️ Политика конф."),
-                callback_data="menu_privacy_policy",
+                url="https://telegra.ph/Politika-konfidencialnosti-07-20-101",
             )
         ])
 
@@ -707,7 +707,10 @@ def get_info_menu_keyboard(
         ])
 
     buttons.append([
-        InlineKeyboardButton(text=texts.MENU_RULES, callback_data="menu_rules")
+        InlineKeyboardButton(
+            text=texts.MENU_RULES,
+            url="https://telegra.ph/Polzovatelskoe-soglashenie-07-20-32",
+        )
     ])
 
     server_status_mode = settings.get_server_status_mode()
