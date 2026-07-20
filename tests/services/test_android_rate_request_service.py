@@ -141,7 +141,7 @@ async def test_process_due_requests_sends_and_records(monkeypatch):
     assert button.url == (
         f"https://example.test/android-rate-request/click?sent_notification_id={notification.id}"
     )
-    assert "<b>Спасибо, что пользуешься Leto VPN</b>" in bot.send_message.await_args.kwargs["text"]
+    assert "<b>Оцени Leto VPN и получи 50 ₽ на баланс</b>" in bot.send_message.await_args.kwargs["text"]
     upsert_system_setting.assert_awaited_once()
     assert db.commit.await_count == 2
 
@@ -302,8 +302,10 @@ async def test_candidate_query_requires_android_app_usage():
     await service._get_candidate_subscriptions(Db(), now, limit=123, after_user_id=456)
 
     assert str(TELEGRAM_ID) not in captured["sql"]
-    assert "users.has_used_mobile_app = true" in captured["sql"].lower()
-    assert "subscriptions.is_trial = false" in captured["sql"].lower()
+    sql = captured["sql"].lower()
+    assert "users.has_used_mobile_app = true" in sql
+    assert "subscriptions.status in ('active', 'trial')" in sql
+    assert "subscriptions.is_trial = false" not in sql
     assert "user_daily_traffic_usage" in captured["sql"]
     assert "sent_notifications" in captured["sql"]
     assert "users.id > 456" in captured["sql"]
@@ -330,5 +332,5 @@ async def test_debug_candidate_query_targets_only_debug_user(monkeypatch):
     assert "users.has_used_mobile_app" not in sql
     assert "user_daily_traffic_usage" not in sql
     assert "sent_notifications" not in sql
-    assert "subscriptions.is_trial = false" in sql
+    assert "subscriptions.is_trial = false" not in sql
     assert "limit 1" in sql

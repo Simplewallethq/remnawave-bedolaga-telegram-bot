@@ -40,26 +40,26 @@ class _AsyncSessionContext:
         return None
 
 
-def test_first_touch_window_is_50_to_55_minutes() -> None:
+def test_first_touch_window_is_30_to_45_minutes() -> None:
     now = datetime(2026, 7, 13, 9, 0)
 
     assert hot_invoice_offer_service.is_touch_due(
-        _payment(now - timedelta(minutes=50)),
+        _payment(now - timedelta(minutes=30)),
         hot_invoice_offer_service.FIRST_SLOT_KEY,
         now,
     )
     assert hot_invoice_offer_service.is_touch_due(
-        _payment(now - timedelta(minutes=54, seconds=59)),
+        _payment(now - timedelta(minutes=44, seconds=59)),
         hot_invoice_offer_service.FIRST_SLOT_KEY,
         now,
     )
     assert not hot_invoice_offer_service.is_touch_due(
-        _payment(now - timedelta(minutes=49, seconds=59)),
+        _payment(now - timedelta(minutes=29, seconds=59)),
         hot_invoice_offer_service.FIRST_SLOT_KEY,
         now,
     )
     assert not hot_invoice_offer_service.is_touch_due(
-        _payment(now - timedelta(minutes=55)),
+        _payment(now - timedelta(minutes=45)),
         hot_invoice_offer_service.FIRST_SLOT_KEY,
         now,
     )
@@ -95,7 +95,7 @@ def test_discount_expires_at_2200_msk_on_day_six() -> None:
 
 def test_invoice_minutes_left_uses_actual_expiration() -> None:
     now = datetime(2026, 7, 13, 9, 0)
-    payment = _payment(now - timedelta(minutes=50))
+    payment = _payment(now - timedelta(minutes=30))
     payment.expires_at = now + timedelta(minutes=7, seconds=1)
 
     assert hot_invoice_offer_service.invoice_minutes_left(payment, now) == 8
@@ -103,14 +103,14 @@ def test_invoice_minutes_left_uses_actual_expiration() -> None:
 
 def test_invoice_minutes_left_falls_back_to_one_hour() -> None:
     now = datetime(2026, 7, 13, 9, 0)
-    payment = _payment(now - timedelta(minutes=52))
+    payment = _payment(now - timedelta(minutes=32))
 
-    assert hot_invoice_offer_service.invoice_minutes_left(payment, now) == 8
+    assert hot_invoice_offer_service.invoice_minutes_left(payment, now) == 28
 
 
 async def test_first_touch_message_uses_calculated_minutes() -> None:
     now = datetime(2026, 7, 13, 9, 0)
-    payment = _payment(now - timedelta(minutes=50))
+    payment = _payment(now - timedelta(minutes=30))
     payment.expires_at = now + timedelta(minutes=6, seconds=1)
     candidate = HotInvoiceCandidate(
         payment=payment,

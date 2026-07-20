@@ -66,8 +66,8 @@ class HotInvoiceOfferService:
     }
 
     MSK_TZ = ZoneInfo("Europe/Moscow")
-    FIRST_TOUCH_MIN_AGE = timedelta(minutes=50)
-    FIRST_TOUCH_MAX_AGE = timedelta(minutes=55)
+    FIRST_TOUCH_MIN_AGE = timedelta(minutes=30)
+    FIRST_TOUCH_MAX_AGE = timedelta(minutes=45)
 
     def is_debug_enabled(self) -> bool:
         return IS_ARTEM_DEBUG

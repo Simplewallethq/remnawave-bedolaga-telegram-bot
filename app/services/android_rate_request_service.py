@@ -277,8 +277,12 @@ class AndroidRateRequestService:
                     User.has_used_mobile_app == True,  # noqa: E712
                     User.id > after_user_id,
                     User.status == ModelUserStatus.ACTIVE.value,
-                    Subscription.status == SubscriptionStatus.ACTIVE.value,
-                    Subscription.is_trial == False,  # noqa: E712
+                    Subscription.status.in_(
+                        (
+                            SubscriptionStatus.ACTIVE.value,
+                            SubscriptionStatus.TRIAL.value,
+                        )
+                    ),
                     Subscription.start_date.isnot(None),
                     Subscription.start_date <= minimum_start_date,
                     Subscription.end_date > now_utc_naive,
