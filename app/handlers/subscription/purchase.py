@@ -1100,16 +1100,27 @@ async def handle_extend_subscription(
         db_user: User,
         db: AsyncSession
 ):
-    texts = get_texts(db_user.language)
     subscription = db_user.subscription
+
+    if user_uses_tariffs(db_user):
+        from app.handlers.subscription.tariffs import show_renew_current, show_tariffs_page
+
+        if subscription and subscription.plan_id is not None and not subscription.is_trial:
+            await show_renew_current(callback, db_user, db)
+        else:
+            await show_tariffs_page(callback, db_user, db)
+        return
 
     if not subscription:
         await callback.answer("⚠ Продление доступно только когда есть подписка", show_alert=True)
         return
-        
+
     if subscription.is_trial:
-        await start_subscription_purchase(callback, state, db_user, db)
+        from app.handlers.subscription.tariffs import show_tariffs_page
+        await show_tariffs_page(callback, db_user, db)
         return
+
+    texts = get_texts(db_user.language)
 
     subscription_service = SubscriptionService()
 
@@ -2899,29 +2910,17 @@ async def handle_sub_add_days(
     subscription = getattr(db_user, "subscription", None)
 
     has_tariff = subscription is not None and subscription.plan_id is not None
-    # Tariff flow for: everyone (flag on), tariff holders, and post-rollout registrants.
     if user_uses_tariffs(db_user):
-        now = datetime.utcnow()
-        is_paid_active = (
-            subscription is not None
-            and subscription.status == SubscriptionStatus.ACTIVE.value
-            and subscription.end_date is not None
-            and subscription.end_date > now
-            and not subscription.is_trial
-        )
-
-        # Tiered-plan users renew at their plan's price ladder, not the legacy à-la-carte calc.
-        if has_tariff and is_paid_active:
+        # Tiered-plan users restore/renew at their plan's price ladder, not the legacy à-la-carte calc.
+        if has_tariff and not subscription.is_trial:
             from app.handlers.subscription.tariffs import show_renew_current
             await show_renew_current(callback, db_user, db)
             return
 
-        # Trial / no subscription / expired — send to the tiered catalog instead of legacy topup.
-        # (Only reached with tariffs enabled, or for an expired tariff holder re-buying a plan.)
-        if subscription is None or subscription.is_trial or not is_paid_active:
-            from app.handlers.subscription.tariffs import show_tariffs_page
-            await show_tariffs_page(callback, db_user, db)
-            return
+        # Trial / no subscription / post-rollout users start from the tiered catalog.
+        from app.handlers.subscription.tariffs import show_tariffs_page
+        await show_tariffs_page(callback, db_user, db)
+        return
 
     periods = settings.get_available_renewal_periods()
 

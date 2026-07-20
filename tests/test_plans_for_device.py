@@ -51,6 +51,14 @@ def test_build_legacy_catalog_uses_settings(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(settings, "DEFAULT_TRAFFIC_LIMIT_GB", 100, raising=False)
     monkeypatch.setattr(settings, "DEFAULT_DEVICE_LIMIT", 1, raising=False)
     monkeypatch.setattr(settings, "MAX_DEVICES_LIMIT", 20, raising=False)
+    monkeypatch.setattr(
+        type(settings),
+        "get_traffic_packages",
+        lambda self: [
+            {"gb": 5, "price": 1000, "enabled": True},
+            {"gb": 0, "price": 5000, "enabled": True},
+        ],
+    )
     refresh_period_prices()
 
     catalog = _build_legacy_catalog()
@@ -85,7 +93,7 @@ def test_build_legacy_catalog_skips_zero_priced_periods(monkeypatch: pytest.Monk
     assert 15 not in period_days
 
 
-def test_build_plan_items_maps_full_plan_shape() -> None:
+async def test_build_plan_items_maps_full_plan_shape() -> None:
     """Spot-check the plan→PlanItem mapping that's shared between /api/plans
     and /api/plans/for-device."""
     price = SimpleNamespace(period_days=30, price_kopeks=27000)
@@ -96,7 +104,7 @@ def test_build_plan_items_maps_full_plan_shape() -> None:
         sort_order=20, is_active=True, description_md="Solo md",
         prices=[price],
     )
-    items = _build_plan_items([plan])
+    items = await _build_plan_items([plan])
     assert len(items) == 1
     item = items[0]
     assert isinstance(item, PlanItem)
@@ -124,6 +132,15 @@ def test_user_uses_tariffs_legacy_user_before_cutoff(monkeypatch: pytest.MonkeyP
     assert cutoff is not None
     user = _make_user(created_at=cutoff - timedelta(days=1), subscription=_make_sub(plan_id=None))
     assert user_uses_tariffs(user) is False
+
+
+def test_user_uses_tariffs_global_flag_routes_everyone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The global flag keeps its broad rollout semantics outside local handlers."""
+    monkeypatch.setattr(settings, "TARIFFS_ENABLED", True, raising=False)
+    cutoff = settings.get_tariffs_legacy_cutoff()
+    assert cutoff is not None
+    user = _make_user(created_at=cutoff - timedelta(days=1), subscription=_make_sub(plan_id=None))
+    assert user_uses_tariffs(user) is True
 
 
 def test_user_uses_tariffs_legacy_user_with_plan_id(monkeypatch: pytest.MonkeyPatch) -> None:

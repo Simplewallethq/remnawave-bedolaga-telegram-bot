@@ -18,6 +18,7 @@ sys.path.insert(0, str(project_root))
 os.environ.setdefault("DATABASE_MODE", "postgresql")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/test_db")
 os.environ.setdefault("BOT_TOKEN", "test-token")
+os.environ.setdefault("BACKUP_LOCATION", "/tmp/remnawave-bedolaga-test-backups")
 
 # Создаём заглушки для драйверов, которых может не быть в окружении тестов.
 sys.modules.setdefault("asyncpg", types.ModuleType("asyncpg"))
