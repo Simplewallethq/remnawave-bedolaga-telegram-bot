@@ -13,6 +13,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.services.payment.common import PaymentCommonMixin
+from app.utils.success_notifications import format_subscription_purchase_success
 
 
 @pytest.fixture
@@ -92,6 +93,18 @@ async def test_send_payment_success_notification_recovers_missing_greenlet(monke
 
     assert service.bot.messages, "Ожидалось, что уведомление будет отправлено"
     message = service.bot.messages[0]
-    assert "Тестовый метод" in message["text"]
+    assert "✅ <b>Платёж прошёл</b>" in message["text"]
+    assert "Зачислено на баланс: 123 ₽" in message["text"]
+    assert "Тестовый метод" not in message["text"]
     assert service.keyboard_user is not None
     assert isinstance(service.keyboard_user, SimpleNamespace)
+
+
+def test_subscription_success_message_escapes_plan_html() -> None:
+    message = format_subscription_purchase_success(
+        plan="A&B <Pro>",
+        period=30,
+        end_date="01.08.2026",
+    )
+
+    assert "Тариф A&amp;B &lt;Pro&gt;" in message

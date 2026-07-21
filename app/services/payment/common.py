@@ -25,6 +25,10 @@ from app.services.subscription_checkout_service import (
 )
 from app.services.user_cart_service import user_cart_service
 from app.utils.miniapp_buttons import build_miniapp_or_callback_button
+from app.utils.success_notifications import (
+    build_success_management_keyboard,
+    format_topup_success_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,100 +38,7 @@ class PaymentCommonMixin:
 
     async def build_topup_success_keyboard(self, user: Any) -> InlineKeyboardMarkup:
         """Формирует клавиатуру по завершении платежа, подстраиваясь под пользователя."""
-        # Загружаем нужные тексты с учётом выбранного языка пользователя.
-        texts = get_texts(user.language if user else "ru")
-
-        # Определяем статус подписки, чтобы показать подходящую кнопку.
-        has_active_subscription = False
-        subscription = None
-        if user:
-            try:
-                subscription = user.subscription
-                has_active_subscription = bool(
-                    subscription
-                    and not getattr(subscription, "is_trial", False)
-                    and getattr(subscription, "is_active", False)
-                )
-            except MissingGreenlet as error:
-                logger.warning(
-                    "Не удалось лениво загрузить подписку пользователя %s при построении клавиатуры после пополнения: %s",
-                    getattr(user, "id", None),
-                    error,
-                )
-            except Exception as error:  # pragma: no cover - защитный код
-                logger.error(
-                    "Ошибка загрузки подписки пользователя %s при построении клавиатуры после пополнения: %s",
-                    getattr(user, "id", None),
-                    error,
-                )
-
-        # Создаем основную кнопку: если есть активная подписка - продлить, иначе купить
-        first_button = build_miniapp_or_callback_button(
-            text=(
-                texts.MENU_EXTEND_SUBSCRIPTION
-                if has_active_subscription
-                else texts.MENU_BUY_SUBSCRIPTION
-            ),
-            callback_data=(
-                "subscription_extend" if has_active_subscription else "menu_buy"
-            ),
-        )
-
-        # Кнопка активации подписки (всегда отображается)
-        activate_subscription_button = build_miniapp_or_callback_button(
-            text="🚀 Активировать подписку",
-            callback_data="menu_buy"  # Используем ту же callback_data что и "Купить подписку"
-        )
-
-        keyboard_rows: list[list[InlineKeyboardButton]] = [
-            [first_button],
-            [activate_subscription_button]
-        ]
-
-        # Если для пользователя есть незавершённый checkout, предлагаем вернуться к нему.
-        if user:
-            try:
-                has_saved_cart = await user_cart_service.has_user_cart(user.id)
-            except Exception as cart_error:
-                logger.warning(
-                    "Не удалось проверить наличие сохраненной корзины у пользователя %s: %s",
-                    user.id,
-                    cart_error,
-                )
-                has_saved_cart = False
-
-            if has_saved_cart:
-                keyboard_rows.append([
-                    build_miniapp_or_callback_button(
-                        text=texts.RETURN_TO_SUBSCRIPTION_CHECKOUT,
-                        callback_data="return_to_saved_cart",
-                    )
-                ])
-            else:
-                draft_exists = await has_subscription_checkout_draft(user.id)
-                if should_offer_checkout_resume(user, draft_exists, subscription=subscription):
-                    keyboard_rows.append([
-                        build_miniapp_or_callback_button(
-                            text=texts.RETURN_TO_SUBSCRIPTION_CHECKOUT,
-                            callback_data="subscription_resume_checkout",
-                        )
-                    ])
-
-        # Стандартные кнопки быстрого доступа к балансу и главному меню.
-        keyboard_rows.append([
-            build_miniapp_or_callback_button(
-                text="💰 Мой баланс",
-                callback_data="menu_balance",
-            )
-        ])
-        keyboard_rows.append([
-            InlineKeyboardButton(
-                text="🏠 Главное меню",
-                callback_data="back_to_menu",
-            )
-        ])
-
-        return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+        return build_success_management_keyboard()
 
     async def _send_payment_success_notification(
         self,
@@ -156,17 +67,7 @@ class PaymentCommonMixin:
         try:
             keyboard = await self.build_topup_success_keyboard(user_snapshot)
 
-            payment_method = payment_method_title or "Банковская карта (YooKassa)"
-            message = (
-                "✅ <b>Платеж успешно завершен!</b>\n\n"
-                f"💰 Сумма: {settings.format_price(amount_kopeks)}\n"
-                f"💳 Способ: {payment_method}\n\n"
-                "Средства зачислены на ваш баланс!\n\n"
-                "⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                "Обязательно активируйте подписку отдельно!\n\n"
-                f"🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
-                f"подписка будет приобретена автоматически после пополнения баланса."
-            )
+            message = format_topup_success_message(settings.format_price(amount_kopeks))
 
             await self.bot.send_message(
                 chat_id=telegram_id,

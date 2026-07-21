@@ -10,6 +10,7 @@ from app.external.telegram_stars import TelegramStarsService
 from app.database.crud.user import get_user_by_telegram_id
 from app.localization.loader import DEFAULT_LANGUAGE
 from app.localization.texts import get_texts
+from app.utils.success_notifications import format_topup_success_message
 
 logger = logging.getLogger(__name__)
 
@@ -153,29 +154,10 @@ async def handle_successful_payment(
             # Если автопокупка сработала, не отправляем generic уведомление о пополнении
             auto_purchased = getattr(payment_service, "_last_auto_purchase_success", False)
             if not auto_purchased:
-                amount_text = settings.format_price(amount_kopeks).replace(" ₽", "")
-
                 keyboard = await payment_service.build_topup_success_keyboard(user)
 
-                transaction_id_short = payment.telegram_payment_charge_id[:8]
-
                 await message.answer(
-                    texts.t(
-                        "STARS_PAYMENT_SUCCESS",
-                        "🎉 <b>Платеж успешно обработан!</b>\n\n"
-                        "⭐ Потрачено звезд: {stars_spent}\n"
-                        "💰 Зачислено на баланс: {amount} ₽\n"
-                        "🆔 ID транзакции: {transaction_id}...\n\n"
-                        "⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                        "Обязательно активируйте подписку отдельно!\n\n"
-                        "🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
-                        "подписка будет приобретена автоматически после пополнения баланса.\n\n"
-                        "Спасибо за пополнение! 🚀",
-                    ).format(
-                        stars_spent=payment.total_amount,
-                        amount=amount_text,
-                        transaction_id=transaction_id_short,
-                    ),
+                    format_topup_success_message(settings.format_price(amount_kopeks)),
                     parse_mode="HTML",
                     reply_markup=keyboard,
                 )

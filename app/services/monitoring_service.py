@@ -1265,79 +1265,16 @@ class MonitoringService:
     
     async def _send_trial_ending_notification(self, user: User, subscription: Subscription) -> bool:
         try:
-            texts = get_texts(user.language)
-
-            # Рассчитываем минимальную цену за подписку с минимальной конфигурацией
-            from app.config import settings, PERIOD_PRICES
-            from app.utils.pricing_utils import apply_percentage_discount
-
-            # Базовая цена за 30 дней
-            base_price_original = PERIOD_PRICES.get(30, settings.PRICE_30_DAYS)
-            
-            # Применяем скидку промогруппы для категории "period"
-            promo_group_discount = user.get_promo_discount("period", 30) if user else 0
-            # Применяем пользовательскую промо-скидку (если есть)
-            user_discount_percent = self._get_user_promo_offer_discount_percent(user)
-            
-            # Общая скидка - максимальная из промогруппы и пользовательской
-            total_discount_percent = max(promo_group_discount, user_discount_percent)
-            
-            base_price, _ = apply_percentage_discount(base_price_original, total_discount_percent)
-
-            # Добавляем цену за трафик (если фиксированный трафик включён)
-            if settings.is_traffic_fixed():
-                traffic_price = settings.get_traffic_price(settings.get_fixed_traffic_limit())
-                # Применяем скидки на трафик
-                traffic_discount = user.get_promo_discount("traffic", 30) if user else 0
-                traffic_price, _ = apply_percentage_discount(traffic_price, traffic_discount)
-            else:
-                traffic_price = 0  # Трафик не фиксирован, цена включена в базовую
-
-            # Добавляем цену за серверы (предполагаем минимум 1 сервер по минимальной цене)
-            # Вместо сложного запроса к БД, используем настройки
-            # Для минимальной конфигурации - один сервер с минимальной ценой
-            min_server_price = getattr(settings, 'MIN_SERVER_PRICE', 0) or 0
-            if min_server_price == 0:
-                # Если нет явной минимальной цены, используем базовую цену
-                # В реальных условиях цена сервера будет определяться в ходе оформления подписки
-                min_server_price = 0
-            
-            # Добавляем цену за устройства (если больше базового лимита)
-            # В минимальной конфигурации - базовый лимит, без доп. устройств
-            device_limit = settings.DEFAULT_DEVICE_LIMIT
-            additional_devices = max(0, device_limit - settings.DEFAULT_DEVICE_LIMIT)
-            devices_price = additional_devices * settings.PRICE_PER_DEVICE
-
-            # Для простоты и правильной работы без обращения к БД, рассчитываем минимальную цену как:
-            # базовая цена + минимальная цена за трафик (если есть фиксированный)
-            min_server_price = 0  # для минимальной конфигурации с 1 сервером используем 0 или минимальную известную
-            
-            # Попробуем получить минимальную цену сервера из настроек или используем подходящее значение
-            # Находим минимальную возможную цену из возможных цен серверов
-            # В упрощенном варианте используем базовую конфигурацию: базовая цена + трафик
-            min_total_price = base_price + traffic_price
-
-            message = f"""
-🎁 <b>Тестовая подписка скоро закончится!</b>
-
-Ваша тестовая подписка истекает через 2 часа.
-
-💎 <b>Не хотите остаться без VPN?</b>
-Переходите на полную подписку!
-
-🔥 <b>Специальное предложение:</b>
-• Лучшие цены на рынке
-• Безлимитный трафик
-• Все серверы доступны
-• Скорость до 1ГБит/сек
-
-⚡️ Успейте оформить до окончания тестового периода!
-"""
+            message = (
+                "⏳ <b>Тест заканчивается через 2 часа</b>\n\n"
+                "Понравилось? Останься с VPN — выбери тариф и продолжай без перерыва."
+            )
             
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [build_miniapp_or_callback_button(text="💎 Купить подписку", callback_data="menu_buy")],
+                [build_miniapp_or_callback_button(text="💎 Выбрать тариф", callback_data="menu_buy")],
+                [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu_support")],
             ])
 
             await self._send_message_with_logo(

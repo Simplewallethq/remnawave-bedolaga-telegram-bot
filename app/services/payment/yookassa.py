@@ -25,6 +25,11 @@ from app.services.tariff_partial_payment_service import (
     build_invoice_checkout_snapshot,
     extract_checkout_snapshot,
 )
+from app.utils.success_notifications import (
+    build_success_management_keyboard,
+    format_subscription_purchase_success,
+    subscription_plan_name,
+)
 from app.utils.user_utils import format_referrer_info
 
 logger = logging.getLogger(__name__)
@@ -741,55 +746,12 @@ class YooKassaPaymentMixin:
                             if auto_purchase_success:
                                 has_saved_cart = False
 
-                        if not auto_purchase_success and has_saved_cart and getattr(self, "bot", None):
-                            from app.localization.texts import get_texts
-                            from aiogram import types
-
-                            texts = get_texts(user.language)
-                            cart_message = texts.BALANCE_TOPUP_CART_REMINDER_DETAILED.format(
-                                total_amount=settings.format_price(payment.amount_kopeks)
-                            )
-
-                            keyboard = types.InlineKeyboardMarkup(
-                                inline_keyboard=[
-                                    [
-                                        types.InlineKeyboardButton(
-                                            text=texts.RETURN_TO_SUBSCRIPTION_CHECKOUT,
-                                            callback_data="return_to_saved_cart",
-                                        )
-                                    ],
-                                    [
-                                        types.InlineKeyboardButton(
-                                            text="💰 Мой баланс",
-                                            callback_data="menu_balance",
-                                        )
-                                    ],
-                                    [
-                                        types.InlineKeyboardButton(
-                                            text="🏠 Главное меню",
-                                            callback_data="back_to_menu",
-                                        )
-                                    ],
-                                ]
-                            )
-
-                            await self.bot.send_message(
-                                chat_id=user.telegram_id,
-                                text=f"✅ Баланс пополнен на {settings.format_price(payment.amount_kopeks)}!\n\n"
-                                     f"⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                                     f"Обязательно активируйте подписку отдельно!\n\n"
-                                     f"🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
-                                     f"подписка будет приобретена автоматически после пополнения баланса.\n\n{cart_message}",
-                                reply_markup=keyboard,
-                            )
-                            logger.info(
-                                f"Отправлено уведомление с кнопкой возврата к оформлению подписки пользователю {user.id}"
-                            )
-                        else:
-                            logger.info(
-                                "У пользователя %s нет сохраненной корзины, бот недоступен или покупка уже выполнена",
-                                user.id,
-                            )
+                        logger.info(
+                            "У пользователя %s сохраненная корзина: %s, автопокупка выполнена: %s",
+                            user.id,
+                            has_saved_cart,
+                            auto_purchase_success,
+                        )
                     except Exception as e:
                         logger.error(
                             f"Критическая ошибка при работе с сохраненной корзиной для пользователя {user.id}: {e}",
@@ -853,29 +815,14 @@ class YooKassaPaymentMixin:
                             
                             # Отправляем уведомление пользователю об активации подписки
                             if getattr(self, "bot", None):
-                                from app.localization.texts import get_texts
-                                from aiogram import types
-                                
-                                texts = get_texts(user.language)
-                                
-                                success_message = (
-                                    f"✅ <b>Подписка успешно активирована!</b>\n\n"
-                                    f"📅 Период: {subscription_period} дней\n"
-                                    f"📱 Устройства: 1\n"
-                                    f"📊 Трафик: Безлимит\n"
-                                    f"💳 Оплата: {settings.format_price(payment.amount_kopeks)} (YooKassa)\n\n"
-                                    f"🔗 Для подключения перейдите в раздел 'Моя подписка'"
-                                )
-                                
-                                keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-                                    [types.InlineKeyboardButton(text="📱 Моя подписка", callback_data="menu_subscription")],
-                                    [types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_menu")]
-                                ])
-                                
                                 await self.bot.send_message(
                                     chat_id=user.telegram_id,
-                                    text=success_message,
-                                    reply_markup=keyboard,
+                                    text=format_subscription_purchase_success(
+                                        plan=subscription_plan_name(subscription),
+                                        period=subscription_period,
+                                        end_date=subscription.end_date,
+                                    ),
+                                    reply_markup=build_success_management_keyboard(),
                                     parse_mode="HTML"
                                 )
 

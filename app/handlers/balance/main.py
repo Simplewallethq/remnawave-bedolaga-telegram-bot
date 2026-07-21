@@ -21,6 +21,10 @@ from app.keyboards.inline import (
 )
 from app.localization.texts import get_texts
 from app.services.payment_service import PaymentService
+from app.utils.success_notifications import (
+    build_success_management_keyboard,
+    format_topup_success_message,
+)
 from app.utils.pagination import paginate_list
 from app.utils.decorators import error_handler
 
@@ -418,22 +422,12 @@ async def handle_successful_topup_with_cart(
                 )]
             ])
             
-            success_text = (
-                f"✅ Баланс пополнен на {texts.format_price(amount_kopeks)}!\n\n"
-                f"💰 Текущий баланс: {texts.format_price(user.balance_kopeks)}\n\n"
-                f"⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                f"Обязательно активируйте подписку отдельно!\n\n"
-                f"🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
-                f"подписка будет приобретена автоматически после пополнения баланса.\n\n"
-                f"🛒 У вас есть сохраненная корзина подписки\n"
-                f"Стоимость: {texts.format_price(total_price)}\n\n"
-                f"Хотите продолжить оформление?"
-            )
+            success_text = format_topup_success_message(texts.format_price(amount_kopeks))
             
             await bot.send_message(
                 chat_id=user.telegram_id,
                 text=success_text,
-                reply_markup=keyboard,
+                reply_markup=build_success_management_keyboard(),
                 parse_mode="HTML"
             )
             

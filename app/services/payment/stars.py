@@ -24,6 +24,11 @@ from app.external.telegram_stars import TelegramStarsService
 from app.services.subscription_auto_purchase_service import (
     auto_purchase_saved_cart_after_topup,
 )
+from app.utils.success_notifications import (
+    build_success_management_keyboard,
+    format_subscription_purchase_success,
+    subscription_plan_name,
+)
 from app.utils.user_utils import format_referrer_info
 
 logger = logging.getLogger(__name__)
@@ -57,6 +62,8 @@ class TelegramStarsMixin:
 
             # Если количество звёзд не задано, вычисляем его из курса.
             if stars_amount is None:
+                if settings.get_stars_rate() <= 0:
+                    raise ValueError("Stars rate must be positive")
                 stars_amount = settings.rubles_to_stars(float(amount_rubles))
 
             if stars_amount <= 0:
@@ -338,12 +345,15 @@ class TelegramStarsMixin:
             db,
             user_id=user.id,
             subscription_id=subscription.id,
-            transaction_id=transaction.id,
+            transaction_id=getattr(transaction, "id", None),
             amount_kopeks=amount_kopeks,
-            occurred_at=transaction.completed_at or transaction.created_at,
+            occurred_at=(
+                getattr(transaction, "completed_at", None)
+                or getattr(transaction, "created_at", None)
+            ),
             period_days=period_display,
             was_trial_conversion=False,
-            payment_method=transaction.payment_method,
+            payment_method=getattr(transaction, "payment_method", PaymentMethod.TELEGRAM_STARS),
             source="stars_simple_subscription",
             starts_at=subscription.start_date,
             ends_at=subscription.end_date,
@@ -351,45 +361,14 @@ class TelegramStarsMixin:
 
         if getattr(self, "bot", None):
             try:
-                from aiogram import types
-                from app.localization.texts import get_texts
-
-                texts = get_texts(user.language)
-                traffic_limit = getattr(subscription, "traffic_limit_gb", 0) or 0
-                traffic_label = (
-                    "Безлимит" if traffic_limit == 0 else f"{int(traffic_limit)} ГБ"
-                )
-
-                success_message = (
-                    "✅ <b>Подписка успешно активирована!</b>\n\n"
-                    f"📅 Период: {period_display} дней\n"
-                    f"📱 Устройства: {getattr(subscription, 'device_limit', 1)}\n"
-                    f"📊 Трафик: {traffic_label}\n"
-                    f"⭐ Оплата: {stars_amount} ⭐ ({settings.format_price(amount_kopeks)})\n\n"
-                    "🔗 Для подключения перейдите в раздел 'Моя подписка'"
-                )
-
-                keyboard = types.InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            types.InlineKeyboardButton(
-                                text="📱 Моя подписка",
-                                callback_data="menu_subscription",
-                            )
-                        ],
-                        [
-                            types.InlineKeyboardButton(
-                                text="🏠 Главное меню",
-                                callback_data="back_to_menu",
-                            )
-                        ],
-                    ]
-                )
-
                 await self.bot.send_message(
                     chat_id=user.telegram_id,
-                    text=success_message,
-                    reply_markup=keyboard,
+                    text=format_subscription_purchase_success(
+                        plan=subscription_plan_name(subscription),
+                        period=period_display,
+                        end_date=subscription.end_date,
+                    ),
+                    reply_markup=build_success_management_keyboard(),
                     parse_mode="HTML",
                 )
                 logger.info(
@@ -408,15 +387,27 @@ class TelegramStarsMixin:
                 from app.services.admin_notification_service import AdminNotificationService
 
                 notification_service = AdminNotificationService(self.bot)
-                await notification_service.send_subscription_purchase_notification(
-                    db,
-                    user,
-                    subscription,
-                    transaction,
-                    period_display,
-                    was_trial_conversion=False,
-                    record_event=False,
-                )
+                try:
+                    await notification_service.send_subscription_purchase_notification(
+                        db,
+                        user,
+                        subscription,
+                        transaction,
+                        period_display,
+                        was_trial_conversion=False,
+                        record_event=False,
+                    )
+                except TypeError as type_error:
+                    if "record_event" not in str(type_error):
+                        raise
+                    await notification_service.send_subscription_purchase_notification(
+                        db,
+                        user,
+                        subscription,
+                        transaction,
+                        period_display,
+                        was_trial_conversion=False,
+                    )
             except Exception as admin_error:  # pragma: no cover - диагностический лог
                 logger.error(
                     "Ошибка уведомления администраторов о подписке через Stars: %s",
@@ -540,8 +531,6 @@ class TelegramStarsMixin:
         # Сначала пробуем автопокупку — если успех, не отправляем generic уведомление
         auto_purchase_success = False
         try:
-            from aiogram import types
-            from app.localization.texts import get_texts
             from app.services.user_cart_service import user_cart_service
 
             has_saved_cart = await user_cart_service.has_user_cart(user.id)
@@ -563,51 +552,6 @@ class TelegramStarsMixin:
 
                 if auto_purchase_success:
                     has_saved_cart = False
-
-            if not auto_purchase_success and has_saved_cart and getattr(self, "bot", None):
-                texts = get_texts(user.language)
-                cart_message = texts.t(
-                    "BALANCE_TOPUP_CART_REMINDER_DETAILED",
-                    "🛒 У вас есть неоформленный заказ.\n\n"
-                    "Вы можете продолжить оформление с теми же параметрами.",
-                )
-
-                keyboard = types.InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            types.InlineKeyboardButton(
-                                text=texts.RETURN_TO_SUBSCRIPTION_CHECKOUT,
-                                callback_data="return_to_saved_cart",
-                            )
-                        ],
-                        [
-                            types.InlineKeyboardButton(
-                                text="💰 Мой баланс",
-                                callback_data="menu_balance",
-                            )
-                        ],
-                        [
-                            types.InlineKeyboardButton(
-                                text="🏠 Главное меню",
-                                callback_data="back_to_menu",
-                            )
-                        ],
-                    ]
-                )
-
-                await self.bot.send_message(
-                    chat_id=user.telegram_id,
-                    text=f"✅ Баланс пополнен на {settings.format_price(amount_kopeks)}!\n\n"
-                         f"⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                         f"Обязательно активируйте подписку отдельно!\n\n"
-                         f"🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
-                         f"подписка будет приобретена автоматически после пополнения баланса.\n\n{cart_message}",
-                    reply_markup=keyboard,
-                )
-                logger.info(
-                    "Отправлено уведомление с кнопкой возврата к оформлению подписки пользователю %s",
-                    user.id,
-                )
         except Exception as error:  # pragma: no cover - диагностический лог
             logger.error(
                 "Ошибка при работе с сохраненной корзиной для пользователя %s: %s",
