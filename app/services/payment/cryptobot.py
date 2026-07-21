@@ -31,6 +31,7 @@ from app.services.subscription_renewal_service import (
     parse_payment_metadata,
 )
 from app.utils.currency_converter import currency_converter
+from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
 
 logger = logging.getLogger(__name__)
@@ -56,14 +57,6 @@ class _UserNotificationPayload:
     reply_markup: Any
     amount_rubles: float
     asset: str
-
-
-@dataclass(slots=True)
-class _SavedCartNotificationPayload:
-    telegram_id: int
-    text: str
-    reply_markup: Any
-    user_id: int
 
 
 class CryptoBotPaymentMixin:
@@ -328,8 +321,6 @@ class CryptoBotPaymentMixin:
 
                 admin_notification: Optional[_AdminNotificationContext] = None
                 user_notification: Optional[_UserNotificationPayload] = None
-                saved_cart_notification: Optional[_SavedCartNotificationPayload] = None
-
                 bot_instance = getattr(self, "bot", None)
                 if bot_instance:
                     admin_notification = _AdminNotificationContext(
@@ -342,13 +333,8 @@ class CryptoBotPaymentMixin:
 
                     try:
                         keyboard = await self.build_topup_success_keyboard(user)
-                        message_text = (
-                            "✅ <b>Пополнение успешно!</b>\n\n"
-                            f"💰 Сумма: {settings.format_price(amount_kopeks)}\n"
-                            f"🪙 Платеж: {updated_payment.amount} {updated_payment.asset}\n"
-                            f"💱 Курс: 1 USD = {conversion_rate:.2f}₽\n"
-                            f"🆔 Транзакция: {invoice_id[:8]}...\n\n"
-                            "Баланс пополнен автоматически!"
+                        message_text = format_topup_success_message(
+                            settings.format_price(amount_kopeks)
                         )
                         user_notification = _UserNotificationPayload(
                             telegram_id=user.telegram_id,
@@ -367,7 +353,6 @@ class CryptoBotPaymentMixin:
                 # Проверяем наличие сохраненной корзины для возврата к оформлению подписки
                 try:
                     from app.services.user_cart_service import user_cart_service
-                    from aiogram import types
 
                     checkout_snapshot = extract_checkout_snapshot(updated_payment)
                     has_saved_cart = await user_cart_service.has_user_cart(user.id)
@@ -390,42 +375,6 @@ class CryptoBotPaymentMixin:
 
                         if auto_purchase_success:
                             has_saved_cart = False
-
-                    if has_saved_cart and bot_instance:
-                        from app.localization.texts import get_texts
-
-                        texts = get_texts(user.language)
-                        cart_message = texts.BALANCE_TOPUP_CART_REMINDER_DETAILED.format(
-                            total_amount=settings.format_price(amount_kopeks)
-                        )
-
-                        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-                            [types.InlineKeyboardButton(
-                                text=texts.RETURN_TO_SUBSCRIPTION_CHECKOUT,
-                                callback_data="return_to_saved_cart"
-                            )],
-                            [types.InlineKeyboardButton(
-                                text="💰 Мой баланс",
-                                callback_data="menu_balance"
-                            )],
-                            [types.InlineKeyboardButton(
-                                text="🏠 Главное меню",
-                                callback_data="back_to_menu"
-                            )]
-                        ])
-
-                        saved_cart_notification = _SavedCartNotificationPayload(
-                            telegram_id=user.telegram_id,
-                            text=(
-                                f"✅ Баланс пополнен на {settings.format_price(amount_kopeks)}!\n\n"
-                                f"⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                                f"Обязательно активируйте подписку отдельно!\n\n"
-                                f"🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
-                                f"подписка будет приобретена автоматически после пополнения баланса.\n\n{cart_message}"
-                            ),
-                            reply_markup=keyboard,
-                            user_id=user.id,
-                        )
                 except Exception as error:
                     logger.error(
                         "Ошибка при работе с сохраненной корзиной для пользователя %s: %s",
@@ -439,9 +388,6 @@ class CryptoBotPaymentMixin:
 
                 if user_notification and bot_instance and not auto_purchase_success:
                     await self._deliver_user_topup_notification(user_notification)
-
-                if saved_cart_notification and bot_instance:
-                    await self._deliver_saved_cart_reminder(saved_cart_notification)
 
             return True
 
@@ -689,31 +635,6 @@ class CryptoBotPaymentMixin:
             logger.error(
                 "Ошибка отправки уведомления о пополнении CryptoBot: %s",
                 error,
-            )
-
-    async def _deliver_saved_cart_reminder(
-        self, payload: _SavedCartNotificationPayload
-    ) -> None:
-        bot_instance = getattr(self, "bot", None)
-        if not bot_instance:
-            return
-
-        try:
-            await bot_instance.send_message(
-                chat_id=payload.telegram_id,
-                text=payload.text,
-                reply_markup=payload.reply_markup,
-            )
-            logger.info(
-                "Отправлено уведомление с кнопкой возврата к оформлению подписки пользователю %s",
-                payload.user_id,
-            )
-        except Exception as error:
-            logger.error(
-                "Ошибка отправки уведомления о сохраненной корзине для пользователя %s: %s",
-                payload.user_id,
-                error,
-                exc_info=True,
             )
 
     async def get_cryptobot_payment_status(

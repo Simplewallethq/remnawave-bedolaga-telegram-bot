@@ -17,6 +17,7 @@ from app.services.payment_service import PaymentService
 from app.services.subscription_auto_purchase_service import (
     auto_purchase_saved_cart_after_topup,
 )
+from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
 
 logger = logging.getLogger(__name__)
@@ -263,36 +264,12 @@ class TributeService:
     async def _send_success_notification(self, user_id: int, amount_kopeks: int):
 
         try:
-            amount_rubles = amount_kopeks / 100
-
             async for session in get_db():
                 user = await get_user_by_telegram_id(session, user_id)
                 break
 
-            # Сначала отправляем стандартное уведомление
-            payment_service = PaymentService(self.bot)
-            keyboard = await payment_service.build_topup_success_keyboard(user)
-
-            text = (
-                f"✅ **Платеж успешно получен!**\n\n"
-                f"💰 Сумма: {int(amount_rubles)} ₽\n"
-                f"💳 Способ оплаты: Tribute\n"
-                f"🎉 Средства зачислены на баланс!\n\n"
-                f"⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                f"Обязательно активируйте подписку отдельно!\n\n"
-                f"🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
-                f"подписка будет приобретена автоматически после пополнения баланса.\n\n"
-                f"Спасибо за оплату! 🙏"
-            )
-
-            await self.bot.send_message(
-                user_id,
-                text,
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-
-            # Проверяем наличие сохраненной корзины для возврата к оформлению подписки
+            # Сначала пробуем автопокупку. Если она не сработала, отправляем одно
+            # универсальное подтверждение пополнения.
             from app.services.user_cart_service import user_cart_service
             has_saved_cart = await user_cart_service.has_user_cart(user.id)
             auto_purchase_success = False
@@ -314,43 +291,16 @@ class TributeService:
                 if auto_purchase_success:
                     has_saved_cart = False
 
-            if has_saved_cart and self.bot:
-                # Если у пользователя есть сохраненная корзина,
-                # отправляем ему уведомление с кнопкой вернуться к оформлению
-                from app.localization.texts import get_texts
-                from aiogram import types
-
-                texts = get_texts(user.language)
-                cart_message = texts.BALANCE_TOPUP_CART_REMINDER_DETAILED.format(
-                    total_amount=settings.format_price(amount_kopeks)
-                )
-
-                # Создаем клавиатуру с кнопками
-                keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-                    [types.InlineKeyboardButton(
-                        text=texts.RETURN_TO_SUBSCRIPTION_CHECKOUT,
-                        callback_data="subscription_resume_checkout"
-                    )],
-                    [types.InlineKeyboardButton(
-                        text="💰 Мой баланс",
-                        callback_data="menu_balance"
-                    )],
-                    [types.InlineKeyboardButton(
-                        text="🏠 Главное меню",
-                        callback_data="back_to_menu"
-                    )]
-                ])
+            if not auto_purchase_success:
+                payment_service = PaymentService(self.bot)
+                keyboard = await payment_service.build_topup_success_keyboard(user)
+                text = format_topup_success_message(settings.format_price(amount_kopeks))
 
                 await self.bot.send_message(
-                    chat_id=user_id,
-                    text=f"✅ Баланс пополнен на {settings.format_price(amount_kopeks)}!\n\n"
-                         f"⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                         f"Обязательно активируйте подписку отдельно!\n\n{cart_message}",
-                    reply_markup=keyboard
-                )
-                logger.info(
-                    "Отправлено уведомление с кнопкой возврата к оформлению подписки пользователю %s",
                     user_id,
+                    text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
                 )
 
         except Exception as e:

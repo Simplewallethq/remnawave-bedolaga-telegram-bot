@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, Optional
+from unittest.mock import AsyncMock
 import sys
 
 import pytest
@@ -343,5 +344,84 @@ async def test_process_stars_payment_simple_subscription_success(
     assert admin_calls[0]["subscription"] is activated_subscription
     assert admin_calls[0]["period"] == 30
     assert bot.sent_messages, "Пользователь должен получить уведомление"
-    assert "Подписка успешно активирована" in bot.sent_messages[0]["text"]
+    assert "✅ <b>Подписка активирована</b>" in bot.sent_messages[0]["text"]
     assert transaction_holder["value"].external_id == "charge12345"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_process_stars_payment_saved_cart_does_not_send_cart_reminder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bot = DummyBot()
+    service = _make_service(bot)
+    db = DummySession(DummySubscription(subscription_id=1))
+    user = DummyUser(user_id=901, telegram_id=123457)
+    user.get_primary_promo_group = lambda: None
+
+    async def fake_create_transaction(**kwargs: Any) -> DummyTransaction:
+        return DummyTransaction(external_id=kwargs.get("external_id", ""))
+
+    async def fake_get_user_by_id(_db: Any, _user_id: int) -> DummyUser:
+        return user
+
+    class AdminNotificationStub:
+        def __init__(self, _bot: Any) -> None:
+            self.bot = _bot
+
+        async def send_balance_topup_notification(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "app.services.payment.stars.create_transaction",
+        fake_create_transaction,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.payment.stars.get_user_by_id",
+        fake_get_user_by_id,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.payment.stars.TelegramStarsService.calculate_rubles_from_stars",
+        lambda stars: Decimal("100"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.user_cart_service.user_cart_service.has_user_cart",
+        AsyncMock(return_value=True),
+    )
+    auto_purchase_mock = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        "app.services.payment.stars.auto_purchase_saved_cart_after_topup",
+        auto_purchase_mock,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.admin_notification_service.AdminNotificationService",
+        AdminNotificationStub,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.referral_service.process_referral_topup",
+        AsyncMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        type(settings),
+        "format_price",
+        lambda self, amount: f"{amount / 100:.0f}₽",
+        raising=False,
+    )
+
+    result = await service.process_stars_payment(
+        db=db,
+        user_id=user.id,
+        stars_amount=5,
+        payload="topup",
+        telegram_payment_charge_id="charge-topup",
+    )
+
+    assert result is True
+    assert service._last_auto_purchase_success is False
+    auto_purchase_mock.assert_awaited_once()
+    assert bot.sent_messages == []

@@ -18,6 +18,7 @@ from app.services.tariff_partial_payment_service import (
     build_invoice_checkout_snapshot,
     extract_checkout_snapshot,
 )
+from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
 
 logger = logging.getLogger(__name__)
@@ -431,28 +432,9 @@ class HeleketPaymentMixin:
                     return updated_payment
                 keyboard = await self.build_topup_success_keyboard(user)
 
-                exchange_rate_value = updated_payment.exchange_rate or 0
-                rate_text = (
-                    f"💱 Курс: 1 RUB = {1 / exchange_rate_value:.4f} {updated_payment.payer_currency}"
-                    if exchange_rate_value and updated_payment.payer_currency
-                    else None
-                )
-
-                message_lines = [
-                    "✅ <b>Пополнение успешно!</b>",
-                    f"💰 Сумма: {settings.format_price(amount_kopeks)}",
-                    "💳 Способ: Heleket",
-                ]
-                if updated_payment.payer_amount and updated_payment.payer_currency:
-                    message_lines.append(
-                        f"🪙 Оплата: {updated_payment.payer_amount} {updated_payment.payer_currency}"
-                    )
-                if rate_text:
-                    message_lines.append(rate_text)
-
                 await self.bot.send_message(
                     chat_id=user.telegram_id,
-                    text="\n".join(message_lines),
+                    text=format_topup_success_message(settings.format_price(amount_kopeks)),
                     parse_mode="HTML",
                     reply_markup=keyboard,
                 )

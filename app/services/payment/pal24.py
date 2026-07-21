@@ -21,6 +21,7 @@ from app.services.tariff_partial_payment_service import (
     build_invoice_checkout_snapshot,
     extract_checkout_snapshot,
 )
+from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
 
 logger = logging.getLogger(__name__)
@@ -464,9 +465,9 @@ class Pal24PaymentMixin:
 
         # Сначала пробуем автопокупку
         auto_purchase_success = False
+        has_saved_cart = False
         try:
             from app.services.user_cart_service import user_cart_service
-            from aiogram import types
 
             checkout_snapshot = extract_checkout_snapshot(payment)
             has_saved_cart = await user_cart_service.has_user_cart(user.id)
@@ -488,52 +489,6 @@ class Pal24PaymentMixin:
 
                 if auto_purchase_success:
                     has_saved_cart = False
-
-            if not auto_purchase_success and has_saved_cart and getattr(self, "bot", None):
-                from app.localization.texts import get_texts
-
-                texts = get_texts(user.language)
-                cart_message = texts.t(
-                    "BALANCE_TOPUP_CART_REMINDER",
-                    "У вас есть незавершенное оформление подписки. Вернуться?",
-                )
-
-                keyboard = types.InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            types.InlineKeyboardButton(
-                                text=texts.t(
-                                    "BALANCE_TOPUP_CART_BUTTON",
-                                    "🛒 Продолжить оформление",
-                                ),
-                                callback_data="return_to_saved_cart",
-                            )
-                        ],
-                        [
-                            types.InlineKeyboardButton(
-                                text="🏠 Главное меню",
-                                callback_data="back_to_menu",
-                            )
-                        ],
-                    ]
-                )
-
-                await self.bot.send_message(
-                    chat_id=user.telegram_id,
-                    text=(
-                        "✅ Баланс пополнен на "
-                        f"{settings.format_price(payment.amount_kopeks)}!\n\n"
-                        f"⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                        f"Обязательно активируйте подписку отдельно!\n\n"
-                        f"🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
-                        f"подписка будет приобретена автоматически после пополнения баланса.\n\n{cart_message}"
-                    ),
-                    reply_markup=keyboard,
-                )
-                logger.info(
-                    "Отправлено уведомление с кнопкой возврата к оформлению подписки пользователю %s",
-                    user.id,
-                )
         except Exception as error:
             logger.error(
                 "Ошибка при работе с сохраненной корзиной для пользователя %s: %s",
@@ -548,13 +503,7 @@ class Pal24PaymentMixin:
                 keyboard = await self.build_topup_success_keyboard(user)
                 await self.bot.send_message(
                     user.telegram_id,
-                    (
-                        "✅ <b>Пополнение успешно!</b>\n\n"
-                        f"💰 Сумма: {settings.format_price(payment.amount_kopeks)}\n"
-                        "🦊 Способ: PayPalych\n"
-                        f"🆔 Транзакция: {transaction.id}\n\n"
-                        "Баланс пополнен автоматически!"
-                    ),
+                    format_topup_success_message(settings.format_price(payment.amount_kopeks)),
                     parse_mode="HTML",
                     reply_markup=keyboard,
                 )

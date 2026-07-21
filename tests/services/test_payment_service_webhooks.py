@@ -326,6 +326,16 @@ async def test_process_cryptobot_webhook_success(monkeypatch: pytest.MonkeyPatch
     referral_crypto = SimpleNamespace(process_referral_topup=AsyncMock())
     monkeypatch.setitem(sys.modules, "app.services.referral_service", referral_crypto)
 
+    user_cart_stub = ModuleType("app.services.user_cart_service")
+    user_cart_stub.user_cart_service = SimpleNamespace(has_user_cart=AsyncMock(return_value=True))
+    monkeypatch.setitem(sys.modules, "app.services.user_cart_service", user_cart_stub)
+    auto_purchase_mock = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        cryptobot_module,
+        "auto_purchase_saved_cart_after_topup",
+        auto_purchase_mock,
+    )
+
     admin_calls: list[Any] = []
 
     class DummyAdminService2:
@@ -366,7 +376,17 @@ async def test_process_cryptobot_webhook_success(monkeypatch: pytest.MonkeyPatch
     assert transactions and transactions[0]["amount_kopeks"] == 14000
     assert user.balance_kopeks == 14000
     assert payment.transaction_id == 888
-    assert bot.sent_messages
+    message_texts = [
+        message["args"][1] if len(message["args"]) > 1 else message["kwargs"].get("text", "")
+        for message in bot.sent_messages
+    ]
+    assert sum("✅ <b>Платёж прошёл</b>" in text for text in message_texts) == 1
+    assert not any(
+        message["kwargs"].get("reply_markup")
+        and message["kwargs"]["reply_markup"].inline_keyboard[0][0].kwargs.get("callback_data") == "return_to_saved_cart"
+        for message in bot.sent_messages
+    )
+    auto_purchase_mock.assert_awaited_once()
     assert admin_calls
 
 
@@ -1075,10 +1095,16 @@ async def test_process_pal24_callback_success(monkeypatch: pytest.MonkeyPatch) -
     assert payment.transaction_id == 654
     assert user.balance_kopeks == 5000
     assert bot.sent_messages
-    saved_cart_message = bot.sent_messages[-1]
-    reply_markup = saved_cart_message["kwargs"].get("reply_markup")
-    assert reply_markup is not None
-    assert reply_markup.inline_keyboard[0][0].kwargs["callback_data"] == "return_to_saved_cart"
+    message_texts = [
+        message["args"][1] if len(message["args"]) > 1 else message["kwargs"].get("text", "")
+        for message in bot.sent_messages
+    ]
+    assert sum("✅ <b>Платёж прошёл</b>" in text for text in message_texts) == 1
+    assert not any(
+        message["kwargs"].get("reply_markup")
+        and message["kwargs"]["reply_markup"].inline_keyboard[0][0].kwargs.get("callback_data") == "return_to_saved_cart"
+        for message in bot.sent_messages
+    )
     assert admin_calls
 
 

@@ -38,6 +38,12 @@ from app.services.subscription_service import SubscriptionService
 from app.services.user_cart_service import user_cart_service
 from app.utils.bot_registry import get_logo_for_bot
 from app.utils.pricing_utils import format_period_description
+from app.utils.success_notifications import (
+    build_success_management_keyboard,
+    format_subscription_purchase_success,
+    format_subscription_renewal_success,
+    subscription_plan_name,
+)
 from app.utils.timezone import format_local_datetime
 
 logger = logging.getLogger(__name__)
@@ -137,9 +143,11 @@ async def _prepare_auto_extend_context(
     user: User,
     cart_data: dict,
 ) -> Optional[AutoExtendContext]:
-    from app.database.crud.subscription import get_subscription_by_user_id
+    subscription = getattr(user, "subscription", None)
+    if subscription is None:
+        from app.database.crud.subscription import get_subscription_by_user_id
 
-    subscription = await get_subscription_by_user_id(db, user.id)
+        subscription = await get_subscription_by_user_id(db, user.id)
     if subscription is None:
         logger.info(
             "🔁 Автопокупка: у пользователя %s нет активной подписки для продления",
@@ -408,58 +416,20 @@ async def _auto_extend_subscription(
             )
 
         try:
-            auto_message = texts.t(
-                "AUTO_PURCHASE_SUBSCRIPTION_EXTENDED",
-                "✅ Subscription automatically extended for {period}.",
-            ).format(period=period_label)
-            details_message = texts.t(
-                "AUTO_PURCHASE_SUBSCRIPTION_EXTENDED_DETAILS",
-                "New expiration date: {date}.",
-            ).format(date=end_date_label)
-            hint_message = texts.t(
-                "AUTO_PURCHASE_SUBSCRIPTION_HINT",
-                "Open the ‘My subscription’ section to access your link.",
+            full_message = format_subscription_renewal_success(
+                plan=subscription_plan_name(updated_subscription),
+                days=prepared.period_days,
+                end_date=new_end_date,
             )
 
-            full_message = "\n\n".join(
-                part.strip()
-                for part in [auto_message, details_message, hint_message]
-                if part and part.strip()
-            )
+            keyboard = build_success_management_keyboard()
 
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 My subscription"),
-                            callback_data="subscription",
-                        )
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "🏠 Main menu"),
-                            callback_data="back_to_menu",
-                        )
-                    ],
-                ]
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text=full_message,
+                reply_markup=keyboard,
+                parse_mode="HTML",
             )
-
-            logo_path = get_logo_for_bot(bot.id if bot else None)
-            if settings.ENABLE_LOGO_MODE and logo_path.exists():
-                await bot.send_photo(
-                    chat_id=user.telegram_id,
-                    photo=FSInputFile(logo_path),
-                    caption=full_message,
-                    reply_markup=keyboard,
-                    parse_mode="HTML",
-                )
-            else:
-                await bot.send_message(
-                    chat_id=user.telegram_id,
-                    text=full_message,
-                    reply_markup=keyboard,
-                    parse_mode="HTML",
-                )
         except Exception as error:  # pragma: no cover - defensive logging
             logger.error(
                 "⚠️ Автопокупка: не удалось уведомить пользователя %s о продлении: %s",
@@ -1321,60 +1291,20 @@ async def auto_purchase_saved_cart_after_topup(
             )
 
         try:
-            period_label = format_period_description(
-                selection.period.days,
-                getattr(user, "language", "ru"),
-            )
-            auto_message = texts.t(
-                "AUTO_PURCHASE_SUBSCRIPTION_SUCCESS",
-                "✅ Subscription purchased automatically after balance top-up ({period}).",
-            ).format(period=period_label)
-
-            hint_message = texts.t(
-                "AUTO_PURCHASE_SUBSCRIPTION_HINT",
-                "Open the ‘My subscription’ section to access your link.",
+            full_message = format_subscription_purchase_success(
+                plan=subscription_plan_name(subscription),
+                period=selection.period.days,
+                end_date=getattr(subscription, "end_date", None),
             )
 
-            purchase_message = purchase_result.get("message", "")
-            full_message = "\n\n".join(
-                part.strip()
-                for part in [auto_message, purchase_message, hint_message]
-                if part and part.strip()
-            )
+            keyboard = build_success_management_keyboard()
 
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(
-                            text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 My subscription"),
-                            callback_data="subscription",
-                        )
-                    ],
-                    [
-                        InlineKeyboardButton(
-                            text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "🏠 Main menu"),
-                            callback_data="back_to_menu",
-                        )
-                    ],
-                ]
+            await bot.send_message(
+                chat_id=user.telegram_id,
+                text=full_message,
+                reply_markup=keyboard,
+                parse_mode="HTML",
             )
-
-            logo_path = get_logo_for_bot(bot.id if bot else None)
-            if settings.ENABLE_LOGO_MODE and logo_path.exists():
-                await bot.send_photo(
-                    chat_id=user.telegram_id,
-                    photo=FSInputFile(logo_path),
-                    caption=full_message,
-                    reply_markup=keyboard,
-                    parse_mode="HTML",
-                )
-            else:
-                await bot.send_message(
-                    chat_id=user.telegram_id,
-                    text=full_message,
-                    reply_markup=keyboard,
-                    parse_mode="HTML",
-                )
         except Exception as error:  # pragma: no cover - defensive logging
             logger.error(
                 "⚠️ Автопокупка: не удалось уведомить пользователя %s: %s",

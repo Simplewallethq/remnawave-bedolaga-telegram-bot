@@ -9,6 +9,10 @@ from app.database.crud.user import get_user_by_id, add_user_balance
 from app.database.crud.transaction import create_transaction, get_transaction_by_external_id
 from app.database.models import TransactionType, PaymentMethod
 from app.external.tribute import TributeService
+from app.utils.success_notifications import (
+    build_success_management_keyboard,
+    format_topup_success_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,11 +118,9 @@ async def handle_successful_payment(message: types.Message):
                         )
                         
                         await message.answer(
-                            f"✅ Баланс успешно пополнен на {settings.format_price(amount_kopeks)}!\n\n"
-                            "⚠️ <b>Важно:</b> Пополнение баланса не активирует подписку автоматически. "
-                            "Обязательно активируйте подписку отдельно!\n\n"
-                            f"🔄 При наличии сохранённой корзины подписки и включенной автопокупке, "
-                            f"подписка будет приобретена автоматически после пополнения баланса."
+                            format_topup_success_message(settings.format_price(amount_kopeks)),
+                            reply_markup=build_success_management_keyboard(),
+                            parse_mode="HTML",
                         )
                         
                         logger.info(f"✅ Обработан Stars платеж: {payment.telegram_payment_charge_id}")

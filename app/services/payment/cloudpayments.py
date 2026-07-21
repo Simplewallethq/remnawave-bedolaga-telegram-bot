@@ -342,33 +342,13 @@ class CloudPaymentsPaymentMixin:
     ) -> None:
         """Send success notification to user via Telegram."""
         from app.bot import bot
-        from app.localization.texts import get_texts
+        from app.utils.success_notifications import format_topup_success_message
 
         if not bot:
             return
 
-        texts = get_texts(user.language)
         keyboard = await self.build_topup_success_keyboard(user)
-
-        referrer_info = format_referrer_info(user)
-
-        amount_rub = amount_kopeks / 100
-        new_balance = user.balance_kopeks / 100
-
-        message = texts.t(
-            "PAYMENT_SUCCESS_CLOUDPAYMENTS",
-            "✅ <b>Оплата получена!</b>\n\n"
-            "💰 Сумма: {amount}₽\n"
-            "💳 Способ: CloudPayments\n"
-            "💵 Баланс: {balance}₽\n\n"
-            "Спасибо за пополнение!",
-        ).format(
-            amount=f"{amount_rub:.2f}",
-            balance=f"{new_balance:.2f}",
-        )
-
-        if referrer_info:
-            message += f"\n\n{referrer_info}"
+        message = format_topup_success_message(settings.format_price(amount_kopeks))
 
         try:
             await bot.send_message(

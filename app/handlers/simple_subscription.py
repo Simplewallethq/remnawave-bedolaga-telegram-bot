@@ -21,6 +21,11 @@ from app.utils.subscription_utils import (
     resolve_simple_subscription_device_limit,
 )
 from app.utils.pricing_utils import compute_simple_subscription_price
+from app.utils.success_notifications import (
+    build_success_management_keyboard,
+    format_subscription_purchase_success,
+    subscription_plan_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -606,6 +611,12 @@ async def handle_simple_subscription_pay_with_balance(
         )
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+        success_message = format_subscription_purchase_success(
+            plan=subscription_plan_name(subscription),
+            period=subscription_params["period_days"],
+            end_date=subscription.end_date,
+        )
+        keyboard = build_success_management_keyboard()
 
         await callback.message.edit_text(
             success_message,
@@ -2318,6 +2329,12 @@ async def confirm_simple_subscription_purchase(
         )
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+        success_message = format_subscription_purchase_success(
+            plan=subscription_plan_name(subscription),
+            period=subscription_params["period_days"],
+            end_date=subscription.end_date,
+        )
+        keyboard = build_success_management_keyboard()
 
         await callback.message.edit_text(
             success_message,

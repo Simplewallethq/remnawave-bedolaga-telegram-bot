@@ -21,6 +21,7 @@ from app.services.tariff_partial_payment_service import (
     extract_checkout_snapshot,
 )
 from app.services.wata_service import WataAPIError, WataService
+from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
 
 logger = logging.getLogger(__name__)
@@ -535,7 +536,6 @@ class WataPaymentMixin:
         auto_purchase_success = False
         try:
             from app.services.user_cart_service import user_cart_service
-            from aiogram import types
 
             checkout_snapshot = extract_checkout_snapshot(payment)
             has_saved_cart = await user_cart_service.has_user_cart(user.id)
@@ -557,45 +557,6 @@ class WataPaymentMixin:
 
                 if auto_purchase_success:
                     has_saved_cart = False
-
-            if not auto_purchase_success and has_saved_cart and getattr(self, "bot", None):
-                from app.localization.texts import get_texts
-
-                texts = get_texts(user.language)
-                cart_message = texts.t(
-                    "BALANCE_TOPUP_CART_REMINDER_DETAILED",
-                    "🛒 У вас есть неоформленный заказ.\n\n"
-                    "Вы можете продолжить оформление с теми же параметрами.",
-                )
-
-                keyboard = types.InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            types.InlineKeyboardButton(
-                                text=texts.RETURN_TO_SUBSCRIPTION_CHECKOUT,
-                                callback_data="return_to_saved_cart",
-                            )
-                        ],
-                        [
-                            types.InlineKeyboardButton(
-                                text="💰 Мой баланс",
-                                callback_data="menu_balance",
-                            )
-                        ],
-                        [
-                            types.InlineKeyboardButton(
-                                text="🏠 Главное меню",
-                                callback_data="back_to_menu",
-                            )
-                        ],
-                    ]
-                )
-
-                await self.bot.send_message(
-                    user.telegram_id,
-                    cart_message,
-                    reply_markup=keyboard,
-                )
         except Exception as error:
             logger.debug("Не удалось отправить напоминание о корзине после WATA: %s", error)
 
@@ -605,13 +566,7 @@ class WataPaymentMixin:
                 keyboard = await self.build_topup_success_keyboard(user)
                 await self.bot.send_message(
                     user.telegram_id,
-                    (
-                        "✅ <b>Пополнение успешно!</b>\n\n"
-                        f"💰 Сумма: {settings.format_price(payment.amount_kopeks)}\n"
-                        "🦊 Способ: WATA\n"
-                        f"🆔 Транзакция: {transaction.id}\n\n"
-                        "Баланс пополнен автоматически!"
-                    ),
+                    format_topup_success_message(settings.format_price(payment.amount_kopeks)),
                     parse_mode="HTML",
                     reply_markup=keyboard,
                 )

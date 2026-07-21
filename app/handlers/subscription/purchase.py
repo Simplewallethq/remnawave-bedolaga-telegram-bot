@@ -77,6 +77,12 @@ from app.services.trial_activation_service import (
     rollback_trial_subscription_activation,
 )
 from app.services.payment_service import PaymentService
+from app.utils.success_notifications import (
+    build_success_management_keyboard,
+    format_subscription_purchase_success,
+    format_subscription_renewal_success,
+    subscription_plan_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1595,22 +1601,16 @@ async def confirm_extend_subscription(
         except Exception as e:
             logger.error(f"Ошибка отправки уведомления о продлении: {e}")
 
-        success_message = (
-            "✅ Подписка успешно продлена!\n\n"
-            f"Добавлено: {days} дней\n"
-            f"Действует до: {format_local_datetime(refreshed_end_date, '%d.%m.%Y %H:%M')}\n\n"
-            f"💰 Списано: {texts.format_price(price)}"
+        success_message = format_subscription_renewal_success(
+            plan=subscription_plan_name(subscription),
+            days=days,
+            end_date=refreshed_end_date,
         )
-
-        if promo_component["discount"] > 0:
-            success_message += (
-                f" (включая доп. скидку {promo_component['percent']}%:"
-                f" -{texts.format_price(promo_component['discount'])})"
-            )
 
         await callback.message.edit_text(
             success_message,
-            reply_markup=get_back_keyboard(db_user.language)
+            reply_markup=build_success_management_keyboard(),
+            parse_mode="HTML",
         )
 
         logger.info(f"✅ Пользователь {db_user.telegram_id} продлил подписку на {days} дней за {price / 100}₽")
@@ -2469,20 +2469,23 @@ async def confirm_purchase(
                 ])
 
             await callback.message.edit_text(
-                success_text,
-                reply_markup=connect_keyboard,
+                format_subscription_purchase_success(
+                    plan=subscription_plan_name(subscription),
+                    period=data["period_days"],
+                    end_date=subscription.end_date,
+                ),
+                reply_markup=build_success_management_keyboard(),
                 parse_mode="HTML"
             )
         else:
-            purchase_text = texts.SUBSCRIPTION_PURCHASED
-            if discount_note:
-                purchase_text = f"{purchase_text}\n\n{discount_note}"
             await callback.message.edit_text(
-                texts.t(
-                    "SUBSCRIPTION_LINK_GENERATING_NOTICE",
-                    "{purchase_text}\n\nПри необходимости перейдите в раздел \"Управление подпиской\" чтобы получить ссылку для подключения.",
-                ).format(purchase_text=purchase_text),
-                reply_markup=get_back_keyboard(db_user.language)
+                format_subscription_purchase_success(
+                    plan=subscription_plan_name(subscription),
+                    period=data["period_days"],
+                    end_date=subscription.end_date,
+                ),
+                reply_markup=build_success_management_keyboard(),
+                parse_mode="HTML",
             )
 
         purchase_completed = True
@@ -3494,16 +3497,16 @@ async def handle_payment_selection(
             except Exception as e:
                 logger.error(f"Ошибка отправки уведомления о продлении: {e}")
 
-            success_message = (
-                "✅ Подписка успешно продлена!\n\n"
-                f"Добавлено: {days} дней\n"
-                f"Действует до: {format_local_datetime(refreshed_end_date, '%d.%m.%Y %H:%M')}\n\n"
-                f"💰 Списано: {texts.format_price(amount_kopeks)}"
+            success_message = format_subscription_renewal_success(
+                plan=subscription_plan_name(subscription),
+                days=days,
+                end_date=refreshed_end_date,
             )
 
             await callback.message.edit_text(
                 success_message,
-                reply_markup=get_back_keyboard(db_user.language)
+                reply_markup=build_success_management_keyboard(),
+                parse_mode="HTML",
             )
 
             logger.info(f"✅ Пользователь {db_user.telegram_id} продлил подписку на {days} дней за {amount_kopeks / 100}₽ (с баланса)")
@@ -4580,20 +4583,16 @@ async def _extend_existing_subscription(
         logger.error(f"Ошибка отправки уведомления о продлении: {e}")
 
     # Отправляем сообщение пользователю
-    success_message = (
-        "✅ Подписка успешно продлена!\n\n"
-        f"Добавлено: {period_days} дней\n"
-        f"Действует до: {format_local_datetime(new_end_date, '%d.%m.%Y %H:%M')}\n\n"
-        f"💰 Списано: {texts.format_price(price_kopeks)}"
+    success_message = format_subscription_renewal_success(
+        plan=subscription_plan_name(current_subscription),
+        days=period_days,
+        end_date=new_end_date,
     )
-
-    # Если это была триальная подписка, добавляем информацию о преобразовании
-    if current_subscription.is_trial:
-        success_message += "\n🎯 Триальная подписка преобразована в платную"
 
     await callback.message.edit_text(
         success_message,
-        reply_markup=get_back_keyboard(db_user.language)
+        reply_markup=build_success_management_keyboard(),
+        parse_mode="HTML",
     )
 
     logger.info(f"✅ Пользователь {db_user.telegram_id} продлил подписку на {period_days} дней за {price_kopeks / 100}₽")

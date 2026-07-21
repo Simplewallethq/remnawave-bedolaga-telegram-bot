@@ -50,6 +50,12 @@ from app.services.hot_invoice_offer_service import hot_invoice_offer_service
 from app.services.expired_subscription_offer_service import expired_subscription_offer_service
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.subscription_service import SubscriptionService
+from app.utils.success_notifications import (
+    build_success_management_keyboard,
+    format_subscription_purchase_success,
+    format_subscription_renewal_success,
+    subscription_plan_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1049,13 +1055,16 @@ async def start_tariff_purchase(
     except Exception as e:
         logger.debug(f"Уведомление о покупке не отправлено: {e}")
 
-    await callback.answer(
-        texts.t("TARIFF_PURCHASE_DONE", "Подписка активирована ✅"),
-        show_alert=False,
+    await callback.answer()
+    await callback.message.edit_text(
+        format_subscription_purchase_success(
+            plan=subscription_plan_name(new_sub, plan),
+            period=period_days,
+            end_date=new_sub.end_date,
+        ),
+        reply_markup=build_success_management_keyboard(),
+        parse_mode="HTML",
     )
-    from app.handlers.subscription.purchase import show_subscription_info
-    callback.data = "menu_subscription"
-    await show_subscription_info(callback, db_user, db)
 
 
 async def _render_tariff_partial_breakdown(
@@ -1423,12 +1432,19 @@ async def pay_cold_solo_offer_from_balance(
     if result is None:
         await callback.answer("Не удалось списать средства", show_alert=True)
         return
+    new_sub, _, _ = result
 
     await cold_solo_offer_service.mark_claimed_after_purchase(db, offer)
-    await callback.answer("Подписка активирована ✅", show_alert=False)
-    from app.handlers.subscription.purchase import show_subscription_info
-    callback.data = "menu_subscription"
-    await show_subscription_info(callback, db_user, db)
+    await callback.answer()
+    await callback.message.edit_text(
+        format_subscription_purchase_success(
+            plan=subscription_plan_name(new_sub, plan),
+            period=cold_solo_offer_service.PERIOD_DAYS,
+            end_date=new_sub.end_date,
+        ),
+        reply_markup=build_success_management_keyboard(),
+        parse_mode="HTML",
+    )
 
 
 async def claim_legacy_pro_offer(
@@ -1580,12 +1596,19 @@ async def pay_legacy_pro_offer_from_balance(
     if result is None:
         await callback.answer("Не удалось списать средства", show_alert=True)
         return
+    new_sub, _, _ = result
 
     await legacy_pro_offer_service.mark_claimed_after_purchase(db, offer)
-    await callback.answer("Подписка активирована ✅", show_alert=False)
-    from app.handlers.subscription.purchase import show_subscription_info
-    callback.data = "menu_subscription"
-    await show_subscription_info(callback, db_user, db)
+    await callback.answer()
+    await callback.message.edit_text(
+        format_subscription_purchase_success(
+            plan=subscription_plan_name(new_sub, plan),
+            period=legacy_pro_offer_service.PERIOD_DAYS,
+            end_date=new_sub.end_date,
+        ),
+        reply_markup=build_success_management_keyboard(),
+        parse_mode="HTML",
+    )
 
 
 async def show_renew_current(
@@ -1797,13 +1820,16 @@ async def _execute_renewal(
     except Exception as e:
         logger.debug(f"Уведомление о продлении не отправлено: {e}")
 
-    await callback.answer(
-        texts.t("TARIFF_RENEW_DONE", "Подписка продлена ✅"),
-        show_alert=False,
+    await callback.answer()
+    await callback.message.edit_text(
+        format_subscription_renewal_success(
+            plan=subscription_plan_name(subscription, plan),
+            days=period_days,
+            end_date=subscription.end_date,
+        ),
+        reply_markup=build_success_management_keyboard(),
+        parse_mode="HTML",
     )
-    from app.handlers.subscription.purchase import show_subscription_info
-    callback.data = "menu_subscription"
-    await show_subscription_info(callback, db_user, db)
 
 
 async def _all_active_server_uuids(db: AsyncSession) -> list:
