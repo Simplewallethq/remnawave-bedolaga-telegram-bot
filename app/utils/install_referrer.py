@@ -105,3 +105,26 @@ def apply_install_referrer(user: "User", raw: Optional[str]) -> bool:
         )
 
     return changed
+
+
+_APP_NAME_MAX_LENGTH = 100
+
+
+def apply_app_name(user: "User", raw: Optional[str]) -> bool:
+    """Записывает клиент мобильного приложения (заголовок x-appName,
+    например 'letoAndroid/1.2.1') в users.last_app_name.
+
+    В отличие от install referrer это last-touch: значение обновляется при
+    каждом обращении, чтобы отражать актуальные платформу и версию.
+
+    Returns True if the user object was modified (caller must commit).
+    """
+    app_name = (raw or "").strip()[:_APP_NAME_MAX_LENGTH]
+    if not app_name or user.last_app_name == app_name:
+        return False
+
+    user.last_app_name = app_name
+    logger.info(
+        "x-appName обновлён у пользователя %s: %s", user.id, app_name
+    )
+    return True

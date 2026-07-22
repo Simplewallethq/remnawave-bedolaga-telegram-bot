@@ -5247,6 +5247,37 @@ async def add_user_tg_user_id_column() -> bool:
         return False
 
 
+async def add_user_last_app_name_column() -> bool:
+    """Добавляет колонку last_app_name в таблицу users (заголовок x-appName)."""
+    column_exists = await check_column_exists('users', 'last_app_name')
+    if column_exists:
+        logger.info("Колонка last_app_name уже существует в users")
+        return True
+
+    try:
+        db_type = await get_database_type()
+        async with engine.begin() as conn:
+            if db_type == 'sqlite':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN last_app_name VARCHAR(100)")
+                )
+            elif db_type == 'postgresql':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN last_app_name VARCHAR(100) NULL")
+                )
+            elif db_type == 'mysql':
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN last_app_name VARCHAR(100) NULL")
+                )
+
+        logger.info("✅ Добавлена колонка last_app_name в users")
+        return True
+
+    except Exception as error:
+        logger.error(f"❌ Ошибка добавления last_app_name в users: {error}")
+        return False
+
+
 async def create_device_binding_codes_table() -> bool:
     table_exists = await check_table_exists('device_binding_codes')
     if table_exists:
@@ -7389,6 +7420,13 @@ async def run_universal_migration():
             logger.info("✅ Колонка tg_user_id в users готова")
         else:
             logger.warning("⚠️ Проблемы с добавлением tg_user_id в users")
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ LAST_APP_NAME В USERS ===")
+        last_app_name_ready = await add_user_last_app_name_column()
+        if last_app_name_ready:
+            logger.info("✅ Колонка last_app_name в users готова")
+        else:
+            logger.warning("⚠️ Проблемы с добавлением last_app_name в users")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ DEVICE_BINDING_CODES ===")
         device_binding_codes_ready = await create_device_binding_codes_table()

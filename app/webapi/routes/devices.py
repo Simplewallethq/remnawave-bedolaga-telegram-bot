@@ -31,7 +31,7 @@ from app.database.crud.share_token import (
 )
 
 from app.database.models import Subscription
-from app.utils.install_referrer import apply_install_referrer
+from app.utils.install_referrer import apply_app_name, apply_install_referrer
 
 from ..dependencies import get_db_session, require_api_token
 from ..schemas.devices import BindByCodeRequest, DeviceLinkRequest, DeviceLinkResponse
@@ -204,10 +204,14 @@ async def bind_device_by_code(
     # Атрибуция установки: личный код вводит владелец подписки, поэтому
     # Install Referrer применяем к нему. Share-код (_bind_via_share_code)
     # пропускаем — там устройство привязывает не владелец.
-    if subscription.user is not None and apply_install_referrer(
-        subscription.user, payload.install_referrer
-    ):
-        await db.commit()
+    if subscription.user is not None:
+        changed = apply_install_referrer(
+            subscription.user, payload.install_referrer
+        )
+        if apply_app_name(subscription.user, payload.app_name):
+            changed = True
+        if changed:
+            await db.commit()
 
     if existing_link is not None and existing_link.subscription_id == subscription.id:
         response = _serialize_subscription(subscription)

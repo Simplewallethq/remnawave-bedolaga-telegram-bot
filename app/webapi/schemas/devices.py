@@ -30,3 +30,6 @@ class BindByCodeRequest(BaseModel):
     # Опционально: сырая строка Google Play Install Referrer
     # ('utm_source=telegram&tg_user_id=123456789'). Пустая строка — no-op.
     install_referrer: Optional[str] = Field(default=None, max_length=512)
+    # Опционально: клиент приложения из заголовка x-appName
+    # ('letoAndroid/1.2.1'). Пустая строка — no-op.
+    app_name: Optional[str] = Field(default=None, max_length=100)

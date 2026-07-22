@@ -743,6 +743,9 @@ class User(Base):
     # и этим же Telegram ID может владеть отдельный нативный TG-аккаунт).
     acquisition_source = Column(String(100), nullable=True)
     tg_user_id = Column(BigInteger, nullable=True)
+    # Клиент мобильного приложения из заголовка x-appName ('letoAndroid/1.2.1');
+    # last-touch: обновляется при каждом обращении приложения к API.
+    last_app_name = Column(String(100), nullable=True)
 
     @property
     def balance_rubles(self) -> float:
