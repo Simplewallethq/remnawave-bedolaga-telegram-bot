@@ -1,6 +1,9 @@
 import logging
+from html import escape
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.config import settings
 from app.database.crud.user import add_user_balance, get_user_by_id
@@ -18,13 +21,25 @@ REFERRAL_QUALIFIED_TOPUP_THRESHOLD_KOPEKS = 100_000
 async def send_referral_notification(
     bot: Bot,
     user_id: int,
-    message: str
+    message: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
 ):
     try:
-        await bot.send_message(user_id, message, parse_mode="HTML")
+        await bot.send_message(
+            user_id,
+            message,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
         logger.info(f"✅ Уведомление отправлено пользователю {user_id}")
     except Exception as e:
         logger.error(f"❌ Ошибка отправки уведомления пользователю {user_id}: {e}")
+
+
+def get_referral_link_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔗 Моя ссылка", callback_data="referral")
+    ]])
 
 
 async def process_referral_registration(
@@ -77,18 +92,28 @@ async def process_referral_registration(
             )
 
         if bot:
+            referrer_name = escape(referrer.full_name or "друга")
+            new_user_name = escape(new_user.full_name or "Пользователь")
             referral_notification = (
-                f"🎉 <b>Добро пожаловать!</b>\n\n"
-                f"Вы перешли по реферальной ссылке пользователя <b>{referrer.full_name}</b>."
+                f"🎉 <b>С прибытием!</b>\n"
+                f"Ты пришёл по приглашению {referrer_name}. "
+                f"Осваивайся — 3 дня VPN уже твои."
             )
             await send_referral_notification(bot, new_user.telegram_id, referral_notification)
 
             inviter_notification = (
-                f"👥 <b>Новый реферал!</b>\n\n"
-                f"По вашей ссылке зарегистрировался пользователь <b>{new_user.full_name}</b>!\n\n"
-                f"💰 Вы будете получать <b>{commission_percent}%</b> со всех его платежей."
+                f"👥 <b>+1 в команду</b>\n"
+                f"{new_user_name} пришёл по твоей ссылке — теперь тебе капает "
+                f"{commission_percent}% с каждого его платежа. Деньги можно вывести "
+                f"на карту (от 3000₽) или потратить на подписку.\n"
+                f"Позови ещё — ссылка та же."
             )
-            await send_referral_notification(bot, referrer.telegram_id, inviter_notification)
+            await send_referral_notification(
+                bot,
+                referrer.telegram_id,
+                inviter_notification,
+                reply_markup=get_referral_link_keyboard(),
+            )
 
         logger.info(f"✅ Зарегистрирован реферал {new_user_id} для {referrer_id}.")
         return True
@@ -195,15 +220,19 @@ async def process_referral_topup(
             )
 
         if bot:
+            referral_name = escape(user.full_name or "Реферал")
             commission_notification = (
-                f"💰 <b>Реферальная комиссия!</b>\n\n"
-                f"Ваш реферал <b>{user.full_name}</b> пополнил баланс на "
-                f"{settings.format_price(topup_amount_kopeks)}\n\n"
-                f"🎁 Ваша комиссия ({commission_percent}%): "
-                f"{settings.format_price(commission_amount)}\n\n"
-                f"💎 Средства зачислены на ваш баланс."
+                f"💰 <b>+{settings.format_price(commission_amount)}</b>\n"
+                f"{referral_name} оплатил — твои {commission_percent}% уже на балансе. "
+                f"Накопишь 3000₽ — выведешь на карту.\n\n"
+                f"Зови ещё друзей и зарабатывай больше."
             )
-            await send_referral_notification(bot, referrer.telegram_id, commission_notification)
+            await send_referral_notification(
+                bot,
+                referrer.telegram_id,
+                commission_notification,
+                reply_markup=get_referral_link_keyboard(),
+            )
 
         return True
 
