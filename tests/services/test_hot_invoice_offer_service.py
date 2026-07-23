@@ -130,6 +130,63 @@ async def test_first_touch_message_uses_calculated_minutes() -> None:
     assert "Счёт закроется через 7 мин" in service.bot.send_message.await_args.args[1]
 
 
+async def test_discount_message_routes_through_offer_claim_callback() -> None:
+    candidate = HotInvoiceCandidate(
+        payment=_payment(datetime(2026, 7, 10, 6, 0)),
+        user=User(id=10, telegram_id=1000, status="active"),
+    )
+    service = InteractiveNotificationService()
+    service.bot = AsyncMock()
+    service.bot.send_message.return_value = SimpleNamespace(message_id=42)
+
+    message_id = await service._send_hot_invoice_message(
+        candidate,
+        hot_invoice_offer_service.FOURTH_MORNING_SLOT_KEY,
+        offer_id=55,
+    )
+
+    assert message_id == 42
+    keyboard = service.bot.send_message.await_args.kwargs["reply_markup"]
+    assert (
+        keyboard.inline_keyboard[0][0].callback_data
+        == "hot_invoice_offer:claim:55:solo"
+    )
+    assert (
+        keyboard.inline_keyboard[1][0].callback_data
+        == "hot_invoice_offer:claim:55:plus"
+    )
+    assert (
+        keyboard.inline_keyboard[2][0].callback_data
+        == "hot_invoice_offer:claim:55:pro"
+    )
+
+
+async def test_expired_hot_offer_claim_shows_alert(monkeypatch) -> None:
+    callback = SimpleNamespace(
+        data="hot_invoice_offer:claim:55:solo",
+        answer=AsyncMock(),
+    )
+    show_periods = AsyncMock()
+    monkeypatch.setattr(
+        hot_invoice_offer_service,
+        "get_available_offer",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(tariffs_module, "show_tariff_periods", show_periods)
+
+    await tariffs_module.claim_hot_invoice_offer(
+        callback,
+        SimpleNamespace(id=10),
+        AsyncMock(),
+    )
+
+    callback.answer.assert_awaited_once_with(
+        "Предложение недоступно или истекло",
+        show_alert=True,
+    )
+    show_periods.assert_not_awaited()
+
+
 async def test_detects_conflicting_active_offer() -> None:
     db = AsyncMock()
     result = MagicMock()

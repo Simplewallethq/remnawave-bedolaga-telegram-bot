@@ -184,12 +184,42 @@ async def test_day_six_message_routes_to_previous_plan_periods() -> None:
     message_id = await service._send_expired_subscription_message(
         candidate,
         expired_subscription_offer_service.FOURTH_MORNING_SLOT_KEY,
+        offer_id=55,
     )
 
     assert message_id == 42
     keyboard = service.bot.send_message.await_args.kwargs["reply_markup"]
-    assert keyboard.inline_keyboard[0][0].callback_data == "tariff_select:solo"
+    assert (
+        keyboard.inline_keyboard[0][0].callback_data
+        == "expired_subscription_offer:claim:55:solo"
+    )
     assert "−20%" in keyboard.inline_keyboard[0][0].text
+
+
+async def test_expired_subscription_offer_claim_shows_alert(monkeypatch) -> None:
+    callback = SimpleNamespace(
+        data="expired_subscription_offer:claim:55:solo",
+        answer=AsyncMock(),
+    )
+    show_periods = AsyncMock()
+    monkeypatch.setattr(
+        expired_subscription_offer_service,
+        "get_available_offer",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(tariffs_module, "show_tariff_periods", show_periods)
+
+    await tariffs_module.claim_expired_subscription_offer(
+        callback,
+        SimpleNamespace(id=10),
+        AsyncMock(),
+    )
+
+    callback.answer.assert_awaited_once_with(
+        "Предложение недоступно или истекло",
+        show_alert=True,
+    )
+    show_periods.assert_not_awaited()
 
 
 async def test_expired_paid_tiered_subscription_is_renewable() -> None:

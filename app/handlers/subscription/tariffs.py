@@ -1304,6 +1304,58 @@ async def show_tariff_saved_cart(
     await callback.answer()
 
 
+async def claim_hot_invoice_offer(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    parts = (callback.data or "").split(":")
+    try:
+        offer_id = int(parts[2]) if len(parts) > 2 else 0
+    except (TypeError, ValueError):
+        offer_id = 0
+    plan_code = parts[3] if len(parts) > 3 else ""
+
+    offer = await hot_invoice_offer_service.get_available_offer(db, db_user.id)
+    if not offer or not offer_id or offer.id != offer_id:
+        await callback.answer("Предложение недоступно или истекло", show_alert=True)
+        return
+
+    callback.data = f"tariff_select:{plan_code}"
+    await show_tariff_periods(callback, db_user, db)
+
+
+async def claim_expired_subscription_offer(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    parts = (callback.data or "").split(":")
+    try:
+        offer_id = int(parts[2]) if len(parts) > 2 else 0
+    except (TypeError, ValueError):
+        offer_id = 0
+    plan_code = parts[3] if len(parts) > 3 else ""
+
+    offer = await expired_subscription_offer_service.get_available_offer(db, db_user.id)
+    expected_plan_code = (
+        str((offer.extra_data or {}).get("plan_code") or "").lower()
+        if offer
+        else ""
+    )
+    if (
+        not offer
+        or not offer_id
+        or offer.id != offer_id
+        or expected_plan_code != (plan_code or "").lower()
+    ):
+        await callback.answer("Предложение недоступно или истекло", show_alert=True)
+        return
+
+    callback.data = f"tariff_select:{plan_code}"
+    await show_tariff_periods(callback, db_user, db)
+
+
 async def claim_cold_solo_offer(
     callback: types.CallbackQuery,
     db_user: User,
@@ -1853,6 +1905,14 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         pay_legacy_pro_offer_from_balance,
         F.data.startswith("legacy_pro_offer:balance:"),
+    )
+    dp.callback_query.register(
+        claim_hot_invoice_offer,
+        F.data.startswith("hot_invoice_offer:claim:"),
+    )
+    dp.callback_query.register(
+        claim_expired_subscription_offer,
+        F.data.startswith("expired_subscription_offer:claim:"),
     )
     dp.callback_query.register(
         show_tariffs_page,

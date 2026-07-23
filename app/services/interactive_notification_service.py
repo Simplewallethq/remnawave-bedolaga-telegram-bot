@@ -445,6 +445,7 @@ class InteractiveNotificationService:
                     message_id = await self._send_hot_invoice_message(
                         candidate,
                         slot.key,
+                        offer_id=offer.id if offer else None,
                         now_utc=now,
                     )
                     payload = hot_invoice_offer_service.build_campaign_payload(candidate)
@@ -515,6 +516,7 @@ class InteractiveNotificationService:
                 message_id = await self._send_hot_invoice_message(
                     candidate,
                     slot_key,
+                    offer_id=offer.id if offer else None,
                     now_utc=datetime.utcnow(),
                 )
                 payload = hot_invoice_offer_service.build_campaign_payload(candidate)
@@ -563,6 +565,7 @@ class InteractiveNotificationService:
         candidate: HotInvoiceCandidate,
         slot_key: str,
         *,
+        offer_id: Optional[int] = None,
         now_utc: Optional[datetime] = None,
     ) -> Optional[int]:
         if not self.bot or candidate.user.telegram_id is None:
@@ -605,6 +608,8 @@ class InteractiveNotificationService:
                 ]
             )
         else:
+            if offer_id is None:
+                return None
             if slot_key == hot_invoice_offer_service.FOURTH_MORNING_SLOT_KEY:
                 text = (
                     "<b>🎁 Держи скидку −20% — только сегодня</b>\n\n"
@@ -618,9 +623,24 @@ class InteractiveNotificationService:
                 )
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="Купить Solo -20%", callback_data="tariff_select:solo")],
-                    [InlineKeyboardButton(text="Купить Plus -20%", callback_data="tariff_select:plus")],
-                    [InlineKeyboardButton(text="Купить Pro -20%", callback_data="tariff_select:pro")],
+                    [
+                        InlineKeyboardButton(
+                            text="Купить Solo -20%",
+                            callback_data=f"hot_invoice_offer:claim:{offer_id}:solo",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="Купить Plus -20%",
+                            callback_data=f"hot_invoice_offer:claim:{offer_id}:plus",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="Купить Pro -20%",
+                            callback_data=f"hot_invoice_offer:claim:{offer_id}:pro",
+                        )
+                    ],
                 ]
             )
 
@@ -734,6 +754,7 @@ class InteractiveNotificationService:
                     message_id = await self._send_expired_subscription_message(
                         candidate,
                         slot.key,
+                        offer_id=offer.id if offer else None,
                     )
                     payload = expired_subscription_offer_service.build_campaign_payload(candidate)
                     if offer:
@@ -803,6 +824,7 @@ class InteractiveNotificationService:
                 message_id = await self._send_expired_subscription_message(
                     candidate,
                     slot_key,
+                    offer_id=offer.id if offer else None,
                 )
                 payload = expired_subscription_offer_service.build_campaign_payload(candidate)
                 payload["debug"] = True
@@ -823,6 +845,8 @@ class InteractiveNotificationService:
         self,
         candidate: ExpiredSubscriptionCandidate,
         slot_key: str,
+        *,
+        offer_id: Optional[int] = None,
     ) -> Optional[int]:
         if not self.bot or candidate.user.telegram_id is None:
             return None
@@ -876,7 +900,7 @@ class InteractiveNotificationService:
                 ]
             )
         else:
-            if not plan_code:
+            if not plan_code or offer_id is None:
                 return None
             if slot_key == expired_subscription_offer_service.FOURTH_MORNING_SLOT_KEY:
                 text = (
@@ -894,7 +918,7 @@ class InteractiveNotificationService:
                     [
                         InlineKeyboardButton(
                             text=f"💎 Восстановить {plan_name} −20%",
-                            callback_data=f"tariff_select:{plan_code}",
+                            callback_data=f"expired_subscription_offer:claim:{offer_id}:{plan_code}",
                         )
                     ]
                 ]
