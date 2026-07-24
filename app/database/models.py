@@ -1058,6 +1058,21 @@ class UserDailyTrafficUsage(Base):
     user = relationship("User", backref="daily_traffic_usage")
 
 
+class DailySubscriptionMetric(Base):
+    __tablename__ = "daily_subscription_metrics"
+    __table_args__ = (
+        UniqueConstraint("date", name="uq_daily_subscription_metrics_date"),
+        Index("ix_daily_subscription_metrics_date", "date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False)
+    paid_users_count = Column(Integer, nullable=False, default=0)
+    lost_paid_users_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class CabinetOtp(Base):
     """Email-код подтверждения регистрации в веб-кабинете (хранится только HMAC)."""
 

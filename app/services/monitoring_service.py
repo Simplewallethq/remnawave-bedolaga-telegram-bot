@@ -58,6 +58,7 @@ from app.services.payment_service import PaymentService
 from app.services.subscription_service import SubscriptionService
 from app.services.promo_offer_service import promo_offer_service
 from app.services.user_daily_traffic_usage_service import user_daily_traffic_usage_service
+from app.services.daily_subscription_metrics_service import daily_subscription_metrics_service
 from app.services.android_rate_request_service import android_rate_request_service
 from app.services.expired_subscription_feedback_service import expired_subscription_feedback_service
 from app.utils.pricing_utils import apply_percentage_discount
@@ -85,6 +86,7 @@ class MonitoringService:
         self.subscription_service = SubscriptionService()
         self.payment_service = PaymentService()
         self.user_daily_traffic_usage_service = user_daily_traffic_usage_service
+        self.daily_subscription_metrics_service = daily_subscription_metrics_service
         self.bot = bot
         self._notified_users: Set[str] = set()
         self._last_cleanup = datetime.utcnow()
@@ -241,6 +243,7 @@ class MonitoringService:
                 if settings.ENABLE_AUTOPAY:
                     await self._process_autopayments(db)
                 await self._cleanup_inactive_users(db)
+                await self._collect_daily_subscription_metrics(db)
                 await self._collect_user_daily_traffic_usage(db)
                 await self._process_android_rate_requests(db)
                 await self._cleanup_cabinet_notifications(db)
@@ -1707,6 +1710,48 @@ class MonitoringService:
                 f"Ошибка синхронизации с RemnaWave: {str(e)}",
                 {"error": str(e)},
                 is_success=False
+            )
+
+    async def _collect_daily_subscription_metrics(self, db: AsyncSession):
+        try:
+            result = await self.daily_subscription_metrics_service.collect_for_yesterday(db)
+
+            if result.get("skipped"):
+                reason = result.get("reason")
+                if reason == "already_collected":
+                    logger.debug(
+                        "Snapshot метрик подписок за %s уже собран, пропускаем",
+                        result.get("date"),
+                    )
+                    return
+
+                await self._log_monitoring_event(
+                    db,
+                    "daily_subscription_metrics_snapshot_skipped",
+                    f"Сбор snapshot-метрик подписок пропущен: {reason}",
+                    result,
+                    is_success=False,
+                )
+                return
+
+            await self._log_monitoring_event(
+                db,
+                "daily_subscription_metrics_snapshot",
+                (
+                    f"Собран snapshot метрик подписок за {result.get('date')}: "
+                    f"платные={result.get('paid_users_count')}, "
+                    f"потерянные={result.get('lost_paid_users_count')}"
+                ),
+                result,
+            )
+        except Exception as e:
+            logger.error(f"Ошибка сбора snapshot-метрик подписок: {e}")
+            await self._log_monitoring_event(
+                db,
+                "daily_subscription_metrics_snapshot_error",
+                f"Ошибка сбора snapshot-метрик подписок: {str(e)}",
+                {"error": str(e)},
+                is_success=False,
             )
 
     async def _collect_user_daily_traffic_usage(self, db: AsyncSession):
