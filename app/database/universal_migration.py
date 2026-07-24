@@ -5507,6 +5507,72 @@ async def create_user_daily_traffic_usage_table() -> bool:
         return False
 
 
+async def create_daily_subscription_metrics_table() -> bool:
+    table_exists = await check_table_exists('daily_subscription_metrics')
+    if table_exists:
+        logger.info("Таблица daily_subscription_metrics уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE daily_subscription_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date DATE NOT NULL,
+                    paid_users_count INTEGER NOT NULL DEFAULT 0,
+                    lost_paid_users_count INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_daily_subscription_metrics_date UNIQUE (date)
+                );
+
+                CREATE INDEX ix_daily_subscription_metrics_date ON daily_subscription_metrics(date);
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS daily_subscription_metrics (
+                    id SERIAL PRIMARY KEY,
+                    date DATE NOT NULL,
+                    paid_users_count INTEGER NOT NULL DEFAULT 0,
+                    lost_paid_users_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_daily_subscription_metrics_date UNIQUE (date)
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_daily_subscription_metrics_date ON daily_subscription_metrics(date);
+                """
+            elif db_type == 'mysql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS daily_subscription_metrics (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    date DATE NOT NULL,
+                    paid_users_count INT NOT NULL DEFAULT 0,
+                    lost_paid_users_count INT NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_daily_subscription_metrics_date UNIQUE (date)
+                );
+
+                CREATE INDEX ix_daily_subscription_metrics_date ON daily_subscription_metrics(date);
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица daily_subscription_metrics успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы daily_subscription_metrics: {e}")
+        return False
+
+
 async def add_subscription_is_partner_column() -> bool:
     """Adds Subscription.is_partner boolean + CHECK constraint enforcing
     that is_trial and is_partner are mutually exclusive.
@@ -7449,6 +7515,13 @@ async def run_universal_migration():
         else:
             logger.warning("⚠️ Проблемы с таблицей user_daily_traffic_usage")
 
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ DAILY_SUBSCRIPTION_METRICS ===")
+        daily_subscription_metrics_ready = await create_daily_subscription_metrics_table()
+        if daily_subscription_metrics_ready:
+            logger.info("✅ Таблица daily_subscription_metrics готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей daily_subscription_metrics")
+
         logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ is_partner В SUBSCRIPTIONS ===")
         is_partner_ready = await add_subscription_is_partner_column()
         if is_partner_ready:
@@ -7688,6 +7761,7 @@ async def check_migration_status():
             "promo_offer_logs_table": False,
             "subscription_temporary_access_table": False,
             "user_daily_traffic_usage_table": False,
+            "daily_subscription_metrics_table": False,
             "advertising_campaigns_table": False,
             "advertising_campaign_registrations_table": False,
             "users_raw_start_payload_column": False,
@@ -7727,6 +7801,7 @@ async def check_migration_status():
         status["promo_offer_logs_table"] = await check_table_exists('promo_offer_logs')
         status["subscription_temporary_access_table"] = await check_table_exists('subscription_temporary_access')
         status["user_daily_traffic_usage_table"] = await check_table_exists('user_daily_traffic_usage')
+        status["daily_subscription_metrics_table"] = await check_table_exists('daily_subscription_metrics')
         status["advertising_campaigns_table"] = await check_table_exists('advertising_campaigns')
         status["advertising_campaign_registrations_table"] = await check_table_exists('advertising_campaign_registrations')
         status["users_raw_start_payload_column"] = await check_column_exists('users', 'raw_start_payload')
@@ -7837,6 +7912,7 @@ async def check_migration_status():
             "promo_offer_logs_table": "Таблица promo_offer_logs",
             "subscription_temporary_access_table": "Таблица subscription_temporary_access",
             "user_daily_traffic_usage_table": "Таблица дневного трафика пользователей",
+            "daily_subscription_metrics_table": "Таблица дневных snapshot-метрик подписок",
             "advertising_campaigns_table": "Таблица advertising_campaigns",
             "advertising_campaign_registrations_table": "Таблица advertising_campaign_registrations",
             "users_raw_start_payload_column": "Колонка raw_start_payload у пользователей",
