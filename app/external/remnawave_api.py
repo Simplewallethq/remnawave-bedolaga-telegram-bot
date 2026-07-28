@@ -97,6 +97,15 @@ class RemnaWaveUser:
             return self.user_traffic.first_connected_at
         return None
 
+    @property
+    def has_vpn_connection_signal(self) -> bool:
+        """True when RemnaWave has any evidence that the user connected."""
+        return bool(
+            self.first_connected_at
+            or self.used_traffic_bytes > 0
+            or self.lifetime_used_traffic_bytes > 0
+        )
+
 
 @dataclass
 class RemnaWaveInbound:
