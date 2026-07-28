@@ -477,9 +477,15 @@ class SubscriptionService:
                 subscription.traffic_used_gb = used_gb
                 
                 # Проверяем и обновляем флаг подключения к VPN
-                if not user.has_connected_to_vpn and remnawave_user.first_connected_at:
+                if not user.has_connected_to_vpn and remnawave_user.has_vpn_connection_signal:
                     user.has_connected_to_vpn = True
-                    logger.info(f"✅ Пользователь {user.telegram_id} впервые подключился к VPN в {remnawave_user.first_connected_at}")
+                    logger.info(
+                        "✅ Пользователь %s впервые подключился к VPN (first_connected_at=%s, used_bytes=%s, lifetime_bytes=%s)",
+                        user.telegram_id,
+                        remnawave_user.first_connected_at,
+                        remnawave_user.used_traffic_bytes,
+                        remnawave_user.lifetime_used_traffic_bytes,
+                    )
                 
                 await db.commit()
                 

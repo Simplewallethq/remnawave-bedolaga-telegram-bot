@@ -55,6 +55,7 @@ from app.database.models import (
 from app.localization.texts import get_texts
 from app.services.notification_settings_service import NotificationSettingsService
 from app.services.payment_service import PaymentService
+from app.services.remnawave_service import RemnaWaveService
 from app.services.subscription_service import SubscriptionService
 from app.services.promo_offer_service import promo_offer_service
 from app.services.user_daily_traffic_usage_service import user_daily_traffic_usage_service
@@ -80,6 +81,7 @@ class MonitoringService:
     SEND_AUTOPAY_USER_NOTIFICATIONS = False
     SEND_LEGACY_EXPIRED_TELEGRAM_NOTIFICATIONS = False
     SEND_LEGACY_EXPIRED_FOLLOWUPS = False
+    REMNAWAVE_SYNC_INTERVAL_MINUTES = 60
     
     def __init__(self, bot=None):
         self.is_running = False
@@ -92,6 +94,8 @@ class MonitoringService:
         self._last_cleanup = datetime.utcnow()
         self._last_cabinet_notifications_cleanup = datetime.min
         self._sla_task = None
+        self._last_remnawave_sync_at: Optional[datetime] = None
+        self._remnawave_sync_lock = asyncio.Lock()
 
     async def _send_message_with_logo(
         self,
@@ -1656,52 +1660,31 @@ class MonitoringService:
     async def _sync_with_remnawave(self, db: AsyncSession):
         try:
             now = datetime.utcnow()
-            if now.minute != 0:
+            if (
+                self._last_remnawave_sync_at
+                and now - self._last_remnawave_sync_at < timedelta(minutes=self.REMNAWAVE_SYNC_INTERVAL_MINUTES)
+            ):
+                return
+
+            if self._remnawave_sync_lock.locked():
+                logger.info("⏭️ Batch sync VPN connection flags already running, skipping this cycle")
                 return
             
             if not self.subscription_service.is_configured:
                 logger.warning("RemnaWave API не настроен. Пропускаем синхронизацию")
                 return
 
-            async with self.subscription_service.get_api_client() as api:
-                system_stats = await api.get_system_stats()
-                
-                # Проверяем подключения пользователей к VPN
-                result = await db.execute(
-                    select(User)
-                    .options(selectinload(User.subscription))
-                    .where(
-                        and_(
-                            User.has_connected_to_vpn == False,
-                            User.remnawave_uuid.isnot(None)
-                        )
-                    )
-                )
-                users_to_check = result.scalars().all()
-                
-                updated_count = 0
-                for user in users_to_check:
-                    try:
-                        remnawave_user = await api.get_user_by_uuid(user.remnawave_uuid)
-                        if remnawave_user and remnawave_user.first_connected_at:
-                            user.has_connected_to_vpn = True
-                            updated_count += 1
-                            logger.info(
-                                f"✅ Пользователь {user.telegram_id} подключился к VPN в {remnawave_user.first_connected_at}"
-                            )
-                    except Exception as user_error:
-                        logger.debug(f"Ошибка проверки пользователя {user.telegram_id}: {user_error}")
-                        continue
-                
-                if updated_count > 0:
-                    await db.commit()
-                    logger.info(f"🔄 Обновлено флагов подключения к VPN: {updated_count}")
-                
+            async with self._remnawave_sync_lock:
+                sync_stats = await RemnaWaveService().sync_vpn_connection_flags_from_panel(db)
+                self._last_remnawave_sync_at = now
+
                 await self._log_monitoring_event(
-                    db, "remnawave_sync",
-                    "Синхронизация с RemnaWave завершена",
-                    {"stats": system_stats, "vpn_connections_updated": updated_count}
+                    db,
+                    "remnawave_sync",
+                    "Batch-синхронизация флагов подключения VPN с RemnaWave завершена",
+                    sync_stats,
                 )
+                logger.info("🔄 Batch sync VPN connection flags completed: %s", sync_stats)
                 
         except Exception as e:
             logger.error(f"Ошибка синхронизации с RemnaWave: {e}")

@@ -52,9 +52,9 @@ def _get_user_traffic_bytes(panel_user: Dict[str, Any]) -> int:
     # Новый формат: userTraffic.usedTrafficBytes
     user_traffic = panel_user.get('userTraffic')
     if user_traffic and isinstance(user_traffic, dict):
-        return user_traffic.get('usedTrafficBytes', 0)
+        return user_traffic.get('usedTrafficBytes') or 0
     # Старый формат: usedTrafficBytes напрямую
-    return panel_user.get('usedTrafficBytes', 0)
+    return panel_user.get('usedTrafficBytes') or 0
 
 
 def _get_lifetime_traffic_bytes(panel_user: Dict[str, Any]) -> int:
@@ -62,9 +62,24 @@ def _get_lifetime_traffic_bytes(panel_user: Dict[str, Any]) -> int:
     # Новый формат: userTraffic.lifetimeUsedTrafficBytes
     user_traffic = panel_user.get('userTraffic')
     if user_traffic and isinstance(user_traffic, dict):
-        return user_traffic.get('lifetimeUsedTrafficBytes', 0)
+        return user_traffic.get('lifetimeUsedTrafficBytes') or 0
     # Старый формат: lifetimeUsedTrafficBytes напрямую
-    return panel_user.get('lifetimeUsedTrafficBytes', 0)
+    return panel_user.get('lifetimeUsedTrafficBytes') or 0
+
+
+def _panel_user_has_vpn_connection_signal(panel_user: Dict[str, Any]) -> bool:
+    """True when panel data has any evidence that the user connected."""
+    user_traffic = panel_user.get('userTraffic')
+    first_connected_at = None
+    if user_traffic and isinstance(user_traffic, dict):
+        first_connected_at = user_traffic.get('firstConnectedAt')
+    first_connected_at = first_connected_at or panel_user.get('firstConnectedAt')
+
+    return bool(
+        first_connected_at
+        or _get_user_traffic_bytes(panel_user) > 0
+        or _get_lifetime_traffic_bytes(panel_user) > 0
+    )
 
 
 _UUID_MAP_MISSING = object()
@@ -238,6 +253,130 @@ class RemnaWaveService:
         assert self.api is not None
         async with self.api as api:
             yield api
+
+    async def sync_vpn_connection_flags_from_panel(
+        self,
+        db: AsyncSession,
+        *,
+        page_size: int = 1000,
+        update_chunk_size: int = 2000,
+    ) -> Dict[str, Any]:
+        """Batch-sync only users.has_connected_to_vpn from RemnaWave panel data."""
+        started_at = datetime.utcnow()
+        stats: Dict[str, Any] = {
+            "local_candidates": 0,
+            "panel_users_scanned": 0,
+            "pages": 0,
+            "matched": 0,
+            "updated": 0,
+            "errors": 0,
+            "duration_seconds": 0.0,
+        }
+
+        if not self.is_configured:
+            raise RemnaWaveConfigurationError(
+                self.configuration_error or "RemnaWave API не настроен"
+            )
+
+        page_size = max(100, min(int(page_size or 1000), 1000))
+        update_chunk_size = max(100, min(int(update_chunk_size or 2000), 2000))
+
+        result = await db.execute(
+            select(User.id, User.remnawave_uuid).where(
+                User.has_connected_to_vpn == False,
+                User.remnawave_uuid.isnot(None),
+            )
+        )
+        candidates_by_uuid = {
+            str(remnawave_uuid): user_id
+            for user_id, remnawave_uuid in result.all()
+            if remnawave_uuid
+        }
+        stats["local_candidates"] = len(candidates_by_uuid)
+
+        if not candidates_by_uuid:
+            stats["duration_seconds"] = round((datetime.utcnow() - started_at).total_seconds(), 3)
+            return stats
+
+        async def flush_updates(user_ids: List[int]) -> None:
+            if not user_ids:
+                return
+
+            update_result = await db.execute(
+                update(User)
+                .where(
+                    User.id.in_(user_ids),
+                    User.has_connected_to_vpn == False,
+                )
+                .values(has_connected_to_vpn=True)
+            )
+            await db.commit()
+
+            rowcount = getattr(update_result, "rowcount", None)
+            stats["updated"] += rowcount if isinstance(rowcount, int) and rowcount >= 0 else len(user_ids)
+
+        pending_updates: List[int] = []
+        start = 0
+
+        try:
+            async with self.get_api_client() as api:
+                while candidates_by_uuid:
+                    response = await api.get_all_users(
+                        start=start,
+                        size=page_size,
+                        enrich_happ_links=False,
+                    )
+                    users_batch = response.get("users", [])
+                    total_users = int(response.get("total") or 0)
+
+                    stats["pages"] += 1
+                    stats["panel_users_scanned"] += len(users_batch)
+
+                    for panel_user in users_batch:
+                        if not getattr(panel_user, "has_vpn_connection_signal", False):
+                            continue
+
+                        user_id = candidates_by_uuid.pop(panel_user.uuid, None)
+                        if user_id is None:
+                            continue
+
+                        pending_updates.append(user_id)
+                        stats["matched"] += 1
+
+                        if len(pending_updates) >= update_chunk_size:
+                            await flush_updates(pending_updates)
+                            pending_updates.clear()
+
+                    if len(users_batch) < page_size:
+                        break
+
+                    start += page_size
+                    if total_users and start >= total_users:
+                        break
+
+                if pending_updates:
+                    await flush_updates(pending_updates)
+
+        except Exception:
+            stats["errors"] += 1
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            stats["duration_seconds"] = round((datetime.utcnow() - started_at).total_seconds(), 3)
+
+        logger.info(
+            "✅ Batch sync VPN connection flags: candidates=%s scanned=%s matched=%s updated=%s pages=%s duration=%ss",
+            stats["local_candidates"],
+            stats["panel_users_scanned"],
+            stats["matched"],
+            stats["updated"],
+            stats["pages"],
+            stats["duration_seconds"],
+        )
+        return stats
 
     def _now_utc(self) -> datetime:
         """Возвращает текущее время в UTC без привязки к часовому поясу."""
@@ -1170,6 +1309,8 @@ class RemnaWaveService:
                             'expireAt': user_obj.expire_at.isoformat() + 'Z',
                             'trafficLimitBytes': user_obj.traffic_limit_bytes,
                             'usedTrafficBytes': user_obj.used_traffic_bytes,
+                            'lifetimeUsedTrafficBytes': user_obj.lifetime_used_traffic_bytes,
+                            'firstConnectedAt': user_obj.first_connected_at.isoformat() + 'Z' if user_obj.first_connected_at else None,
                             'hwidDeviceLimit': user_obj.hwid_device_limit,
                             'subscriptionUrl': user_obj.subscription_url,
                             'subscriptionCryptoLink': user_obj.happ_crypto_link,
@@ -1578,6 +1719,14 @@ class RemnaWaveService:
 
             used_traffic_bytes = _get_user_traffic_bytes(panel_user)
             traffic_used_gb = used_traffic_bytes / (1024**3)
+            if not user.has_connected_to_vpn and _panel_user_has_vpn_connection_signal(panel_user):
+                user.has_connected_to_vpn = True
+                logger.info(
+                    "✅ Пользователь %s подключился к VPN по данным панели (used_bytes=%s, lifetime_bytes=%s)",
+                    user.telegram_id,
+                    used_traffic_bytes,
+                    _get_lifetime_traffic_bytes(panel_user),
+                )
 
             active_squads = panel_user.get('activeInternalSquads', [])
             squad_uuids = []
@@ -1683,6 +1832,14 @@ class RemnaWaveService:
 
             used_traffic_bytes = _get_user_traffic_bytes(panel_user)
             traffic_used_gb = used_traffic_bytes / (1024**3)
+            if not user.has_connected_to_vpn and _panel_user_has_vpn_connection_signal(panel_user):
+                user.has_connected_to_vpn = True
+                logger.info(
+                    "✅ Пользователь %s подключился к VPN по данным панели (used_bytes=%s, lifetime_bytes=%s)",
+                    user.telegram_id,
+                    used_traffic_bytes,
+                    _get_lifetime_traffic_bytes(panel_user),
+                )
 
             if abs(subscription.traffic_used_gb - traffic_used_gb) > 0.01:
                 subscription.traffic_used_gb = traffic_used_gb
