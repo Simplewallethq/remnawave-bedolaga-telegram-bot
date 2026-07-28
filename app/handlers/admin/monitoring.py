@@ -91,69 +91,43 @@ def _build_notification_preview_message(language: str, notification_type: str):
     header = "🧪 <b>Тестовое уведомление мониторинга</b>\n\n"
 
     if notification_type == "trial_inactive_1h":
-        template = texts.get(
-            "TRIAL_INACTIVE_1H",
-            (
-                "⏳ <b>Прошёл час, а подключения нет</b>\n\n"
-                "Если возникли сложности с запуском — воспользуйтесь инструкциями."
-            ),
-        )
-        message = template.format(
-            price=price_30_days,
-            end_date=(now + timedelta(days=settings.TRIAL_DURATION_DAYS)).strftime("%d.%m.%Y %H:%M"),
+        message = (
+            "👋 <b>Застрял на подключении?</b>\n\n"
+            "Доступ уже активен — покажем, как подключиться за минуту."
         )
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text=texts.t("CONNECT_BUTTON", "🔗 Подключиться"),
+                        text="📲 Подключиться",
                         callback_data="subscription_connect",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 Моя подписка"),
-                        callback_data="menu_subscription",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"),
+                        text="🆘 Поддержка",
                         callback_data="menu_support",
                     )
                 ],
             ]
         )
     elif notification_type == "trial_inactive_24h":
-        template = texts.get(
-            "TRIAL_INACTIVE_24H",
-            (
-                "⏳ <b>Вы ещё не подключились к VPN</b>\n\n"
-                "Прошли сутки с активации тестового периода, но трафик не зафиксирован."
-                "\n\nНажмите кнопку ниже, чтобы подключиться."
-            ),
-        )
-        message = template.format(
-            price=price_30_days,
-            end_date=(now + timedelta(days=1)).strftime("%d.%m.%Y %H:%M"),
+        message = (
+            "⏳ <b>Твой тест уходит впустую</b>\n\n"
+            "Сутки прошли, а VPN так и не подключён. Давай исправим —\n"
+            "это пара минут."
         )
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text=texts.t("CONNECT_BUTTON", "🔗 Подключиться"),
+                        text="📲 Подключиться",
                         callback_data="subscription_connect",
                     )
                 ],
                 [
                     InlineKeyboardButton(
-                        text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 Моя подписка"),
-                        callback_data="menu_subscription",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"),
+                        text="🆘 Поддержка",
                         callback_data="menu_support",
                     )
                 ],
