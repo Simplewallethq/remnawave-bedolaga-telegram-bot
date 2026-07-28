@@ -21,8 +21,10 @@ from app.database.crud.device_link import count_device_links
 from app.database.crud.share_token import get_by_token
 from app.database.models import Subscription
 from app.utils.subscription_utils import (
+    build_incy_deep_link,
     convert_subscription_link_to_happ_scheme,
     get_display_subscription_link,
+    get_raw_subscription_link,
 )
 
 from ..dependencies import get_db_session
@@ -117,11 +119,14 @@ async def resolve_share_token(
 
     raw_link = get_display_subscription_link(subscription)
     happ_link = convert_subscription_link_to_happ_scheme(raw_link)
+    # Incy добавляет подписку по обычной ссылке из Remnawave, а не по криптоссылке.
+    incy_link = build_incy_deep_link(get_raw_subscription_link(subscription) or raw_link)
 
     return ShareResolveResponse(
         status="active",
         shareCode=record.share_code,
         happLink=happ_link,
+        incyLink=incy_link,
         rawLink=raw_link,
         platforms=settings.get_share_platform_map(),
         referral=referral,

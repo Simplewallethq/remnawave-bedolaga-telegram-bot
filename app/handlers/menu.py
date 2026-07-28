@@ -31,7 +31,12 @@ from app.keyboards.inline import (
     get_onboarding_connection_keyboard,
     get_onboarding_connected_keyboard,
 )
-from app.utils.subscription_utils import get_display_subscription_link
+from app.utils.subscription_utils import (
+    get_display_subscription_link,
+    get_incy_button_url,
+    get_raw_subscription_link,
+    is_ios_device_type,
+)
 from app.database.crud.referral import get_user_referral_stats
 from app.database.crud.transaction import get_user_transactions
 from app.database.models import TransactionType
@@ -1330,6 +1335,11 @@ async def handle_onboarding_device_selection(
             "ONBOARDING_CONNECTION_TEXT_ANDROID",
             "Установи приложение Leto по кнопке ниже.\n\nПосле авторизуйся в приложении через Telegram → все настроится в один клик.",
         )
+    elif is_ios_device_type(device_type):
+        connection_text = texts.t(
+            "ONBOARDING_CONNECTION_TEXT_IOS",
+            "Установи приложение Incy по кнопке ниже.\n\nПосле установки нажми кнопку \"Подключиться\"  ниже → все настроится автоматически.",
+        )
     else:
         connection_text = texts.t(
             "ONBOARDING_CONNECTION_TEXT",
@@ -1337,14 +1347,17 @@ async def handle_onboarding_device_selection(
         )
 
     subscription_link = None
+    raw_subscription_link = None
     if user.subscription:
         subscription_link = get_display_subscription_link(user.subscription)
+        raw_subscription_link = get_raw_subscription_link(user.subscription)
 
     keyboard = get_onboarding_connection_keyboard(
         device_type,
         user.language,
         subscription_link=subscription_link,
         telegram_id=user.telegram_id,
+        raw_subscription_link=raw_subscription_link,
     )
 
     image_path = os.path.join("images", "connection_screen.png")
@@ -1385,14 +1398,22 @@ async def handle_onboarding_connect(
     # Mark link as sent to prevent duplicates
     await state.update_data(onboarding_link_sent=True)
 
+    device_type = data.get("onboarding_device_type") or "iphone"
+
     # Build combined post-connect keyboard with deep link
     redirect_link = None
     subscription = user.subscription
     if subscription:
         subscription_link = get_display_subscription_link(subscription)
         if subscription_link:
-            from app.utils.subscription_utils import get_happ_cryptolink_redirect_link
-            redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
+            if is_ios_device_type(device_type):
+                # Incy принимает обычную ссылку подписки, а не криптоссылку.
+                redirect_link = get_incy_button_url(
+                    get_raw_subscription_link(subscription) or subscription_link
+                )
+            else:
+                from app.utils.subscription_utils import get_happ_cryptolink_redirect_link
+                redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
             if redirect_link:
                 logger.info(f"✅ ONBOARDING_CONNECT: Deep link сгенерирован для {callback.from_user.id}")
             else:
@@ -1448,6 +1469,7 @@ async def handle_onboarding_manual_link(
     callback: types.CallbackQuery,
     db_user: User,
     db: AsyncSession,
+    state: FSMContext = None,
 ):
     """Show subscription link as copyable code for manual connection."""
     if db_user is None:
@@ -1463,19 +1485,34 @@ async def handle_onboarding_manual_link(
         await callback.answer("❌ У вас нет активной подписки", show_alert=True)
         return
 
-    link = get_display_subscription_link(subscription)
+    device_type = "iphone"
+    if state is not None:
+        state_data = await state.get_data() or {}
+        device_type = state_data.get("onboarding_device_type") or device_type
+
+    is_ios = is_ios_device_type(device_type)
+
+    # На iOS Incy добавляет подписку по обычной ссылке, а не по криптоссылке.
+    link = (
+        get_raw_subscription_link(subscription) if is_ios else None
+    ) or get_display_subscription_link(subscription)
     if not link:
         await callback.answer("❌ Ссылка подписки недоступна", show_alert=True)
         return
 
     texts = get_texts(db_user.language)
-    manual_text = (
-        texts.t(
+    if is_ios:
+        manual_prompt = texts.t(
+            "ONBOARDING_MANUAL_LINK_TEXT_IOS",
+            "Для ручного подключения скопируй ключ и добавь его в Incy\n\n",
+        )
+    else:
+        manual_prompt = texts.t(
             "ONBOARDING_MANUAL_LINK_TEXT",
             "Для ручного подключения скопируй ключ и добавь его в Happ\n\n",
         )
-        + f"<blockquote expandable><code>{link}</code></blockquote>"
-    )
+
+    manual_text = manual_prompt + f"<blockquote expandable><code>{link}</code></blockquote>"
 
     support_url = settings.get_support_contact_url() or "https://t.me/letosupportbot"
 

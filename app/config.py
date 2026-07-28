@@ -22,6 +22,9 @@ DEFAULT_DISPLAY_NAME_BANNED_KEYWORDS = [
 
 USER_TAG_PATTERN = re.compile(r"^[A-Z0-9_]{1,16}$")
 
+# Наше приложение для Apple-платформ (используется вместо Happ в iOS-флоу)
+DEFAULT_INCY_APP_DOWNLOAD_LINK_IOS = "https://apps.apple.com/ru/app/incy/id6756943388"
+
 
 logger = logging.getLogger(__name__)
 
@@ -436,6 +439,8 @@ class Settings(BaseSettings):
     HAPP_DOWNLOAD_LINK_MACOS: Optional[str] = None
     HAPP_DOWNLOAD_LINK_WINDOWS: Optional[str] = None
     HAPP_DOWNLOAD_LINK_PC: Optional[str] = None
+    # Наше iOS/macOS-приложение Incy — заменяет Happ во всём Apple-флоу
+    INCY_APP_DOWNLOAD_LINK_IOS: str = DEFAULT_INCY_APP_DOWNLOAD_LINK_IOS
     LETO_APP_DOWNLOAD_LINK_ANDROID: Optional[str] = None
     LETO_APP_DOWNLOAD_LINK_ANDROID_APK: Optional[str] = None
     LETO_APP_DOWNLOAD_LINK_IOS: Optional[str] = None
@@ -445,12 +450,12 @@ class Settings(BaseSettings):
     # Страница «Поделиться доступом» (/s/{token} на сайте)
     SHARE_SITE_BASE_URL: str = ""  # напр. https://info.letovpn.com
     SHARE_MAX_ACTIVATIONS: int = 10
-    # Метод подключения на share-странице по платформам: "leto_code" | "happ_link".
+    # Метод подключения на share-странице: "leto_code" | "incy_link" | "happ_link".
     # Релиз нашего приложения на платформе = флип значения, без изменений кода.
     SHARE_PLATFORM_ANDROID: str = "leto_code"
-    SHARE_PLATFORM_IOS: str = "happ_link"
+    SHARE_PLATFORM_IOS: str = "incy_link"
     SHARE_PLATFORM_WINDOWS: str = "happ_link"
-    SHARE_PLATFORM_MACOS: str = "happ_link"
+    SHARE_PLATFORM_MACOS: str = "incy_link"
     HIDE_SUBSCRIPTION_LINK: bool = False
     ENABLE_LOGO_MODE: bool = True
     LOGO_FILE: str = "vpn_logo.png"
@@ -1417,11 +1422,21 @@ class Settings(BaseSettings):
         template = (self.HAPP_CRYPTOLINK_REDIRECT_TEMPLATE or "").strip()
         return template or None
 
+    def get_incy_download_link(self) -> str:
+        """Ссылка на Incy в App Store (iOS/macOS)."""
+
+        link = (self.INCY_APP_DOWNLOAD_LINK_IOS or "").strip()
+        return link or DEFAULT_INCY_APP_DOWNLOAD_LINK_IOS
+
     def get_happ_download_link(self, platform: str) -> Optional[str]:
         platform_key = platform.lower()
 
         if platform_key == "pc":
             platform_key = "windows"
+
+        # Apple-платформы переехали на Incy — Happ там больше не отдаём.
+        if platform_key in ("ios", "macos"):
+            return self.get_incy_download_link()
 
         links = {
             "ios": (self.HAPP_DOWNLOAD_LINK_IOS or "").strip(),
@@ -1472,6 +1487,10 @@ class Settings(BaseSettings):
             "windows": [{"kind": "direct", "url": _clean(self.LETO_APP_DOWNLOAD_LINK_WINDOWS)}],
             "macos": [{"kind": "app_store", "url": _clean(self.LETO_APP_DOWNLOAD_LINK_MACOS)}],
         }
+        incy_links = {
+            "ios": [{"kind": "app_store_ru", "url": self.get_incy_download_link()}],
+            "macos": [{"kind": "app_store_ru", "url": self.get_incy_download_link()}],
+        }
         methods = {
             "ios": self.SHARE_PLATFORM_IOS,
             "android": self.SHARE_PLATFORM_ANDROID,
@@ -1482,7 +1501,9 @@ class Settings(BaseSettings):
         result = {}
         for platform, method in methods.items():
             method = (method or "").strip().lower()
-            if method == "leto_code":
+            if method == "incy_link" and platform in incy_links:
+                store = incy_links[platform]
+            elif method == "leto_code":
                 store = [entry for entry in leto_links[platform] if entry["url"]]
             else:
                 method = "happ_link"

@@ -9,6 +9,15 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# ── Incy (iOS/macOS) ─────────────────────────────────────────────────────
+# На Apple-платформах вместо Happ используется наше приложение Incy.
+# Оно принимает обычную ссылку подписки из Remnawave (без криптоссылки)
+# через схему incy://add/{subscription_url}.
+INCY_APP_ID = "incy"
+INCY_URL_SCHEME = "incy://add/"
+
+_IOS_DEVICE_TYPES = {"ios", "iphone", "ipad", "mac", "macos"}
+
 
 async def ensure_single_subscription(db: AsyncSession, user_id: int) -> Optional[Subscription]:
     result = await db.execute(
@@ -130,20 +139,15 @@ def get_display_subscription_link(subscription: Optional[Subscription]) -> Optio
     return base_link
 
 
-def get_happ_cryptolink_redirect_link(subscription_link: Optional[str]) -> Optional[str]:
-    if not subscription_link:
-        return None
+def apply_redirect_template(target_link: str, template: str) -> str:
+    """Подставляет ссылку в шаблон redirect-страницы."""
 
-    template = settings.get_happ_cryptolink_redirect_template()
-    if not template:
-        return None
-
-    encoded_link = quote(subscription_link, safe="")
+    encoded_link = quote(target_link, safe="")
     replacements = {
         "{subscription_link}": encoded_link,
         "{link}": encoded_link,
-        "{subscription_link_raw}": subscription_link,
-        "{link_raw}": subscription_link,
+        "{subscription_link_raw}": target_link,
+        "{link_raw}": target_link,
     }
 
     replaced = False
@@ -155,10 +159,98 @@ def get_happ_cryptolink_redirect_link(subscription_link: Optional[str]) -> Optio
     if replaced:
         return template
 
-    if template.endswith(("=", "?", "&")):
-        return f"{template}{encoded_link}"
-
     return f"{template}{encoded_link}"
+
+
+def get_happ_cryptolink_redirect_link(subscription_link: Optional[str]) -> Optional[str]:
+    if not subscription_link:
+        return None
+
+    template = settings.get_happ_cryptolink_redirect_template()
+    if not template:
+        return None
+
+    return apply_redirect_template(subscription_link, template)
+
+
+def is_incy_app(app: Optional[dict]) -> bool:
+    """Приложение из app-config.json — это Incy?"""
+
+    if not isinstance(app, dict):
+        return False
+
+    if str(app.get("id") or "").strip().lower() == INCY_APP_ID:
+        return True
+
+    return str(app.get("urlScheme") or "").strip().lower().startswith("incy://")
+
+
+def is_ios_device_type(device_type: Optional[str]) -> bool:
+    """True для Apple-платформ, где вместо Happ используется Incy."""
+
+    return str(device_type or "").strip().lower() in _IOS_DEVICE_TYPES
+
+
+def get_raw_subscription_link(subscription: Optional[Subscription]) -> Optional[str]:
+    """Обычная ссылка подписки из Remnawave — без happ-криптоссылки.
+
+    Incy добавляет подписку по обычному URL, поэтому режим happ_cryptolink
+    (который подменяет ссылку на зашифрованную) для него не применяется.
+    """
+
+    if not subscription:
+        return None
+
+    return getattr(subscription, "subscription_url", None)
+
+
+def build_incy_deep_link(subscription_link: Optional[str]) -> Optional[str]:
+    """incy://add/{обычная ссылка подписки}."""
+
+    if not subscription_link:
+        return None
+
+    link = str(subscription_link).strip()
+    if not link:
+        return None
+
+    if link.lower().startswith("incy://"):
+        return link
+
+    return f"{INCY_URL_SCHEME}{link}"
+
+
+def get_incy_connect_link(subscription_link: Optional[str]) -> Optional[str]:
+    """Ссылка для кнопки «Подключиться» на iOS.
+
+    Telegram не пропускает кастомные схемы в url-кнопках, поэтому incy://
+    заворачивается в redirect-страницу (HAPP_CRYPTOLINK_REDIRECT_TEMPLATE),
+    если она настроена.
+    """
+
+    deep_link = build_incy_deep_link(subscription_link)
+    if not deep_link:
+        return None
+
+    template = settings.get_happ_cryptolink_redirect_template()
+    if not template:
+        return deep_link
+
+    return apply_redirect_template(deep_link, template)
+
+
+def get_incy_button_url(subscription_link: Optional[str]) -> Optional[str]:
+    """URL для inline-кнопки Telegram — только http(s).
+
+    Схему incy:// Telegram в url-кнопках не пропускает, поэтому без настроенной
+    redirect-страницы кнопку «Подключиться» не показываем (как и для Happ).
+    """
+
+    link = get_incy_connect_link(subscription_link)
+    if link and link.lower().startswith(("http://", "https://")):
+        return link
+
+    return None
 
 
 def convert_subscription_link_to_happ_scheme(subscription_link: Optional[str]) -> Optional[str]:

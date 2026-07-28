@@ -71,7 +71,9 @@ from app.utils.pricing_utils import (
 from app.utils.subscription_utils import (
     get_display_subscription_link,
     get_happ_cryptolink_redirect_link,
+    get_incy_connect_link,
     convert_subscription_link_to_happ_scheme,
+    is_incy_app,
 )
 from app.utils.promo_offer import (
     build_promo_offer_hint,
@@ -343,12 +345,20 @@ def get_device_name(device_type: str, language: str = "ru") -> str:
 
     return names.get(device_type, device_type)
 
-def create_deep_link(app: Dict[str, Any], subscription_url: str) -> Optional[str]:
+def create_deep_link(
+    app: Dict[str, Any],
+    subscription_url: str,
+    raw_subscription_url: Optional[str] = None,
+) -> Optional[str]:
     if not subscription_url:
         return None
 
     if not isinstance(app, dict):
         return subscription_url
+
+    if is_incy_app(app):
+        # Incy принимает обычную ссылку подписки из Remnawave, а не криптоссылку.
+        return get_incy_connect_link(raw_subscription_url or subscription_url)
 
     scheme = str(app.get("urlScheme", "")).strip()
     payload = subscription_url

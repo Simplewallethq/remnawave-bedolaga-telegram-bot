@@ -14,28 +14,19 @@
   "platforms": {
     "ios": [
       {
-        "id": "happ",
-        "name": "Happ",
+        "id": "incy",
+        "name": "Incy",
         "isFeatured": true,
-        "urlScheme": "happ://add/",
+        "urlScheme": "incy://add/",
         "installationStep": {
           "buttons": [
             {
-              "buttonLink": "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+              "buttonLink": "https://apps.apple.com/ru/app/incy/id6756943388",
               "buttonText": {
-                "en": "Open in App Store [EU]",
-                "fa": "باز کردن در App Store [EU]",
-                "ru": "Открыть в App Store [EU]",
-                "zh": "在 App Store 中打开 [EU]"
-              }
-            },
-            {
-              "buttonLink": "https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973",
-              "buttonText": {
-                "en": "Open in App Store [RU]",
-                "fa": "باز کردن در App Store [RU]",
-                "ru": "Открыть в App Store [RU]",
-                "zh": "在 App Store 中打开 [RU]"
+                "en": "Open in App Store",
+                "fa": "باز کردن در App Store",
+                "ru": "Открыть в App Store",
+                "zh": "在 App Store 中打开"
               }
             }
           ],

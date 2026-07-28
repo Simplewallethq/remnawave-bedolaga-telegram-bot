@@ -71,7 +71,9 @@ from app.utils.pricing_utils import (
 from app.utils.subscription_utils import (
     get_display_subscription_link,
     get_happ_cryptolink_redirect_link,
+    get_raw_subscription_link,
     convert_subscription_link_to_happ_scheme,
+    is_ios_device_type,
 )
 from app.utils.promo_offer import (
     build_promo_offer_hint,
@@ -1038,6 +1040,10 @@ async def handle_device_guide(
     subscription = db_user.subscription
     subscription_link = get_display_subscription_link(subscription)
 
+    if is_ios_device_type(device_type):
+        # На Apple-платформах подписка добавляется обычной ссылкой, а не криптоссылкой.
+        subscription_link = get_raw_subscription_link(subscription) or subscription_link
+
     if not subscription_link:
         await callback.answer(
             texts.t("SUBSCRIPTION_LINK_UNAVAILABLE", "❌ Ссылка подписки недоступна"),
@@ -1169,6 +1175,7 @@ async def handle_device_guide(
             device_type,
             db_user.language,
             has_other_apps=bool(other_apps),
+            raw_subscription_url=get_raw_subscription_link(subscription),
         ),
         parse_mode="HTML"
     )
@@ -1218,6 +1225,10 @@ async def handle_specific_app_guide(
     subscription = db_user.subscription
 
     subscription_link = get_display_subscription_link(subscription)
+
+    if is_ios_device_type(device_type):
+        # На Apple-платформах подписка добавляется обычной ссылкой, а не криптоссылкой.
+        subscription_link = get_raw_subscription_link(subscription) or subscription_link
 
     if not subscription_link:
         await callback.answer(
@@ -1301,7 +1312,8 @@ async def handle_specific_app_guide(
             subscription_link,
             app,
             device_type,
-            db_user.language
+            db_user.language,
+            raw_subscription_url=get_raw_subscription_link(subscription),
         ),
         parse_mode="HTML"
     )

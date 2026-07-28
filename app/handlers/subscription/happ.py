@@ -72,6 +72,7 @@ from app.utils.subscription_utils import (
     get_display_subscription_link,
     get_happ_cryptolink_redirect_link,
     convert_subscription_link_to_happ_scheme,
+    is_ios_device_type,
 )
 from app.utils.promo_offer import (
     build_promo_offer_hint,
@@ -144,10 +145,17 @@ async def handle_happ_download_platform_choice(
         "windows": texts.t("HAPP_PLATFORM_WINDOWS", "💻 Windows"),
     }
 
-    link_text = texts.t(
-        "HAPP_DOWNLOAD_LINK_MESSAGE",
-        "⬇️ Скачайте Happ для {platform}:",
-    ).format(platform=platform_names.get(platform, platform.upper()))
+    if is_ios_device_type(platform):
+        # На Apple-платформах отдаём наше приложение Incy вместо Happ.
+        link_text = texts.t(
+            "INCY_DOWNLOAD_LINK_MESSAGE",
+            "⬇️ Скачайте Incy для {platform}:",
+        ).format(platform=platform_names.get(platform, platform.upper()))
+    else:
+        link_text = texts.t(
+            "HAPP_DOWNLOAD_LINK_MESSAGE",
+            "⬇️ Скачайте Happ для {platform}:",
+        ).format(platform=platform_names.get(platform, platform.upper()))
 
     keyboard = get_happ_download_link_keyboard(db_user.language, link)
 

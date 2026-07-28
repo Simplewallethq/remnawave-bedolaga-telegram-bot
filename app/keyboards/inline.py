@@ -21,6 +21,8 @@ from app.utils.price_display import PriceInfo, format_price_button
 from app.utils.subscription_utils import (
     get_display_subscription_link,
     get_happ_cryptolink_redirect_link,
+    get_incy_button_url,
+    is_ios_device_type,
 )
 import logging
 
@@ -2332,6 +2334,7 @@ def get_connection_guide_keyboard(
     device_type: str,
     language: str = DEFAULT_LANGUAGE,
     has_other_apps: bool = False,
+    raw_subscription_url: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     from app.handlers.subscription import create_deep_link
     texts = get_texts(language)
@@ -2365,7 +2368,7 @@ def get_connection_guide_keyboard(
     for button in additional_before_buttons:
         keyboard.append([button])
 
-    connect_link = create_deep_link(app, subscription_url)
+    connect_link = create_deep_link(app, subscription_url, raw_subscription_url)
 
     if connect_link:
         connect_button = InlineKeyboardButton(
@@ -2449,7 +2452,8 @@ def get_specific_app_keyboard(
     subscription_url: str,
     app: dict,
     device_type: str,
-    language: str = DEFAULT_LANGUAGE
+    language: str = DEFAULT_LANGUAGE,
+    raw_subscription_url: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     from app.handlers.subscription import create_deep_link
     texts = get_texts(language)
@@ -2483,7 +2487,7 @@ def get_specific_app_keyboard(
     for button in additional_before_buttons:
         keyboard.append([button])
 
-    connect_link = create_deep_link(app, subscription_url)
+    connect_link = create_deep_link(app, subscription_url, raw_subscription_url)
 
     if connect_link:
         connect_button = InlineKeyboardButton(
@@ -3112,15 +3116,14 @@ def get_activation_keyboard(happ_link_shown: bool = False, language: str = DEFAU
     texts = get_texts(language)
     buttons = [
         [
-            InlineKeyboardButton(text="🍎 iOS (RU)", url="https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643"),
-            InlineKeyboardButton(text="🍎 iOS (WORLD)", url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215")
+            InlineKeyboardButton(text="🍎 iOS (Incy)", url=settings.get_incy_download_link())
         ],
         [
             InlineKeyboardButton(text="🤖 Android", url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru"),
             InlineKeyboardButton(text="💻 Windows", url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe")
         ]
     ]
-    
+
     if happ_link_shown:
         buttons.append([InlineKeyboardButton(text=texts.t("HIDE_LINK_BUTTON", "🙈 Скрыть ссылку"), callback_data="hide_link_activated")])
     else:
@@ -3170,26 +3173,23 @@ def get_onboarding_connection_keyboard(
     language: str = DEFAULT_LANGUAGE,
     subscription_link: Optional[str] = None,
     telegram_id: Optional[int] = None,
+    raw_subscription_link: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """
     Onboarding Screen 3: Device-specific connection instructions.
     device_type: 'iphone', 'android', 'windows', or 'macos'
     telegram_id personalizes the Google Play link (Install Referrer attribution).
+    На Apple-платформах подключение идёт через наше приложение Incy —
+    обычной ссылкой подписки (incy://add/{link}), без криптоссылки.
     """
     texts = get_texts(language)
     buttons = []
 
-    if device_type == "iphone":
+    if is_ios_device_type(device_type):
         buttons.append([
             InlineKeyboardButton(
-                text=texts.t("ONBOARDING_DOWNLOAD_HAPP_IOS_RU", "🍎 Скачать Happ (Apple ID Россия)"),
-                url="https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643",
-            ),
-        ])
-        buttons.append([
-            InlineKeyboardButton(
-                text=texts.t("ONBOARDING_DOWNLOAD_HAPP_IOS_WORLD", "🍎 Скачать Happ (Apple ID International)"),
-                url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+                text=texts.t("ONBOARDING_DOWNLOAD_INCY_IOS", "🍎 Скачать Incy"),
+                url=settings.get_incy_download_link(),
             ),
         ])
     elif device_type == "android":
@@ -3216,22 +3216,12 @@ def get_onboarding_connection_keyboard(
                 url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
             ),
         ])
-    elif device_type == "macos":
-        buttons.append([
-            InlineKeyboardButton(
-                text=texts.t("ONBOARDING_DOWNLOAD_HAPP_IOS_RU", "🍎 Скачать Happ (Apple ID Россия)"),
-                url="https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643",
-            ),
-        ])
-        buttons.append([
-            InlineKeyboardButton(
-                text=texts.t("ONBOARDING_DOWNLOAD_HAPP_IOS_WORLD", "🍎 Скачать Happ (Apple ID International)"),
-                url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
-            ),
-        ])
 
     if device_type != "android":
-        redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
+        if is_ios_device_type(device_type):
+            redirect_link = get_incy_button_url(raw_subscription_link or subscription_link)
+        else:
+            redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
         if redirect_link:
             buttons.append([InlineKeyboardButton(
                 text=texts.t("ONBOARDING_OPEN_HAPP_BUTTON", "🚀 Подключиться"),
@@ -3291,8 +3281,7 @@ def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: boo
     # App download buttons (OS names stay as-is, no translation needed)
     buttons.extend([
         [
-            InlineKeyboardButton(text="🍎 iOS (RU)", url="https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643"),
-            InlineKeyboardButton(text="🍎 iOS (WORLD)", url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215")
+            InlineKeyboardButton(text="🍎 iOS (Incy)", url=settings.get_incy_download_link())
         ],
         [
             InlineKeyboardButton(text="🤖 Android", url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru"),

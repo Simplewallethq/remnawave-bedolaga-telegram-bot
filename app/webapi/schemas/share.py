@@ -19,7 +19,7 @@ class ShareStoreLink(BaseModel):
 
 
 class SharePlatform(BaseModel):
-    method: Literal["leto_code", "happ_link"]
+    method: Literal["leto_code", "incy_link", "happ_link"]
     store: List[ShareStoreLink]
 
 
@@ -31,6 +31,8 @@ class ShareResolveResponse(BaseModel):
     status: Literal["active", "not_found", "paused", "slots_full"]
     shareCode: Optional[str] = None
     happLink: Optional[str] = None
+    # incy://add/{обычная ссылка подписки} — для платформ с method=incy_link
+    incyLink: Optional[str] = None
     rawLink: Optional[str] = None
     platforms: Optional[Dict[str, SharePlatform]] = None
     referral: Optional[ShareReferral] = None
