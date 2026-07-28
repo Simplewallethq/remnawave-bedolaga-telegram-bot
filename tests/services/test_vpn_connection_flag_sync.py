@@ -2,7 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
 from app.external.remnawave_api import RemnaWaveUser, TrafficLimitStrategy, UserStatus, UserTraffic
@@ -24,6 +24,11 @@ class _ExecuteResult:
 
 class _UpdateResult:
     rowcount = 1
+
+
+class _NotificationExecuteResult:
+    def scalar_one_or_none(self):
+        return None
 
 
 def _api_context(api):
@@ -219,6 +224,128 @@ async def test_monitoring_remnawave_sync_skips_when_previous_batch_is_running(mo
         lock.release()
 
     service._log_monitoring_event.assert_not_awaited()
+
+
+async def test_trial_inactivity_notifications_skip_connected_user(monkeypatch):
+    now = datetime.utcnow()
+    user = SimpleNamespace(id=1, telegram_id=123, language="ru", has_connected_to_vpn=True)
+    subscription = SimpleNamespace(
+        id=10,
+        user=user,
+        start_date=now - timedelta(hours=2),
+        end_date=now + timedelta(days=1),
+        traffic_used_gb=0.0,
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ExecuteResult([subscription]))
+
+    service = MonitoringService.__new__(MonitoringService)
+    service.bot = object()
+    service._send_trial_inactive_notification = AsyncMock()
+    service._log_monitoring_event = AsyncMock()
+
+    await service._check_trial_inactivity_notifications(db)
+
+    service._send_trial_inactive_notification.assert_not_awaited()
+
+
+async def test_trial_inactivity_1h_uses_flag_not_traffic(monkeypatch):
+    now = datetime.utcnow()
+    user = SimpleNamespace(id=1, telegram_id=123, language="ru", has_connected_to_vpn=False)
+    subscription = SimpleNamespace(
+        id=10,
+        user=user,
+        start_date=now - timedelta(hours=2),
+        end_date=now + timedelta(days=1),
+        traffic_used_gb=42.0,
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[_ExecuteResult([subscription]), _NotificationExecuteResult()])
+    db.add = MagicMock()
+
+    service = MonitoringService.__new__(MonitoringService)
+    service.bot = object()
+    service._send_trial_inactive_notification = AsyncMock(return_value=True)
+    service._log_monitoring_event = AsyncMock()
+
+    await service._check_trial_inactivity_notifications(db)
+
+    service._send_trial_inactive_notification.assert_awaited_once_with(user, subscription, 1)
+
+
+async def test_trial_inactivity_24h_uses_flag_not_traffic(monkeypatch):
+    now = datetime.utcnow()
+    user = SimpleNamespace(id=1, telegram_id=123, language="ru", has_connected_to_vpn=False)
+    subscription = SimpleNamespace(
+        id=10,
+        user=user,
+        start_date=now - timedelta(hours=25),
+        end_date=now + timedelta(days=1),
+        traffic_used_gb=42.0,
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[_ExecuteResult([subscription]), _NotificationExecuteResult()])
+    db.add = MagicMock()
+
+    service = MonitoringService.__new__(MonitoringService)
+    service.bot = object()
+    service._send_trial_inactive_notification = AsyncMock(return_value=True)
+    service._log_monitoring_event = AsyncMock()
+
+    await service._check_trial_inactivity_notifications(db)
+
+    service._send_trial_inactive_notification.assert_awaited_once_with(user, subscription, 24)
+
+
+async def test_trial_inactive_sender_uses_hardcoded_1h_message_and_buttons():
+    user = SimpleNamespace(id=1, telegram_id=123, language="en")
+    subscription = SimpleNamespace(end_date=datetime.utcnow() + timedelta(days=1))
+
+    service = MonitoringService.__new__(MonitoringService)
+    service._send_message_with_logo = AsyncMock()
+
+    assert await service._send_trial_inactive_notification(user, subscription, 1) is True
+
+    call_kwargs = service._send_message_with_logo.await_args.kwargs
+    keyboard = call_kwargs["reply_markup"]
+    buttons = [row[0] for row in keyboard.inline_keyboard]
+
+    assert call_kwargs["text"] == (
+        "👋 <b>Застрял на подключении?</b>\n\n"
+        "Доступ уже активен — покажем, как подключиться за минуту."
+    )
+    assert len(keyboard.inline_keyboard) == 2
+    assert [(button.text, button.callback_data) for button in buttons] == [
+        ("📲 Подключиться", "subscription_connect"),
+        ("🆘 Поддержка", "menu_support"),
+    ]
+    assert all(button.text != "📱 Моя подписка" for button in buttons)
+
+
+async def test_trial_inactive_sender_uses_hardcoded_24h_message_and_buttons():
+    user = SimpleNamespace(id=1, telegram_id=123, language="en")
+    subscription = SimpleNamespace(end_date=datetime.utcnow() + timedelta(days=1))
+
+    service = MonitoringService.__new__(MonitoringService)
+    service._send_message_with_logo = AsyncMock()
+
+    assert await service._send_trial_inactive_notification(user, subscription, 24) is True
+
+    call_kwargs = service._send_message_with_logo.await_args.kwargs
+    keyboard = call_kwargs["reply_markup"]
+    buttons = [row[0] for row in keyboard.inline_keyboard]
+
+    assert call_kwargs["text"] == (
+        "⏳ <b>Твой тест уходит впустую</b>\n\n"
+        "Сутки прошли, а VPN так и не подключён. Давай исправим —\n"
+        "это пара минут."
+    )
+    assert len(keyboard.inline_keyboard) == 2
+    assert [(button.text, button.callback_data) for button in buttons] == [
+        ("📲 Подключиться", "subscription_connect"),
+        ("🆘 Поддержка", "menu_support"),
+    ]
+    assert all(button.text != "📱 Моя подписка" for button in buttons)
 
 
 async def test_panel_subscription_sync_sets_vpn_flag_from_panel_traffic():

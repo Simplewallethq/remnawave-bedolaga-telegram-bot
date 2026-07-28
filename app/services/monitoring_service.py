@@ -239,9 +239,9 @@ class MonitoringService:
                 await self._check_expired_subscriptions(db)
                 await self._check_expiring_subscriptions(db)
                 await self._check_trial_expiring_soon(db)
+                await self._sync_with_remnawave(db)
                 await self._check_trial_inactivity_notifications(db)
                 await self._check_trial_channel_subscriptions(db)
-                await self._sync_with_remnawave(db)
                 await self._check_expired_subscription_followups(db)
                 await self._process_expired_subscription_feedbacks(db)
                 if settings.ENABLE_AUTOPAY:
@@ -559,7 +559,7 @@ class MonitoringService:
                 if not user:
                     continue
 
-                if (subscription.traffic_used_gb or 0) > 0:
+                if user.has_connected_to_vpn:
                     continue
 
                 start_date = subscription.start_date
@@ -1311,42 +1311,23 @@ class MonitoringService:
 
     async def _send_trial_inactive_notification(self, user: User, subscription: Subscription, hours: int) -> bool:
         try:
-            texts = get_texts(user.language)
             if hours >= 24:
-                template = texts.get(
-                    "TRIAL_INACTIVE_24H",
-                    (
-                        "⏳ <b>Вы ещё не подключились к VPN</b>\n\n"
-                        "Прошли сутки с активации тестового периода, но трафик не зафиксирован."
-                        "\n\nНажмите кнопку ниже, чтобы подключиться."
-                    ),
+                message = (
+                    "⏳ <b>Твой тест уходит впустую</b>\n\n"
+                    "Сутки прошли, а VPN так и не подключён. Давай исправим —\n"
+                    "это пара минут."
                 )
             else:
-                template = texts.get(
-                    "TRIAL_INACTIVE_1H",
-                    (
-                        "⏳ <b>Прошёл час, а подключения нет</b>\n\n"
-                        "Если возникли сложности с запуском — воспользуйтесь инструкциями."
-                    ),
+                message = (
+                    "👋 <b>Застрял на подключении?</b>\n\n"
+                    "Доступ уже активен — покажем, как подключиться за минуту."
                 )
-
-            message = template.format(
-                price=settings.format_price(settings.PRICE_30_DAYS),
-                end_date=format_local_datetime(subscription.end_date, "%d.%m.%Y %H:%M"),
-            )
 
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [build_miniapp_or_callback_button(
-                    text=texts.t("CONNECT_BUTTON", "🔗 Подключиться"),
-                    callback_data="subscription_connect",
-                )],
-                [build_miniapp_or_callback_button(
-                    text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 Моя подписка"),
-                    callback_data="menu_subscription",
-                )],
-                [InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
+                [InlineKeyboardButton(text="📲 Подключиться", callback_data="subscription_connect")],
+                [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu_support")],
             ])
 
             await self._send_message_with_logo(
