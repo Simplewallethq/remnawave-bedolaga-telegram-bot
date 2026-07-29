@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     BOT_USERNAME: Optional[str] = None
     ADMIN_IDS: str = ""
     SUPPORT_USERNAME: str = "@support"
+    SUPPORT_EMAIL: str = ""
     SUPPORT_MENU_ENABLED: bool = True
     SUPPORT_SYSTEM_MODE: str = "both"  # one of: tickets, contact, both
     SUPPORT_MENU_ENABLED: bool = True
@@ -1907,6 +1908,9 @@ class Settings(BaseSettings):
 
     def get_support_contact_display_html(self) -> str:
         return html.escape(self.get_support_contact_display())
+
+    def get_support_email(self) -> str:
+        return (self.SUPPORT_EMAIL or "").strip()
 
     def get_server_status_mode(self) -> str:
         return self.SERVER_STATUS_MODE

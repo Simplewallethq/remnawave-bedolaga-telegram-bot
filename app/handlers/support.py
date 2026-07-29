@@ -6,7 +6,7 @@ from app.config import settings
 from app.database.models import User
 from app.keyboards.inline import get_support_keyboard
 from app.services.support_settings_service import SupportSettingsService
-from app.localization.texts import get_texts
+from app.localization.texts import get_texts, format_support_placeholders
 from app.utils.photo_message import edit_or_answer_photo
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,9 @@ async def show_support_info(
 ):
     
     texts = get_texts(db_user.language)
-    support_info = SupportSettingsService.get_support_info_text(db_user.language)
+    support_info = format_support_placeholders(
+        SupportSettingsService.get_support_info_text(db_user.language)
+    )
     await edit_or_answer_photo(
         callback=callback,
         caption=support_info,

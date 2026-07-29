@@ -40,7 +40,7 @@ from app.utils.subscription_utils import (
 from app.database.crud.referral import get_user_referral_stats
 from app.database.crud.transaction import get_user_transactions
 from app.database.models import TransactionType
-from app.localization.texts import get_texts, get_rules
+from app.localization.texts import get_texts, get_rules, format_support_placeholders
 from app.database.models import PromoGroup, User
 from app.database.crud.user_message import get_random_active_message
 from app.services.subscription_checkout_service import (
@@ -1427,7 +1427,7 @@ async def handle_onboarding_connect(
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
     texts = get_texts(user.language)
-    support_url = settings.get_support_contact_url() or "https://t.me/letosupportbot"
+    support_url = settings.get_support_contact_url()
     buttons = []
     if redirect_link:
         buttons.append([InlineKeyboardButton(
@@ -1442,10 +1442,11 @@ async def handle_onboarding_connect(
         text=texts.t("ONBOARDING_MANUAL_LINK_BUTTON", "🔗 Ручное подключение"),
         callback_data="onboarding_manual_link",
     )])
-    buttons.append([InlineKeyboardButton(
-        text=texts.t("ONBOARDING_SUPPORT_BUTTON", "💬 Поддержка"),
-        url=support_url,
-    )])
+    if support_url:
+        buttons.append([InlineKeyboardButton(
+            text=texts.t("ONBOARDING_SUPPORT_BUTTON", "💬 Поддержка"),
+            url=support_url,
+        )])
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -1514,20 +1515,21 @@ async def handle_onboarding_manual_link(
 
     manual_text = manual_prompt + f"<blockquote expandable><code>{link}</code></blockquote>"
 
-    support_url = settings.get_support_contact_url() or "https://t.me/letosupportbot"
+    support_url = settings.get_support_contact_url()
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
+    manual_rows = []
+    if support_url:
+        manual_rows.append([InlineKeyboardButton(
             text=texts.t("ONBOARDING_SUPPORT_BUTTON", "💬 Поддержка"),
             url=support_url,
-        )],
-        [InlineKeyboardButton(
-            text=texts.t("BACK", "⬅️ Назад"),
-            callback_data="onboarding_connect_free",
-        )],
-    ])
+        )])
+    manual_rows.append([InlineKeyboardButton(
+        text=texts.t("BACK", "⬅️ Назад"),
+        callback_data="onboarding_connect_free",
+    )])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=manual_rows)
 
     await edit_or_answer_photo(
         callback,
@@ -1720,7 +1722,14 @@ async def handle_support(callback: types.CallbackQuery, db_user: User, db: Async
     texts = get_texts(db_user.language)
     text = (
         texts.t("SUPPORT_TITLE", "🛠 Поддержка\n\n")
-        + texts.t("SUPPORT_TEXT", "Возникли вопросы или проблемы?\nСвяжитесь с нашей службой поддержки:\n\n📧 Email: support@letovpn.com\n💬 Telegram: @letosupportbot\n\nМы отвечаем в течение 24 часов.")
+        + format_support_placeholders(
+            texts.t(
+                "SUPPORT_TEXT",
+                "Возникли вопросы или проблемы?\nСвяжитесь с нашей службой поддержки:\n"
+                "\n📧 Email: {support_email}\n💬 Telegram: {support_contact}\n\n"
+                "Мы отвечаем в течение 24 часов.",
+            )
+        )
     )
     
     image_path = os.path.join("images", "support_screen.png")

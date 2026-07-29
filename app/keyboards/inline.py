@@ -3253,8 +3253,8 @@ def get_onboarding_connected_keyboard(language: str = DEFAULT_LANGUAGE) -> Inlin
     Shown after user clicks Подключиться and deep link is sent.
     """
     texts = get_texts(language)
-    support_url = settings.get_support_contact_url() or "https://t.me/letosupportbot"
-    return InlineKeyboardMarkup(inline_keyboard=[
+    support_url = settings.get_support_contact_url()
+    rows = [
         [InlineKeyboardButton(
             text=texts.t("ONBOARDING_CONNECTED_BUTTON", "✅ Я подключился"),
             callback_data="main_menu",
@@ -3263,8 +3263,10 @@ def get_onboarding_connected_keyboard(language: str = DEFAULT_LANGUAGE) -> Inlin
             text=texts.t("ONBOARDING_MANUAL_LINK_BUTTON", "🔗 Ручное подключение"),
             callback_data="onboarding_manual_link",
         )],
-        [InlineKeyboardButton(text=texts.t("ONBOARDING_SUPPORT_BUTTON", "💬 Поддержка"), url=support_url)],
-    ])
+    ]
+    if support_url:
+        rows.append([InlineKeyboardButton(text=texts.t("ONBOARDING_SUPPORT_BUTTON", "💬 Поддержка"), url=support_url)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: bool = True, subscription=None, language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
@@ -3611,7 +3613,9 @@ def get_support_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
     Экран 12: Поддержка
     """
     texts = get_texts(language)
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=texts.t("CONTACT_SUPPORT_BUTTON", "💬 Написать в поддержку"), url="https://t.me/letosupportbot")],
-        [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
-    ])
+    support_url = settings.get_support_contact_url()
+    rows = []
+    if support_url:
+        rows.append([InlineKeyboardButton(text=texts.t("CONTACT_SUPPORT_BUTTON", "💬 Написать в поддержку"), url=support_url)])
+    rows.append([InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

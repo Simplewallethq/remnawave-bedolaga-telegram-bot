@@ -379,7 +379,11 @@ async def start_edit_desc(callback: types.CallbackQuery, db_user: User, db: Asyn
             texts.t("ADMIN_SUPPORT_EDIT_DESCRIPTION_CONTACT_TITLE", "<b>Контакт для режима «Контакт»</b>"),
             f"<code>{html.escape(support_contact_display)}</code>",
             "",
-            texts.t("ADMIN_SUPPORT_EDIT_DESCRIPTION_CONTACT_HINT", "Добавьте в описание при необходимости."),
+            texts.t(
+                "ADMIN_SUPPORT_EDIT_DESCRIPTION_CONTACT_HINT",
+                "Добавьте в описание при необходимости — вставляйте {support_contact} "
+                "(и {support_email}), чтобы контакт подставлялся из настроек.",
+            ),
         ]
     await callback.message.edit_text(
         "\n".join(text_parts),

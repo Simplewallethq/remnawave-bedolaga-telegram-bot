@@ -239,6 +239,7 @@ class BotConfigurationService:
         "TRIAL_WARNING_HOURS": "TRIAL",
         "TRIAL_USER_TAG": "TRIAL",
         "SUPPORT_USERNAME": "SUPPORT",
+        "SUPPORT_EMAIL": "SUPPORT",
         "SUPPORT_MENU_ENABLED": "SUPPORT",
         "SUPPORT_SYSTEM_MODE": "SUPPORT",
         "SUPPORT_TICKET_SLA_ENABLED": "SUPPORT",

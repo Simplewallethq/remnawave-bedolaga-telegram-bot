@@ -28,7 +28,8 @@ _DYNAMIC_LANGUAGE_CONFIGS = {
         "support_info": (
             "Поддержка\n\n"
             "Возникли вопросы или проблемы? Свяжитесь с нашей службой поддержки:\n\n"
-            "Telegram: @letosupportbot\n\n"
+            "📧 Email: {support_email}\n"
+            "Telegram: {support_contact}\n\n"
             "Мы отвечаем в течение 24 часов в рабочие дни."
         ),
     },
@@ -50,7 +51,7 @@ _DYNAMIC_LANGUAGE_CONFIGS = {
         "support_info": (
             "\n🛠️ <b>Технічна підтримка</b>\n\n"
             "З усіх питань звертайтеся до нашої підтримки:\n\n"
-            "👤 {support_username}\n\n"
+            "👤 {support_contact}\n\n"
             "Ми допоможемо з:\n"
             "• Налаштуванням підключення\n"
             "• Вирішенням технічних проблем\n"
@@ -65,7 +66,7 @@ _DYNAMIC_LANGUAGE_CONFIGS = {
         "support_info": (
             "\n🛠️ <b>技术支持</b>\n\n"
             "如有任何问题，请联系我们的支持团队：\n\n"
-            "👤 {support_username}\n\n"
+            "👤 {support_contact}\n\n"
             "我们将帮助您：\n"
             "• 设置连接\n"
             "• 解决技术问题\n"
@@ -85,6 +86,35 @@ _TRAFFIC_TIERS = (
     ("TRAFFIC_100GB", "100", "PRICE_TRAFFIC_100GB"),
     ("TRAFFIC_250GB", "250", "PRICE_TRAFFIC_250GB"),
 )
+
+
+_SUPPORT_TEXT_KEYS = ("SUPPORT_INFO", "SUPPORT_TEXT")
+
+
+def format_support_placeholders(text: Any) -> Any:
+    """Подставляет контакты поддержки из настроек в {support_contact}/{support_email}.
+
+    Строка целиком выбрасывается, если все её плейсхолдеры пустые — чтобы
+    не показывать «Telegram:» без контакта.
+    """
+    if not isinstance(text, str) or "{support_" not in text:
+        return text
+
+    replacements = {
+        "{support_contact}": str(settings.get_support_contact_display() or ""),
+        "{support_email}": str(settings.get_support_email() or ""),
+    }
+
+    lines = []
+    for line in text.split("\n"):
+        used = [key for key in replacements if key in line]
+        if used and not any(replacements[key] for key in used):
+            continue
+        for placeholder, value in replacements.items():
+            line = line.replace(placeholder, value)
+        lines.append(line)
+
+    return "\n".join(lines)
 
 
 def _get_cached_rules_value(language: str) -> str:
@@ -120,9 +150,7 @@ def _build_dynamic_values(language: str) -> Dict[str, Any]:
 
     support_template = config.get("support_info")
     if support_template:
-        values["SUPPORT_INFO"] = support_template.format(
-            support_username=settings.SUPPORT_USERNAME
-        )
+        values["SUPPORT_INFO"] = format_support_placeholders(support_template)
 
     return values
 
@@ -143,6 +171,14 @@ class Texts:
         }
 
         self._values.update(_build_dynamic_values(self.language))
+
+        for key in _SUPPORT_TEXT_KEYS:
+            if key in self._values:
+                self._values[key] = format_support_placeholders(self._values[key])
+            if key in self._fallback_values:
+                self._fallback_values[key] = format_support_placeholders(
+                    self._fallback_values[key]
+                )
 
     def __getattr__(self, item: str) -> Any:
         if item == "language":
