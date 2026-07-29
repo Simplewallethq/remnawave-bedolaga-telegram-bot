@@ -19,6 +19,7 @@ from app.services.tariff_partial_payment_service import (
     build_invoice_checkout_snapshot,
     extract_checkout_snapshot,
 )
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
 
@@ -35,6 +36,7 @@ class MulenPayPaymentMixin:
         amount_kopeks: int,
         description: str,
         language: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Создаёт локальный платеж и инициализирует сессию в MulenPay."""
         display_name = settings.get_mulenpay_display_name()
@@ -43,7 +45,8 @@ class MulenPayPaymentMixin:
             logger.error("%s сервис не инициализирован", display_name)
             return None
 
-        if amount_kopeks < settings.MULENPAY_MIN_AMOUNT_KOPEKS:
+        is_vpn_bonus = vpn_deposit_bonus_service.is_campaign_metadata(metadata)
+        if amount_kopeks < settings.MULENPAY_MIN_AMOUNT_KOPEKS and not is_vpn_bonus:
             logger.warning(
                 "Сумма %s меньше минимальной: %s < %s",
                 display_name,
@@ -97,6 +100,7 @@ class MulenPayPaymentMixin:
                 "user_id": user_id,
                 "amount_kopeks": amount_kopeks,
                 "description": description,
+                **(metadata or {}),
             }
             snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
             if snapshot:
@@ -258,13 +262,33 @@ class MulenPayPaymentMixin:
                     "description",
                     f"платеж {payment.uuid}",
                 )
+                bonus_metadata = vpn_deposit_bonus_service.extract_payment_metadata(payment)
+                bonus_decision = await vpn_deposit_bonus_service.resolve_payment_decision(
+                    db,
+                    user_id=payment.user_id,
+                    payment_amount_kopeks=payment.amount_kopeks,
+                    metadata=bonus_metadata,
+                )
+                credit_amount_kopeks = (
+                    bonus_decision.credit_amount_kopeks
+                    if bonus_decision.is_campaign_payment
+                    else payment.amount_kopeks
+                )
+                referral_amount_kopeks = (
+                    bonus_decision.referral_amount_kopeks
+                    if bonus_decision.is_campaign_payment
+                    else credit_amount_kopeks
+                )
+                transaction_description = f"Пополнение через {display_name}: {payment_description}"
+                if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                    transaction_description = "Бонус за первое подключение VPN: оплачено 10₽, начислено 100₽"
 
                 transaction = await payment_module.create_transaction(
                     db,
                     user_id=payment.user_id,
                     type=TransactionType.DEPOSIT,
-                    amount_kopeks=payment.amount_kopeks,
-                    description=f"Пополнение через {display_name}: {payment_description}",
+                    amount_kopeks=credit_amount_kopeks,
+                    description=transaction_description,
                     payment_method=PaymentMethod.MULENPAY,
                     external_id=payment.uuid,
                     is_completed=True,
@@ -291,8 +315,8 @@ class MulenPayPaymentMixin:
                 await payment_module.add_user_balance(
                     db,
                     user,
-                    payment.amount_kopeks,
-                    f"Пополнение {display_name}: {payment.amount_kopeks // 100}₽",
+                    credit_amount_kopeks,
+                    f"Пополнение {display_name}: {credit_amount_kopeks // 100}₽",
                     create_transaction=False,
                 )
 
@@ -302,7 +326,7 @@ class MulenPayPaymentMixin:
                     await process_referral_topup(
                         db,
                         user.id,
-                        payment.amount_kopeks,
+                        referral_amount_kopeks,
                         getattr(self, "bot", None),
                     )
                 except Exception as error:
@@ -365,6 +389,9 @@ class MulenPayPaymentMixin:
 
                     checkout_snapshot = extract_checkout_snapshot(payment)
                     has_saved_cart = await user_cart_service.has_user_cart(user.id)
+                    if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                        has_saved_cart = False
+                        checkout_snapshot = None
                     if has_saved_cart or checkout_snapshot:
                         try:
                             auto_purchase_success = await auto_purchase_saved_cart_after_topup(
@@ -389,19 +416,30 @@ class MulenPayPaymentMixin:
                 # Уведомление пользователю только если автопокупка не сработала
                 if not auto_purchase_success and getattr(self, "bot", None):
                     try:
-                        keyboard = await self.build_topup_success_keyboard(user)
-                        await self.bot.send_message(
-                            user.telegram_id,
-                            format_topup_success_message(settings.format_price(payment.amount_kopeks)),
-                            parse_mode="HTML",
-                            reply_markup=keyboard,
-                        )
+                        if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                            await vpn_deposit_bonus_service.send_success_message(self.bot, user)
+                        else:
+                            keyboard = await self.build_topup_success_keyboard(user)
+                            await self.bot.send_message(
+                                user.telegram_id,
+                                format_topup_success_message(settings.format_price(credit_amount_kopeks)),
+                                parse_mode="HTML",
+                                reply_markup=keyboard,
+                            )
                     except Exception as error:
                         logger.error(
                             "Ошибка отправки уведомления пользователю %s: %s",
                             display_name,
                             error,
                         )
+
+                await vpn_deposit_bonus_service.record_payment_processed(
+                    db,
+                    user=user,
+                    transaction=transaction,
+                    decision=bonus_decision,
+                    provider="mulenpay",
+                )
 
                 logger.info(
                     "✅ Обработан %s платеж %s для пользователя %s",

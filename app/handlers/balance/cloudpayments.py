@@ -14,6 +14,7 @@ from app.localization.texts import get_texts
 from app.services.payment_service import PaymentService
 from app.states import BalanceStates
 from app.utils.decorators import error_handler
+from .vpn_deposit_bonus import merge_vpn_deposit_bonus_metadata, should_bypass_minimum
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ async def _create_cloudpayments_payment_and_respond(
     db: AsyncSession,
     amount_kopeks: int,
     edit_message: bool = False,
+    state_data: dict | None = None,
 ):
     """
     Common logic for creating CloudPayments payment and sending response.
@@ -53,6 +55,7 @@ async def _create_cloudpayments_payment_and_respond(
         description=description,
         telegram_id=db_user.telegram_id,
         language=db_user.language,
+        metadata=merge_vpn_deposit_bonus_metadata({}, db_user, state_data),
     )
 
     if not result:
@@ -146,7 +149,10 @@ async def process_cloudpayments_payment_amount(
         return
 
     # Validate amount
-    if amount_kopeks < settings.CLOUDPAYMENTS_MIN_AMOUNT_KOPEKS:
+    state_data = await state.get_data()
+    bypass_minimum = should_bypass_minimum(state_data, amount_kopeks)
+
+    if amount_kopeks < settings.CLOUDPAYMENTS_MIN_AMOUNT_KOPEKS and not bypass_minimum:
         min_rub = settings.CLOUDPAYMENTS_MIN_AMOUNT_KOPEKS / 100
         await message.answer(
             texts.t(
@@ -171,7 +177,7 @@ async def process_cloudpayments_payment_amount(
     await clear_state_preserve_topup_amount(state)
 
     await _create_cloudpayments_payment_and_respond(
-        message, db_user, db, amount_kopeks, edit_message=False
+        message, db_user, db, amount_kopeks, edit_message=False, state_data=state_data
     )
 
 
@@ -384,9 +390,11 @@ async def handle_cloudpayments_quick_amount(
         return
 
     amount_rub = amount_kopeks / 100
+    state_data = await state.get_data()
+    bypass_minimum = should_bypass_minimum(state_data, amount_kopeks)
 
     # Validate amount
-    if amount_kopeks < settings.CLOUDPAYMENTS_MIN_AMOUNT_KOPEKS:
+    if amount_kopeks < settings.CLOUDPAYMENTS_MIN_AMOUNT_KOPEKS and not bypass_minimum:
         await callback.answer(
             texts.t("AMOUNT_TOO_LOW_SHORT", "Сумма слишком мала"),
             show_alert=True,
@@ -417,6 +425,7 @@ async def handle_cloudpayments_quick_amount(
         description=description,
         telegram_id=db_user.telegram_id,
         language=db_user.language,
+        metadata=merge_vpn_deposit_bonus_metadata({}, db_user, state_data),
     )
 
     if not result:

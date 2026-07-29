@@ -81,7 +81,7 @@ class MonitoringService:
     SEND_AUTOPAY_USER_NOTIFICATIONS = False
     SEND_LEGACY_EXPIRED_TELEGRAM_NOTIFICATIONS = False
     SEND_LEGACY_EXPIRED_FOLLOWUPS = False
-    REMNAWAVE_SYNC_INTERVAL_MINUTES = 60
+    REMNAWAVE_SYNC_INTERVAL_MINUTES = 15
     
     def __init__(self, bot=None):
         self.is_running = False

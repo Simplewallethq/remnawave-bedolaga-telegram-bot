@@ -21,6 +21,7 @@ from app.services.tariff_partial_payment_service import (
     build_invoice_checkout_snapshot,
     extract_checkout_snapshot,
 )
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
 
@@ -43,13 +44,15 @@ class PlategaPaymentMixin:
         description: str,
         language: str,
         payment_method_code: int,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         service: Optional[PlategaService] = getattr(self, "platega_service", None)
         if not service or not service.is_configured:
             logger.error("Platega сервис не инициализирован")
             return None
 
-        if amount_kopeks < settings.PLATEGA_MIN_AMOUNT_KOPEKS:
+        is_vpn_bonus = vpn_deposit_bonus_service.is_campaign_metadata(metadata)
+        if amount_kopeks < settings.PLATEGA_MIN_AMOUNT_KOPEKS and not is_vpn_bonus:
             logger.warning(
                 "Сумма Platega меньше минимальной: %s < %s",
                 amount_kopeks,
@@ -97,6 +100,7 @@ class PlategaPaymentMixin:
             "raw_response": response,
             "language": language,
             "selected_method": payment_method_code,
+            **(metadata or {}),
         }
         snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
         if snapshot:
@@ -148,6 +152,7 @@ class PlategaPaymentMixin:
         amount_kopeks: int,
         description: str,
         language: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Создаёт платёж Platega без выбора метода — пользователь выбирает на странице Platega."""
 
@@ -156,7 +161,8 @@ class PlategaPaymentMixin:
             logger.error("Platega сервис не инициализирован")
             return None
 
-        if amount_kopeks < settings.PLATEGA_MIN_AMOUNT_KOPEKS:
+        is_vpn_bonus = vpn_deposit_bonus_service.is_campaign_metadata(metadata)
+        if amount_kopeks < settings.PLATEGA_MIN_AMOUNT_KOPEKS and not is_vpn_bonus:
             logger.warning(
                 "Сумма Platega меньше минимальной: %s < %s",
                 amount_kopeks,
@@ -203,6 +209,7 @@ class PlategaPaymentMixin:
             "raw_response": response,
             "language": language,
             "selected_method": "universal",
+            **(metadata or {}),
         }
         snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
         if snapshot:
@@ -476,11 +483,30 @@ class PlategaPaymentMixin:
 
         platega_name = settings.get_platega_display_name()
         method_display = settings.get_platega_method_display_name(payment.payment_method_code)
+        bonus_metadata = vpn_deposit_bonus_service.extract_payment_metadata(payment)
+        bonus_decision = await vpn_deposit_bonus_service.resolve_payment_decision(
+            db,
+            user_id=payment.user_id,
+            payment_amount_kopeks=payment.amount_kopeks,
+            metadata=bonus_metadata,
+        )
+        credit_amount_kopeks = (
+            bonus_decision.credit_amount_kopeks
+            if bonus_decision.is_campaign_payment
+            else payment.amount_kopeks
+        )
+        referral_amount_kopeks = (
+            bonus_decision.referral_amount_kopeks
+            if bonus_decision.is_campaign_payment
+            else credit_amount_kopeks
+        )
         description = (
             f"Пополнение через {platega_name} ({method_display})"
             if method_display
             else f"Пополнение через {platega_name}"
         )
+        if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+            description = "Бонус за первое подключение VPN: оплачено 10₽, начислено 100₽"
 
         transaction = existing_transaction
         created_transaction = False
@@ -490,7 +516,7 @@ class PlategaPaymentMixin:
                 db,
                 user_id=payment.user_id,
                 type=TransactionType.DEPOSIT,
-                amount_kopeks=payment.amount_kopeks,
+                amount_kopeks=credit_amount_kopeks,
                 description=description,
                 payment_method=PaymentMethod.PLATEGA,
                 external_id=transaction_external_id or payment.correlation_id,
@@ -514,7 +540,7 @@ class PlategaPaymentMixin:
         old_balance = user.balance_kopeks
         was_first_topup = not user.has_made_first_topup
 
-        user.balance_kopeks += payment.amount_kopeks
+        user.balance_kopeks += credit_amount_kopeks
         user.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(user)
@@ -526,7 +552,7 @@ class PlategaPaymentMixin:
             await process_referral_topup(
                 db,
                 user.id,
-                payment.amount_kopeks,
+                referral_amount_kopeks,
                 getattr(self, "bot", None),
             )
         except Exception as error:
@@ -564,6 +590,11 @@ class PlategaPaymentMixin:
 
             checkout_snapshot = extract_checkout_snapshot(payment)
             has_saved_cart = await user_cart_service.has_user_cart(user.id)
+
+            if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                has_saved_cart = False
+                checkout_snapshot = None
+
             if has_saved_cart or checkout_snapshot:
                 try:
                     auto_purchase_success = await auto_purchase_saved_cart_after_topup(
@@ -593,20 +624,32 @@ class PlategaPaymentMixin:
         # Уведомление пользователю только если автопокупка не сработала
         if not auto_purchase_success and getattr(self, "bot", None):
             try:
-                keyboard = await self.build_topup_success_keyboard(user)
-                await self.bot.send_message(
-                    user.telegram_id,
-                    format_topup_success_message(settings.format_price(payment.amount_kopeks)),
-                    parse_mode="HTML",
-                    reply_markup=keyboard,
-                )
+                if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                    await vpn_deposit_bonus_service.send_success_message(self.bot, user)
+                else:
+                    keyboard = await self.build_topup_success_keyboard(user)
+                    await self.bot.send_message(
+                        user.telegram_id,
+                        format_topup_success_message(settings.format_price(credit_amount_kopeks)),
+                        parse_mode="HTML",
+                        reply_markup=keyboard,
+                    )
             except Exception as error:
                 logger.error("Ошибка отправки уведомления пользователю Platega: %s", error)
+
+        await vpn_deposit_bonus_service.record_payment_processed(
+            db,
+            user=user,
+            transaction=transaction,
+            decision=bonus_decision,
+            provider="platega",
+        )
 
         metadata["balance_change"] = {
             "old_balance": old_balance,
             "new_balance": user.balance_kopeks,
             "credited_at": datetime.utcnow().isoformat(),
+            "credited_amount_kopeks": credit_amount_kopeks,
         }
         metadata["balance_credited"] = True
 

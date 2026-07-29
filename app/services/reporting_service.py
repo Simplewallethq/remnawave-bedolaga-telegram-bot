@@ -29,6 +29,7 @@ from app.database.models import (
     TransactionType,
     User,
 )
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 
 
 logger = logging.getLogger(__name__)
@@ -639,9 +640,19 @@ class ReportingService:
                             .values(has_connected_to_vpn=True)
                         )
                         await session.commit()
+
+                        users_result = await session.execute(
+                            select(User).where(User.id.in_(newly_connected))
+                        )
+                        for user in users_result.scalars().all():
+                            await vpn_deposit_bonus_service.on_first_vpn_connection_detected(
+                                session,
+                                user,
+                                source="reporting_vpn_connection_check",
+                            )
                     except Exception as exc:  # noqa: BLE001 - best effort
                         logger.warning(
-                            "Не удалось обновить флаги подключения к VPN: %s", exc
+                            "Не удалось обновить флаги подключения к VPN или поставить бонус: %s", exc
                         )
 
         day_map: Dict[date, RegistrationDayStats] = {}
@@ -825,4 +836,3 @@ class ReportingService:
 
 
 reporting_service = ReportingService()
-

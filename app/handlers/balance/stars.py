@@ -13,6 +13,8 @@ from app.states import BalanceStates
 from app.utils.decorators import error_handler
 from app.utils.photo_message import edit_or_answer_photo
 from app.external.telegram_stars import TelegramStarsService
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
+from .vpn_deposit_bonus import is_vpn_deposit_bonus_state
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +103,7 @@ async def process_stars_payment_amount(
         amount_rubles = amount_kopeks / 100
         stars_amount = TelegramStarsService.calculate_stars_from_rubles(amount_rubles)
         stars_rate = settings.get_stars_rate()
+        state_data = await state.get_data()
 
         payment_service = PaymentService(message.bot)
 
@@ -111,12 +114,18 @@ async def process_stars_payment_amount(
             stash_snapshot_for_stars,
         )
 
-        stars_payload = f"balance_{db_user.id}_{amount_kopeks}"
-        snapshot = await build_invoice_checkout_snapshot(db_user.id, amount_kopeks)
-        if snapshot:
-            token = await stash_snapshot_for_stars(db_user.id, snapshot)
-            if token:
-                stars_payload += f"_ts{token}"
+        if is_vpn_deposit_bonus_state(state_data):
+            stars_payload = vpn_deposit_bonus_service.build_stars_payload(
+                db_user.id,
+                amount_kopeks,
+            )
+        else:
+            stars_payload = f"balance_{db_user.id}_{amount_kopeks}"
+            snapshot = await build_invoice_checkout_snapshot(db_user.id, amount_kopeks)
+            if snapshot:
+                token = await stash_snapshot_for_stars(db_user.id, snapshot)
+                if token:
+                    stars_payload += f"_ts{token}"
 
         invoice_link = await payment_service.create_stars_invoice(
             amount_kopeks=amount_kopeks,

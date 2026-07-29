@@ -11,6 +11,8 @@ from app.localization.texts import get_texts
 from app.services.blacklist_service import blacklist_service
 from app.services.payment_service import PaymentService
 from app.utils.decorators import error_handler
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
+from .vpn_deposit_bonus import build_vpn_deposit_bonus_metadata, should_bypass_minimum
 from app.states import BalanceStates
 
 logger = logging.getLogger(__name__)
@@ -123,8 +125,10 @@ async def process_cryptobot_payment_amount(
         return
     
     amount_rubles = amount_kopeks / 100
+    data = await state.get_data()
+    bypass_minimum = should_bypass_minimum(data, amount_kopeks)
     
-    if amount_rubles < settings.CRYPTOBOT_MIN_AMOUNT:
+    if amount_rubles < settings.CRYPTOBOT_MIN_AMOUNT and not bypass_minimum:
         await message.answer(f"Минимальная сумма пополнения: {settings.CRYPTOBOT_MIN_AMOUNT} ₽")
         return
     
@@ -133,7 +137,6 @@ async def process_cryptobot_payment_amount(
         return
     
     try:
-        data = await state.get_data()
         current_rate = data.get('current_rate')
         
         if not current_rate:
@@ -144,7 +147,7 @@ async def process_cryptobot_payment_amount(
         
         amount_usd = math.ceil(amount_usd * 100) / 100
         
-        if amount_usd < settings.CRYPTOBOT_MIN_AMOUNT_USD:
+        if amount_usd < settings.CRYPTOBOT_MIN_AMOUNT_USD and not bypass_minimum:
             await message.answer(f"❌ Минимальная сумма для оплаты в USD: {settings.CRYPTOBOT_MIN_AMOUNT_USD:.2f} USD")
             return
         
@@ -152,6 +155,13 @@ async def process_cryptobot_payment_amount(
             await message.answer("❌ Максимальная сумма для оплаты в USD: 1,000 USD")
             return
         
+        bonus_metadata = build_vpn_deposit_bonus_metadata(db_user, data)
+        payment_payload = (
+            vpn_deposit_bonus_service.PURPOSE
+            if bonus_metadata
+            else f"balance_{db_user.id}_{amount_kopeks}"
+        )
+
         payment_service = PaymentService(message.bot)
         
         payment_result = await payment_service.create_cryptobot_payment(
@@ -160,8 +170,9 @@ async def process_cryptobot_payment_amount(
             amount_usd=amount_usd,
             asset=settings.CRYPTOBOT_DEFAULT_ASSET,
             description=f"Пополнение баланса на {amount_rubles:.0f} ₽ ({amount_usd:.2f} USD)",
-            payload=f"balance_{db_user.id}_{amount_kopeks}",
+            payload=payment_payload,
             amount_kopeks=amount_kopeks,
+            metadata=bonus_metadata,
         )
         
         if not payment_result:

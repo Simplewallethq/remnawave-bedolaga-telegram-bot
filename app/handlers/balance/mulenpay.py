@@ -9,6 +9,7 @@ from app.keyboards.inline import get_back_keyboard
 from app.localization.texts import get_texts
 from app.services.payment_service import PaymentService
 from app.utils.decorators import error_handler
+from .vpn_deposit_bonus import build_vpn_deposit_bonus_metadata, merge_vpn_deposit_bonus_metadata, should_bypass_minimum
 from app.states import BalanceStates
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,10 @@ async def process_mulenpay_payment_amount(
         await message.answer(f"❌ Оплата через {mulenpay_name} временно недоступна")
         return
 
-    if amount_kopeks < settings.MULENPAY_MIN_AMOUNT_KOPEKS:
+    state_data = await state.get_data()
+    bypass_minimum = should_bypass_minimum(state_data, amount_kopeks)
+
+    if amount_kopeks < settings.MULENPAY_MIN_AMOUNT_KOPEKS and not bypass_minimum:
         await message.answer(
             f"Минимальная сумма пополнения: {settings.format_price(settings.MULENPAY_MIN_AMOUNT_KOPEKS)}"
         )
@@ -97,7 +101,6 @@ async def process_mulenpay_payment_amount(
 
     amount_rubles = amount_kopeks / 100
 
-    state_data = await state.get_data()
     prompt_message_id = state_data.get("mulenpay_prompt_message_id")
     prompt_chat_id = state_data.get("mulenpay_prompt_chat_id", message.chat.id)
 
@@ -125,6 +128,7 @@ async def process_mulenpay_payment_amount(
             amount_kopeks=amount_kopeks,
             description=settings.get_balance_payment_description(amount_kopeks),
             language=db_user.language,
+            metadata=build_vpn_deposit_bonus_metadata(db_user, state_data),
         )
 
         if not payment_result or not payment_result.get("payment_url"):
@@ -207,6 +211,11 @@ async def process_mulenpay_payment_amount(
                     "chat_id": invoice_message.chat.id,
                     "message_id": invoice_message.message_id,
                 }
+                payment_metadata = merge_vpn_deposit_bonus_metadata(
+                    payment_metadata,
+                    db_user,
+                    state_data,
+                )
                 await payment_module.update_mulenpay_payment_metadata(
                     db,
                     payment=payment,

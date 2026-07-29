@@ -17,6 +17,7 @@ from app.localization.texts import get_texts
 from app.services.payment_service import PaymentService
 from app.utils.decorators import error_handler
 from app.states import BalanceStates
+from .vpn_deposit_bonus import build_vpn_deposit_bonus_metadata, merge_vpn_deposit_bonus_metadata, should_bypass_minimum
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ async def _send_pal24_payment_message(
     state: FSMContext,
 ) -> None:
     texts = get_texts(db_user.language)
+    state_data = await state.get_data()
 
     try:
         payment_service = PaymentService(message.bot)
@@ -51,6 +53,7 @@ async def _send_pal24_payment_message(
             description=settings.get_balance_payment_description(amount_kopeks),
             language=db_user.language,
             payment_method=payment_method,
+            metadata=build_vpn_deposit_bonus_metadata(db_user, state_data),
         )
 
         if not payment_result:
@@ -222,6 +225,7 @@ async def _send_pal24_payment_message(
                     "chat_id": invoice_message.chat.id,
                     "message_id": invoice_message.message_id,
                 }
+                metadata = merge_vpn_deposit_bonus_metadata(metadata, db_user, state_data)
                 await db.execute(
                     update(payment.__class__)
                     .where(payment.__class__.id == payment.id)
@@ -326,7 +330,10 @@ async def process_pal24_payment_amount(
         await message.answer("❌ Оплата через PayPalych временно недоступна")
         return
 
-    if amount_kopeks < settings.PAL24_MIN_AMOUNT_KOPEKS:
+    state_data = await state.get_data()
+    bypass_minimum = should_bypass_minimum(state_data, amount_kopeks)
+
+    if amount_kopeks < settings.PAL24_MIN_AMOUNT_KOPEKS and not bypass_minimum:
         min_rubles = settings.PAL24_MIN_AMOUNT_KOPEKS / 100
         await message.answer(f"❌ Минимальная сумма для оплаты через PayPalych: {min_rubles:.0f} ₽")
         return

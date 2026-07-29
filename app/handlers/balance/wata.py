@@ -14,6 +14,7 @@ from app.localization.texts import get_texts
 from app.services.payment_service import PaymentService, get_user_by_id as fetch_user_by_id
 from app.states import BalanceStates
 from app.utils.decorators import error_handler
+from .vpn_deposit_bonus import build_vpn_deposit_bonus_metadata, merge_vpn_deposit_bonus_metadata, should_bypass_minimum
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,10 @@ async def process_wata_payment_amount(
         await message.answer("❌ Оплата через WATA временно недоступна")
         return
 
-    if amount_kopeks < settings.WATA_MIN_AMOUNT_KOPEKS:
+    state_data = await state.get_data()
+    bypass_minimum = should_bypass_minimum(state_data, amount_kopeks)
+
+    if amount_kopeks < settings.WATA_MIN_AMOUNT_KOPEKS and not bypass_minimum:
         await message.answer(
             texts.t(
                 "WATA_AMOUNT_TOO_LOW",
@@ -107,6 +111,7 @@ async def process_wata_payment_amount(
             amount_kopeks=amount_kopeks,
             description=settings.get_balance_payment_description(amount_kopeks),
             language=db_user.language,
+            metadata=build_vpn_deposit_bonus_metadata(db_user, state_data),
         )
     except Exception as error:  # pragma: no cover - handled by decorator logs
         logger.exception("Ошибка создания WATA платежа: %s", error)
@@ -165,7 +170,6 @@ async def process_wata_payment_amount(
         payment_id=payment_link_id,
     )
 
-    state_data = await state.get_data()
     prompt_message_id = state_data.get("wata_prompt_message_id")
     prompt_chat_id = state_data.get("wata_prompt_chat_id", message.chat.id)
 
@@ -199,6 +203,7 @@ async def process_wata_payment_amount(
                 "chat_id": invoice_message.chat.id,
                 "message_id": invoice_message.message_id,
             }
+            metadata = merge_vpn_deposit_bonus_metadata(metadata, db_user, state_data)
             await db.execute(
                 update(payment.__class__)
                 .where(payment.__class__.id == payment.id)

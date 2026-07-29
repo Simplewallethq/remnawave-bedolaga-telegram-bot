@@ -14,6 +14,7 @@ from app.services.blacklist_service import blacklist_service
 from app.services.payment_service import PaymentService
 from app.utils.decorators import error_handler
 from app.states import BalanceStates
+from .vpn_deposit_bonus import merge_vpn_deposit_bonus_metadata, should_bypass_minimum
 
 logger = logging.getLogger(__name__)
 
@@ -153,12 +154,14 @@ async def process_yookassa_payment_amount(
         return
 
     texts = get_texts(db_user.language)
+    state_data = await state.get_data()
+    bypass_minimum = should_bypass_minimum(state_data, amount_kopeks)
 
     if not settings.is_yookassa_enabled():
         await message.answer("❌ Оплата через YooKassa временно недоступна")
         return
     
-    if amount_kopeks < settings.YOOKASSA_MIN_AMOUNT_KOPEKS:
+    if amount_kopeks < settings.YOOKASSA_MIN_AMOUNT_KOPEKS and not bypass_minimum:
         min_rubles = settings.YOOKASSA_MIN_AMOUNT_KOPEKS / 100
         await message.answer(f"❌ Минимальная сумма для оплаты картой: {min_rubles:.0f} ₽")
         return
@@ -178,11 +181,11 @@ async def process_yookassa_payment_amount(
             description=settings.get_balance_payment_description(amount_kopeks, telegram_user_id=db_user.telegram_id),
             receipt_email=None,
             receipt_phone=None,
-            metadata={
+            metadata=merge_vpn_deposit_bonus_metadata({
                 "user_telegram_id": str(db_user.telegram_id),
                 "user_username": db_user.username or "",
                 "purpose": "balance_topup"
-            }
+            }, db_user, state_data)
         )
         
         if not payment_result:
@@ -301,12 +304,14 @@ async def process_yookassa_sbp_payment_amount(
         return
 
     texts = get_texts(db_user.language)
+    state_data = await state.get_data()
+    bypass_minimum = should_bypass_minimum(state_data, amount_kopeks)
 
     if not settings.is_yookassa_enabled() or not settings.YOOKASSA_SBP_ENABLED:
         await message.answer("❌ Оплата через СБП временно недоступна")
         return
     
-    if amount_kopeks < settings.YOOKASSA_MIN_AMOUNT_KOPEKS:
+    if amount_kopeks < settings.YOOKASSA_MIN_AMOUNT_KOPEKS and not bypass_minimum:
         min_rubles = settings.YOOKASSA_MIN_AMOUNT_KOPEKS / 100
         await message.answer(f"❌ Минимальная сумма для оплаты через СБП: {min_rubles:.0f} ₽")
         return
@@ -326,11 +331,11 @@ async def process_yookassa_sbp_payment_amount(
             description=settings.get_balance_payment_description(amount_kopeks, telegram_user_id=db_user.telegram_id),
             receipt_email=None,
             receipt_phone=None,
-            metadata={
+            metadata=merge_vpn_deposit_bonus_metadata({
                 "user_telegram_id": str(db_user.telegram_id),
                 "user_username": db_user.username or "",
                 "purpose": "balance_topup_sbp"
-            }
+            }, db_user, state_data)
         )
         
         if not payment_result:

@@ -21,6 +21,7 @@ from app.services.tariff_partial_payment_service import (
     build_invoice_checkout_snapshot,
     extract_checkout_snapshot,
 )
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
 
@@ -41,6 +42,7 @@ class Pal24PaymentMixin:
         ttl_seconds: Optional[int] = None,
         payer_email: Optional[str] = None,
         payment_method: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Создаёт счёт в Pal24 и сохраняет локальную запись."""
         service = getattr(self, "pal24_service", None)
@@ -48,7 +50,8 @@ class Pal24PaymentMixin:
             logger.error("Pal24 сервис не инициализирован")
             return None
 
-        if amount_kopeks < settings.PAL24_MIN_AMOUNT_KOPEKS:
+        is_vpn_bonus = vpn_deposit_bonus_service.is_campaign_metadata(metadata)
+        if amount_kopeks < settings.PAL24_MIN_AMOUNT_KOPEKS and not is_vpn_bonus:
             logger.warning(
                 "Сумма Pal24 меньше минимальной: %s < %s",
                 amount_kopeks,
@@ -158,6 +161,7 @@ class Pal24PaymentMixin:
             "links": metadata_links,
             "raw_response": response,
             "selected_method": normalized_payment_method,
+            **(metadata or {}),
         }
         snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
         if snapshot:
@@ -395,12 +399,33 @@ class Pal24PaymentMixin:
             )
             return False
 
+        bonus_metadata = vpn_deposit_bonus_service.extract_payment_metadata(payment)
+        bonus_decision = await vpn_deposit_bonus_service.resolve_payment_decision(
+            db,
+            user_id=payment.user_id,
+            payment_amount_kopeks=payment.amount_kopeks,
+            metadata=bonus_metadata,
+        )
+        credit_amount_kopeks = (
+            bonus_decision.credit_amount_kopeks
+            if bonus_decision.is_campaign_payment
+            else payment.amount_kopeks
+        )
+        referral_amount_kopeks = (
+            bonus_decision.referral_amount_kopeks
+            if bonus_decision.is_campaign_payment
+            else credit_amount_kopeks
+        )
+        description = f"Пополнение через Pal24 ({payment_id or payment.bill_id})"
+        if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+            description = "Бонус за первое подключение VPN: оплачено 10₽, начислено 100₽"
+
         transaction = await payment_module.create_transaction(
             db,
             user_id=payment.user_id,
             type=TransactionType.DEPOSIT,
-            amount_kopeks=payment.amount_kopeks,
-            description=f"Пополнение через Pal24 ({payment_id or payment.bill_id})",
+            amount_kopeks=credit_amount_kopeks,
+            description=description,
             payment_method=PaymentMethod.PAL24,
             external_id=str(payment_id) if payment_id else payment.bill_id,
             is_completed=True,
@@ -411,7 +436,7 @@ class Pal24PaymentMixin:
         old_balance = user.balance_kopeks
         was_first_topup = not user.has_made_first_topup
 
-        user.balance_kopeks += payment.amount_kopeks
+        user.balance_kopeks += credit_amount_kopeks
         user.updated_at = datetime.utcnow()
 
         promo_group = user.get_primary_promo_group()
@@ -425,7 +450,7 @@ class Pal24PaymentMixin:
             from app.services.referral_service import process_referral_topup
 
             await process_referral_topup(
-                db, user.id, payment.amount_kopeks, getattr(self, "bot", None)
+                db, user.id, referral_amount_kopeks, getattr(self, "bot", None)
             )
         except Exception as error:
             logger.error(
@@ -471,6 +496,9 @@ class Pal24PaymentMixin:
 
             checkout_snapshot = extract_checkout_snapshot(payment)
             has_saved_cart = await user_cart_service.has_user_cart(user.id)
+            if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                has_saved_cart = False
+                checkout_snapshot = None
             if has_saved_cart or checkout_snapshot:
                 try:
                     auto_purchase_success = await auto_purchase_saved_cart_after_topup(
@@ -500,18 +528,29 @@ class Pal24PaymentMixin:
         # Уведомление пользователю только если автопокупка не сработала
         if not auto_purchase_success and getattr(self, "bot", None):
             try:
-                keyboard = await self.build_topup_success_keyboard(user)
-                await self.bot.send_message(
-                    user.telegram_id,
-                    format_topup_success_message(settings.format_price(payment.amount_kopeks)),
-                    parse_mode="HTML",
-                    reply_markup=keyboard,
-                )
+                if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                    await vpn_deposit_bonus_service.send_success_message(self.bot, user)
+                else:
+                    keyboard = await self.build_topup_success_keyboard(user)
+                    await self.bot.send_message(
+                        user.telegram_id,
+                        format_topup_success_message(settings.format_price(credit_amount_kopeks)),
+                        parse_mode="HTML",
+                        reply_markup=keyboard,
+                    )
             except Exception as error:
                 logger.error(
                     "Ошибка отправки уведомления пользователю Pal24: %s",
                     error,
                 )
+
+        await vpn_deposit_bonus_service.record_payment_processed(
+            db,
+            user=user,
+            transaction=transaction,
+            decision=bonus_decision,
+            provider="pal24",
+        )
 
         logger.info(
             "✅ Обработан Pal24 платеж %s для пользователя %s (trigger=%s)",

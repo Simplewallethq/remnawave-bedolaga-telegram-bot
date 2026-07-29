@@ -21,6 +21,7 @@ from app.keyboards.inline import (
 )
 from app.localization.texts import get_texts
 from app.services.payment_service import PaymentService
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 from app.utils.success_notifications import (
     build_success_management_keyboard,
     format_topup_success_message,
@@ -379,6 +380,49 @@ async def handle_payment_methods_unavailable(
 
 
 @error_handler
+async def show_vpn_deposit_bonus_payment_methods(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+    state: FSMContext,
+):
+    campaign_metadata = await vpn_deposit_bonus_service.get_payable_campaign_metadata(
+        db,
+        db_user.id,
+    )
+    if not campaign_metadata:
+        await callback.answer("Предложение уже истекло", show_alert=True)
+        return
+
+    await state.clear()
+    await state.update_data(
+        topup_amount_kopeks=vpn_deposit_bonus_service.INVOICE_AMOUNT_KOPEKS,
+        topup_purpose=vpn_deposit_bonus_service.PURPOSE,
+        vpn_deposit_bonus_metadata=campaign_metadata,
+        payment_method="select_after",
+    )
+
+    texts = get_texts(db_user.language)
+    prompt = (
+        "💳 <b>Бонус 100₽ на баланс</b>\n\n"
+        "Сумма к оплате: 10₽\n"
+        "После успешной оплаты начислим 100₽ на баланс.\n\n"
+        "Выберите способ оплаты:"
+    )
+    keyboard = get_payment_methods_keyboard(
+        vpn_deposit_bonus_service.INVOICE_AMOUNT_KOPEKS,
+        db_user.language,
+        include_tribute=False,
+    )
+
+    try:
+        await callback.message.edit_text(prompt, reply_markup=keyboard, parse_mode="HTML")
+    except TelegramBadRequest:
+        await callback.message.answer(prompt, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@error_handler
 async def handle_successful_topup_with_cart(
     user_id: int,
     amount_kopeks: int,
@@ -525,7 +569,9 @@ async def process_topup_amount(
         data = await state.get_data()
         payment_method = data.get("payment_method", "stars")
         
-        if payment_method in ["yookassa", "yookassa_sbp"]:
+        is_vpn_bonus = data.get("topup_purpose") == vpn_deposit_bonus_service.PURPOSE
+
+        if payment_method in ["yookassa", "yookassa_sbp"] and not is_vpn_bonus:
             if amount_kopeks < settings.YOOKASSA_MIN_AMOUNT_KOPEKS:
                 min_rubles = settings.YOOKASSA_MIN_AMOUNT_KOPEKS / 100
                 await message.answer(f"❌ Минимальная сумма для оплаты через YooKassa: {min_rubles:.0f} ₽")
@@ -903,6 +949,11 @@ def register_balance_handlers(dp: Dispatcher):
     dp.callback_query.register(
         handle_balance_topup_reset,
         F.data == "balance_topup_reset"
+    )
+
+    dp.callback_query.register(
+        show_vpn_deposit_bonus_payment_methods,
+        F.data == "10rub_vpn_deposit_bonus:pay",
     )
     
     from .stars import start_stars_payment
