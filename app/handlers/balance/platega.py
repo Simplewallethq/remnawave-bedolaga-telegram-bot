@@ -14,6 +14,7 @@ from app.localization.texts import get_texts
 from app.services.payment_service import PaymentService
 from app.states import BalanceStates
 from app.utils.decorators import error_handler
+from .vpn_deposit_bonus import build_vpn_deposit_bonus_metadata, merge_vpn_deposit_bonus_metadata, should_bypass_minimum
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +250,9 @@ async def process_platega_payment_amount(
         await state.set_state(BalanceStates.waiting_for_platega_method)
         return
 
-    if amount_kopeks < settings.PLATEGA_MIN_AMOUNT_KOPEKS:
+    bypass_minimum = should_bypass_minimum(data, amount_kopeks)
+
+    if amount_kopeks < settings.PLATEGA_MIN_AMOUNT_KOPEKS and not bypass_minimum:
         await message.answer(
             texts.t(
                 "PLATEGA_AMOUNT_TOO_LOW",
@@ -276,6 +279,7 @@ async def process_platega_payment_amount(
             description=settings.get_balance_payment_description(amount_kopeks),
             language=db_user.language,
             payment_method_code=method_code,
+            metadata=build_vpn_deposit_bonus_metadata(db_user, data),
         )
     except Exception as error:
         logger.exception("Ошибка создания платежа Platega: %s", error)
@@ -365,6 +369,11 @@ async def process_platega_payment_amount(
                 "chat_id": invoice_message.chat.id,
                 "message_id": invoice_message.message_id,
             }
+            payment_metadata = merge_vpn_deposit_bonus_metadata(
+                payment_metadata,
+                db_user,
+                state_data,
+            )
             await payment_module.update_platega_payment(
                 db,
                 payment=payment,
@@ -500,7 +509,10 @@ async def process_platega_universal_payment_amount(
         )
         return
 
-    if amount_kopeks < settings.PLATEGA_MIN_AMOUNT_KOPEKS:
+    state_data = await state.get_data()
+    bypass_minimum = should_bypass_minimum(state_data, amount_kopeks)
+
+    if amount_kopeks < settings.PLATEGA_MIN_AMOUNT_KOPEKS and not bypass_minimum:
         await message.answer(
             texts.t(
                 "PLATEGA_AMOUNT_TOO_LOW",
@@ -526,6 +538,7 @@ async def process_platega_universal_payment_amount(
             amount_kopeks=amount_kopeks,
             description=settings.get_balance_payment_description(amount_kopeks),
             language=db_user.language,
+            metadata=build_vpn_deposit_bonus_metadata(db_user, state_data),
         )
     except Exception as error:
         logger.exception("Ошибка создания универсального платежа Platega: %s", error)
@@ -622,6 +635,11 @@ async def process_platega_universal_payment_amount(
                 "chat_id": invoice_message.chat.id,
                 "message_id": invoice_message.message_id,
             }
+            payment_metadata = merge_vpn_deposit_bonus_metadata(
+                payment_metadata,
+                db_user,
+                state_data,
+            )
             await payment_module.update_platega_payment(
                 db,
                 payment=payment,

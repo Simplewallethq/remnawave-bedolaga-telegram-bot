@@ -20,6 +20,7 @@ from app.utils.pricing_utils import (
 from app.utils.subscription_utils import (
     resolve_hwid_device_limit_for_payload,
 )
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 
 logger = logging.getLogger(__name__)
 
@@ -486,6 +487,19 @@ class SubscriptionService:
                         remnawave_user.used_traffic_bytes,
                         remnawave_user.lifetime_used_traffic_bytes,
                     )
+                    try:
+                        await vpn_deposit_bonus_service.on_first_vpn_connection_detected(
+                            db,
+                            user,
+                            source="subscription_usage_sync",
+                            panel_first_connected_at=remnawave_user.first_connected_at,
+                        )
+                    except Exception as bonus_error:
+                        logger.error(
+                            "Не удалось поставить бонус первого VPN-подключения для пользователя %s: %s",
+                            user.telegram_id,
+                            bonus_error,
+                        )
                 
                 await db.commit()
                 

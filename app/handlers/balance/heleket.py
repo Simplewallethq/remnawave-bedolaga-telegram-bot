@@ -14,6 +14,7 @@ from app.localization.texts import get_texts
 from app.services.payment_service import PaymentService
 from app.states import BalanceStates
 from app.utils.decorators import error_handler
+from .vpn_deposit_bonus import build_vpn_deposit_bonus_metadata, merge_vpn_deposit_bonus_metadata, should_bypass_minimum
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +92,10 @@ async def process_heleket_payment_amount(
         return
 
     amount_rubles = amount_kopeks / 100
+    state_data = await state.get_data()
+    bypass_minimum = should_bypass_minimum(state_data, amount_kopeks)
 
-    if amount_rubles < 100:
+    if amount_rubles < 100 and not bypass_minimum:
         await message.answer("Минимальная сумма пополнения: 100 ₽")
         return
 
@@ -108,6 +111,7 @@ async def process_heleket_payment_amount(
         amount_kopeks=amount_kopeks,
         description=f"Пополнение баланса на {amount_rubles:.0f} ₽",
         language=db_user.language,
+        metadata=build_vpn_deposit_bonus_metadata(db_user, state_data),
     )
 
     if not result:
@@ -187,7 +191,6 @@ async def process_heleket_payment_amount(
         [types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")],
     ])
 
-    state_data = await state.get_data()
     prompt_message_id = state_data.get("heleket_prompt_message_id")
     prompt_chat_id = state_data.get("heleket_prompt_chat_id", message.chat.id)
 
@@ -219,6 +222,7 @@ async def process_heleket_payment_amount(
                 "chat_id": invoice_message.chat.id,
                 "message_id": invoice_message.message_id,
             }
+            metadata = merge_vpn_deposit_bonus_metadata(metadata, db_user, state_data)
             await db.execute(
                 update(payment.__class__)
                 .where(payment.__class__.id == payment.id)

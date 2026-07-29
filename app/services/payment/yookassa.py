@@ -25,6 +25,7 @@ from app.services.tariff_partial_payment_service import (
     build_invoice_checkout_snapshot,
     extract_checkout_snapshot,
 )
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 from app.utils.success_notifications import (
     build_success_management_keyboard,
     format_subscription_purchase_success,
@@ -573,6 +574,23 @@ class YooKassaPaymentMixin:
 
             payment_purpose = payment_metadata.get("payment_purpose", "")
             is_simple_subscription = payment_purpose == "simple_subscription_purchase"
+            bonus_metadata = vpn_deposit_bonus_service.extract_payment_metadata(payment_metadata)
+            bonus_decision = await vpn_deposit_bonus_service.resolve_payment_decision(
+                db,
+                user_id=payment.user_id,
+                payment_amount_kopeks=payment.amount_kopeks,
+                metadata=bonus_metadata,
+            )
+            credit_amount_kopeks = (
+                bonus_decision.credit_amount_kopeks
+                if bonus_decision.is_campaign_payment
+                else payment.amount_kopeks
+            )
+            referral_amount_kopeks = (
+                bonus_decision.referral_amount_kopeks
+                if bonus_decision.is_campaign_payment
+                else credit_amount_kopeks
+            )
 
             transaction_type = (
                 TransactionType.SUBSCRIPTION_PAYMENT
@@ -584,13 +602,15 @@ class YooKassaPaymentMixin:
                 if is_simple_subscription
                 else f"Пополнение через YooKassa: {payment_description}"
             )
+            if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                transaction_description = "Бонус за первое подключение VPN: оплачено 10₽, начислено 100₽"
 
             if transaction is None:
                 transaction = await payment_module.create_transaction(
                     db=db,
                     user_id=payment.user_id,
                     type=transaction_type,
-                    amount_kopeks=payment.amount_kopeks,
+                    amount_kopeks=credit_amount_kopeks,
                     description=transaction_description,
                     payment_method=PaymentMethod.YOOKASSA,
                     external_id=payment.yookassa_payment_id,
@@ -624,7 +644,7 @@ class YooKassaPaymentMixin:
                     old_balance = getattr(user, "balance_kopeks", 0)
                     was_first_topup = not getattr(user, "has_made_first_topup", False)
 
-                    user.balance_kopeks += payment.amount_kopeks
+                    user.balance_kopeks += credit_amount_kopeks
                     user.updated_at = datetime.utcnow()
 
                     # Обновляем пользователя с нужными связями, чтобы избежать проблем с ленивой загрузкой
@@ -668,7 +688,7 @@ class YooKassaPaymentMixin:
                         await process_referral_topup(
                             db,
                             user.id,
-                            payment.amount_kopeks,
+                            referral_amount_kopeks,
                             getattr(self, "bot", None),
                         )
                     except Exception as error:
@@ -727,6 +747,10 @@ class YooKassaPaymentMixin:
                             has_saved_cart,
                         )
 
+                        if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                            has_saved_cart = False
+                            checkout_snapshot = None
+
                         if has_saved_cart or checkout_snapshot:
                             try:
                                 auto_purchase_success = await auto_purchase_saved_cart_after_topup(
@@ -761,13 +785,16 @@ class YooKassaPaymentMixin:
                     # Отправляем уведомление пользователю только если автопокупка не сработала
                     if not auto_purchase_success and getattr(self, "bot", None):
                         try:
-                            await self._send_payment_success_notification(
-                                user.telegram_id,
-                                payment.amount_kopeks,
-                                user=None,
-                                db=db,
-                                payment_method_title="Банковская карта (YooKassa)",
-                            )
+                            if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                                await vpn_deposit_bonus_service.send_success_message(self.bot, user)
+                            else:
+                                await self._send_payment_success_notification(
+                                    user.telegram_id,
+                                    credit_amount_kopeks,
+                                    user=None,
+                                    db=db,
+                                    payment_method_title="Банковская карта (YooKassa)",
+                                )
                             logger.info("Уведомление пользователю о платеже отправлено успешно")
                         except Exception as error:
                             logger.error(
@@ -775,6 +802,14 @@ class YooKassaPaymentMixin:
                                 error,
                                 exc_info=True,
                             )
+
+                    await vpn_deposit_bonus_service.record_payment_processed(
+                        db,
+                        user=user,
+                        transaction=transaction,
+                        decision=bonus_decision,
+                        provider="yookassa",
+                    )
 
                 if is_simple_subscription:
                     logger.info(f"Обнаружен платеж простой покупки подписки для пользователя {user.id}")

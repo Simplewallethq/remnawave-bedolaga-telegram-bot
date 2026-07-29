@@ -35,9 +35,9 @@ class DummyBot:
         self.calls.append(kwargs)
         return "https://t.me/invoice/stars"
 
-    async def send_message(self, **kwargs: Any) -> None:
+    async def send_message(self, *args: Any, **kwargs: Any) -> None:
         """Фиксируем отправленные сообщения пользователю."""
-        self.sent_messages.append(kwargs)
+        self.sent_messages.append({"args": args, **kwargs})
 
 
 def _make_service(bot: Optional[DummyBot]) -> PaymentService:
@@ -105,11 +105,15 @@ class DummyUser:
         self.promo_group = None
         self.subscription = None
 
+    def get_primary_promo_group(self) -> Any:
+        return self.promo_group
+
 
 class DummyTransaction:
     """Локальная транзакция, созданная в тестах."""
 
     def __init__(self, external_id: str) -> None:
+        self.id = 1
         self.external_id = external_id
 
 
@@ -425,3 +429,110 @@ async def test_process_stars_payment_saved_cart_does_not_send_cart_reminder(
     assert service._last_auto_purchase_success is False
     auto_purchase_mock.assert_awaited_once()
     assert bot.sent_messages == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_process_stars_vpn_bonus_counts_as_first_topup_and_referral(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
+
+    bot = DummyBot()
+    service = _make_service(bot)
+    db = DummySession(DummySubscription(subscription_id=1))
+    user = DummyUser(user_id=18835, telegram_id=4200)
+    created_transactions: list[Dict[str, Any]] = []
+
+    async def fake_create_transaction(**kwargs: Any) -> DummyTransaction:
+        created_transactions.append(kwargs)
+        return DummyTransaction(external_id=kwargs.get("external_id", ""))
+
+    async def fake_get_user_by_id(_db: Any, _user_id: int) -> DummyUser:
+        return user
+
+    class AdminNotificationStub:
+        def __init__(self, _bot: Any) -> None:
+            self.bot = _bot
+
+        async def send_balance_topup_notification(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    referral_mock = AsyncMock()
+    auto_purchase_mock = AsyncMock(return_value=False)
+    record_payment_mock = AsyncMock()
+
+    monkeypatch.setattr(
+        "app.services.payment.stars.create_transaction",
+        fake_create_transaction,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.payment.stars.get_user_by_id",
+        fake_get_user_by_id,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.payment.stars.TelegramStarsService.calculate_rubles_from_stars",
+        lambda stars: Decimal("10"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.user_cart_service.user_cart_service.has_user_cart",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        "app.services.payment.stars.auto_purchase_saved_cart_after_topup",
+        auto_purchase_mock,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.admin_notification_service.AdminNotificationService",
+        AdminNotificationStub,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.referral_service.process_referral_topup",
+        referral_mock,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        vpn_deposit_bonus_service,
+        "was_paid",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        vpn_deposit_bonus_service,
+        "record_payment_processed",
+        record_payment_mock,
+    )
+
+    result = await service.process_stars_payment(
+        db=db,
+        user_id=user.id,
+        stars_amount=1,
+        payload=vpn_deposit_bonus_service.build_stars_payload(
+            user.id,
+            vpn_deposit_bonus_service.INVOICE_AMOUNT_KOPEKS,
+        ),
+        telegram_payment_charge_id="charge-vpn-bonus",
+    )
+
+    assert result is True
+    assert created_transactions[0]["amount_kopeks"] == vpn_deposit_bonus_service.BONUS_AMOUNT_KOPEKS
+    assert user.balance_kopeks == vpn_deposit_bonus_service.BONUS_AMOUNT_KOPEKS
+    assert user.has_made_first_topup is True
+    referral_mock.assert_awaited_once_with(
+        db,
+        user.id,
+        vpn_deposit_bonus_service.INVOICE_AMOUNT_KOPEKS,
+        bot,
+    )
+    auto_purchase_mock.assert_not_awaited()
+    record_payment_mock.assert_awaited_once()
+    message_texts = [
+        message.get("text") or (message["args"][1] if len(message["args"]) > 1 else "")
+        for message in bot.sent_messages
+    ]
+    assert any("✅ Готово! На балансе 100₽" in text for text in message_texts)
+    assert not any("✅ <b>Платёж прошёл</b>" in text for text in message_texts)
+    assert not any("пополнение баланса не активирует подписку" in text for text in message_texts)

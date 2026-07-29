@@ -43,6 +43,7 @@ from app.utils.subscription_utils import (
     resolve_hwid_device_limit_for_payload,
 )
 from app.utils.timezone import get_local_timezone
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,37 @@ def _panel_user_has_vpn_connection_signal(panel_user: Dict[str, Any]) -> bool:
         or _get_user_traffic_bytes(panel_user) > 0
         or _get_lifetime_traffic_bytes(panel_user) > 0
     )
+
+
+def _get_panel_first_connected_at(panel_user: Dict[str, Any]) -> Optional[Any]:
+    user_traffic = panel_user.get('userTraffic')
+    if user_traffic and isinstance(user_traffic, dict):
+        first_connected_at = user_traffic.get('firstConnectedAt')
+        if first_connected_at:
+            return first_connected_at
+    return panel_user.get('firstConnectedAt')
+
+
+async def _queue_vpn_deposit_bonus_safely(
+    db: AsyncSession,
+    user: User,
+    *,
+    source: str,
+    panel_first_connected_at: Optional[Any] = None,
+) -> None:
+    try:
+        await vpn_deposit_bonus_service.on_first_vpn_connection_detected(
+            db,
+            user,
+            source=source,
+            panel_first_connected_at=panel_first_connected_at,
+        )
+    except Exception as bonus_error:
+        logger.error(
+            "Не удалось поставить бонус первого VPN-подключения для пользователя %s: %s",
+            getattr(user, "telegram_id", None),
+            bonus_error,
+        )
 
 
 _UUID_MAP_MISSING = object()
@@ -314,6 +346,21 @@ class RemnaWaveService:
 
             rowcount = getattr(update_result, "rowcount", None)
             stats["updated"] += rowcount if isinstance(rowcount, int) and rowcount >= 0 else len(user_ids)
+
+            try:
+                users_result = await db.execute(select(User).where(User.id.in_(user_ids)))
+                for user in users_result.scalars().all():
+                    await _queue_vpn_deposit_bonus_safely(
+                        db,
+                        user,
+                        source="remnawave_batch_sync",
+                    )
+            except Exception as bonus_error:
+                logger.error(
+                    "Не удалось поставить бонус первого VPN-подключения для batch users %s: %s",
+                    user_ids,
+                    bonus_error,
+                )
 
         pending_updates: List[int] = []
         start = 0
@@ -1727,6 +1774,12 @@ class RemnaWaveService:
                     used_traffic_bytes,
                     _get_lifetime_traffic_bytes(panel_user),
                 )
+                await _queue_vpn_deposit_bonus_safely(
+                    db,
+                    user,
+                    source="panel_subscription_create_sync",
+                    panel_first_connected_at=_get_panel_first_connected_at(panel_user),
+                )
 
             active_squads = panel_user.get('activeInternalSquads', [])
             squad_uuids = []
@@ -1839,6 +1892,12 @@ class RemnaWaveService:
                     user.telegram_id,
                     used_traffic_bytes,
                     _get_lifetime_traffic_bytes(panel_user),
+                )
+                await _queue_vpn_deposit_bonus_safely(
+                    db,
+                    user,
+                    source="panel_subscription_update_sync",
+                    panel_first_connected_at=_get_panel_first_connected_at(panel_user),
                 )
 
             if abs(subscription.traffic_used_gb - traffic_used_gb) > 0.01:

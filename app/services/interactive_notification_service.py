@@ -22,6 +22,7 @@ from app.services.expired_subscription_offer_service import (
     expired_subscription_offer_service,
 )
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,14 @@ class InteractiveNotificationService:
         InteractiveNotificationSlot(
             expired_subscription_offer_service.FOURTH_EVENING_SLOT_KEY,
             datetime_time(hour=21, minute=0),
+        ),
+        InteractiveNotificationSlot(
+            vpn_deposit_bonus_service.TOUCH_1_SLOT,
+            interval=timedelta(minutes=1),
+        ),
+        InteractiveNotificationSlot(
+            vpn_deposit_bonus_service.TOUCH_2_SLOT,
+            datetime_time(hour=22, minute=0),
         ),
         *(
             InteractiveNotificationSlot(key, run_at.timetz().replace(tzinfo=None), run_at)
@@ -338,6 +347,12 @@ class InteractiveNotificationService:
 
         if slot.key in expired_subscription_offer_service.SLOT_KEYS:
             return await self._send_expired_subscription_touch(slot)
+
+        if slot.key == vpn_deposit_bonus_service.TOUCH_1_SLOT:
+            return await self._send_vpn_deposit_bonus_first_touch(slot)
+
+        if slot.key == vpn_deposit_bonus_service.TOUCH_2_SLOT:
+            return await self._send_vpn_deposit_bonus_second_touch(slot)
 
         if legacy_pro_offer_service.get_message_for_slot(slot.key):
             return await self._send_legacy_pro_offer_touch(slot)
@@ -655,6 +670,182 @@ class InteractiveNotificationService:
             logger.error(
                 "Не удалось отправить Segment B пользователю %s: %s",
                 candidate.user.telegram_id,
+                exc,
+            )
+            return None
+        return sent_message.message_id
+
+    async def _send_vpn_deposit_bonus_first_touch(
+        self,
+        slot: InteractiveNotificationSlot,
+    ) -> InteractiveNotificationResult:
+        if not self.bot:
+            return InteractiveNotificationResult(status="skipped", error="Bot instance is not available")
+
+        sent = 0
+        failed = 0
+        skipped = 0
+        now = datetime.utcnow()
+
+        async with AsyncSessionLocal() as db:
+            after_log_id = 0
+            while True:
+                queued_logs = await vpn_deposit_bonus_service.list_touch_1_queue(
+                    db,
+                    now_utc=now,
+                    after_log_id=after_log_id,
+                    limit=self.BATCH_LIMIT,
+                )
+                if not queued_logs:
+                    break
+
+                after_log_id = max(log.id for log in queued_logs)
+                for log in queued_logs:
+                    payload = log.payload if isinstance(log.payload, dict) else {}
+                    campaign_key = str(payload.get("campaign_key") or "")
+                    if await vpn_deposit_bonus_service.was_paid(db, log.user_id, campaign_key):
+                        skipped += 1
+                        continue
+
+                    user = await self._get_active_user(db, log.user_id)
+                    if not user or not user.telegram_id:
+                        skipped += 1
+                        continue
+
+                    message_id = await self._send_vpn_deposit_bonus_message(
+                        user.telegram_id,
+                        first_touch=True,
+                    )
+                    if message_id:
+                        sent += 1
+                        log.telegram_id = user.telegram_id
+                        await vpn_deposit_bonus_service.mark_touch_sent(
+                            db,
+                            log,
+                            message_id=message_id,
+                            action="sent_touch_1",
+                        )
+                    else:
+                        failed += 1
+                        log.status = "failed"
+                        log.error = "send_message_failed"
+                        await db.commit()
+
+        return InteractiveNotificationResult(
+            status="processed",
+            payload={"sent": sent, "failed": failed, "skipped": skipped},
+        )
+
+    async def _send_vpn_deposit_bonus_second_touch(
+        self,
+        slot: InteractiveNotificationSlot,
+    ) -> InteractiveNotificationResult:
+        if not self.bot:
+            return InteractiveNotificationResult(status="skipped", error="Bot instance is not available")
+
+        sent = 0
+        failed = 0
+        skipped = 0
+        now = datetime.utcnow()
+
+        async with AsyncSessionLocal() as db:
+            after_log_id = 0
+            while True:
+                candidates = await vpn_deposit_bonus_service.list_touch_2_candidates(
+                    db,
+                    now_utc=now,
+                    after_log_id=after_log_id,
+                    limit=self.BATCH_LIMIT,
+                )
+                if not candidates:
+                    break
+
+                after_log_id = max(log.id for log in candidates)
+                for touch_1_log in candidates:
+                    user = await self._get_active_user(db, touch_1_log.user_id)
+                    if not user or not user.telegram_id:
+                        skipped += 1
+                        continue
+
+                    touch_2_log = await vpn_deposit_bonus_service.create_touch_2_log(db, touch_1_log)
+                    message_id = await self._send_vpn_deposit_bonus_message(
+                        user.telegram_id,
+                        first_touch=False,
+                    )
+                    if message_id:
+                        sent += 1
+                        touch_2_log.telegram_id = user.telegram_id
+                        await vpn_deposit_bonus_service.mark_touch_sent(
+                            db,
+                            touch_2_log,
+                            message_id=message_id,
+                            action="sent_touch_2",
+                        )
+                    else:
+                        failed += 1
+                        touch_2_log.status = "failed"
+                        touch_2_log.error = "send_message_failed"
+                        await db.commit()
+
+        return InteractiveNotificationResult(
+            status="processed",
+            payload={"sent": sent, "failed": failed, "skipped": skipped},
+        )
+
+    async def _get_active_user(self, db, user_id: Optional[int]) -> Optional[User]:
+        if not user_id:
+            return None
+        result = await db.execute(
+            select(User).where(User.id == user_id, User.status == "active")
+        )
+        return result.scalar_one_or_none()
+
+    async def _send_vpn_deposit_bonus_message(
+        self,
+        telegram_id: int,
+        *,
+        first_touch: bool,
+    ) -> Optional[int]:
+        if not self.bot:
+            return None
+
+        if first_touch:
+            text = (
+                "🎉 Готово, ты подключён!\n\n"
+                "Держи бонус: внеси 10₽ и получи 100₽ на баланс.\n"
+                "(любая первая покупка будет на 100₽ дешевле)\n\n"
+                "⏰ Предложение активно до 23:59 MSK."
+            )
+        else:
+            text = (
+                "🎉 Забирай 100₽ на баланс.\n\n"
+                "Напоминаем про бонус: внеси 10₽ и получи 100₽ на баланс.\n\n"
+                "⏰ Предложение активно еще 2 часа - до 23:59 MSK."
+            )
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Внести 10₽ и получить 100₽",
+                        callback_data="10rub_vpn_deposit_bonus:pay",
+                    )
+                ]
+            ]
+        )
+
+        try:
+            sent_message = await self.bot.send_message(
+                int(telegram_id),
+                text,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Не удалось отправить %s пользователю %s: %s",
+                vpn_deposit_bonus_service.PURPOSE,
+                telegram_id,
                 exc,
             )
             return None

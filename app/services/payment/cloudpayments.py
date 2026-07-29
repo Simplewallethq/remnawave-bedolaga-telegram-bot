@@ -21,6 +21,7 @@ from app.services.tariff_partial_payment_service import (
     extract_checkout_snapshot,
 )
 from app.services.cloudpayments_service import CloudPaymentsAPIError, CloudPaymentsService
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 from app.utils.user_utils import format_referrer_info
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ class CloudPaymentsPaymentMixin:
         telegram_id: int,
         language: Optional[str] = None,
         email: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create a CloudPayments payment and return payment link info.
@@ -59,7 +61,8 @@ class CloudPaymentsPaymentMixin:
             logger.error("CloudPayments service is not initialised")
             return None
 
-        if amount_kopeks < settings.CLOUDPAYMENTS_MIN_AMOUNT_KOPEKS:
+        is_vpn_bonus = vpn_deposit_bonus_service.is_campaign_metadata(metadata)
+        if amount_kopeks < settings.CLOUDPAYMENTS_MIN_AMOUNT_KOPEKS and not is_vpn_bonus:
             logger.warning(
                 "Сумма CloudPayments меньше минимальной: %s < %s",
                 amount_kopeks,
@@ -99,6 +102,7 @@ class CloudPaymentsPaymentMixin:
         metadata = {
             "language": language or settings.DEFAULT_LANGUAGE,
             "telegram_id": telegram_id,
+            **(metadata or {}),
         }
         snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
         if snapshot:
@@ -230,17 +234,35 @@ class CloudPaymentsPaymentMixin:
             logger.error("Пользователь не найден: id=%s", payment.user_id)
             return False
 
-        # Add balance
-        await add_user_balance(db, user.id, amount_kopeks)
+        bonus_metadata = vpn_deposit_bonus_service.extract_payment_metadata(payment)
+        bonus_decision = await vpn_deposit_bonus_service.resolve_payment_decision(
+            db,
+            user_id=payment.user_id,
+            payment_amount_kopeks=amount_kopeks,
+            metadata=bonus_metadata,
+        )
+        credit_amount_kopeks = (
+            bonus_decision.credit_amount_kopeks
+            if bonus_decision.is_campaign_payment
+            else amount_kopeks
+        )
+
+        old_balance = user.balance_kopeks
+        user.balance_kopeks += credit_amount_kopeks
+        user.updated_at = datetime.utcnow()
 
         # Create transaction record
         from app.database.crud.transaction import create_transaction
         transaction = await create_transaction(
             db=db,
             user_id=user.id,
-            type_=TransactionType.DEPOSIT,
-            amount_kopeks=amount_kopeks,
-            description=payment.description or settings.CLOUDPAYMENTS_DESCRIPTION,
+            type=TransactionType.DEPOSIT,
+            amount_kopeks=credit_amount_kopeks,
+            description=(
+                "Бонус за первое подключение VPN: оплачено 10₽, начислено 100₽"
+                if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate
+                else payment.description or settings.CLOUDPAYMENTS_DESCRIPTION
+            ),
             payment_method=PaymentMethod.CLOUDPAYMENTS,
             external_id=str(transaction_id_cp) if transaction_id_cp else invoice_id,
             is_completed=True,
@@ -259,23 +281,35 @@ class CloudPaymentsPaymentMixin:
         # Сначала пробуем автопокупку
         auto_purchase_success = False
         try:
-            auto_purchase_success = await auto_purchase_saved_cart_after_topup(
-                db, user, bot=getattr(self, "bot", None),
-                checkout_snapshot=extract_checkout_snapshot(payment),
-            )
+            if not (bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate):
+                auto_purchase_success = await auto_purchase_saved_cart_after_topup(
+                    db, user, bot=getattr(self, "bot", None),
+                    checkout_snapshot=extract_checkout_snapshot(payment),
+                )
         except Exception as error:
             logger.exception("Ошибка автопокупки после CloudPayments: %s", error)
 
         # Уведомление пользователю только если автопокупка не сработала
         if not auto_purchase_success:
             try:
-                await self._send_cloudpayments_success_notification(
-                    user=user,
-                    amount_kopeks=amount_kopeks,
-                    transaction=transaction,
-                )
+                if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                    await vpn_deposit_bonus_service.send_success_message(getattr(self, "bot", None), user)
+                else:
+                    await self._send_cloudpayments_success_notification(
+                        user=user,
+                        amount_kopeks=credit_amount_kopeks,
+                        transaction=transaction,
+                    )
             except Exception as error:
                 logger.exception("Ошибка отправки уведомления CloudPayments: %s", error)
+
+        await vpn_deposit_bonus_service.record_payment_processed(
+            db,
+            user=user,
+            transaction=transaction,
+            decision=bonus_decision,
+            provider="cloudpayments",
+        )
 
         return True
 

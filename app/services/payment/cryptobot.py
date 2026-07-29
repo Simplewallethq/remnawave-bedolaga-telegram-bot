@@ -30,6 +30,7 @@ from app.services.subscription_renewal_service import (
     decode_payment_payload,
     parse_payment_metadata,
 )
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 from app.utils.currency_converter import currency_converter
 from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
@@ -71,6 +72,7 @@ class CryptoBotPaymentMixin:
         description: str = "Пополнение баланса",
         payload: Optional[str] = None,
         amount_kopeks: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Создаёт invoice в CryptoBot и сохраняет локальную запись."""
         if not getattr(self, "cryptobot_service", None):
@@ -80,11 +82,12 @@ class CryptoBotPaymentMixin:
         try:
             amount_str = f"{amount_usd:.2f}"
 
-            metadata_json = None
+            metadata_json = dict(metadata or {}) or None
             if amount_kopeks:
                 snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
                 if snapshot:
-                    metadata_json = {SNAPSHOT_METADATA_KEY: snapshot}
+                    metadata_json = dict(metadata_json or {})
+                    metadata_json[SNAPSHOT_METADATA_KEY] = snapshot
 
             invoice_data = await self.cryptobot_service.create_invoice(
                 amount=amount_str,
@@ -258,15 +261,38 @@ class CryptoBotPaymentMixin:
                     return False
 
                 payment_service_module = import_module("app.services.payment_service")
+                bonus_metadata = vpn_deposit_bonus_service.extract_payment_metadata(updated_payment)
+                if bonus_metadata:
+                    amount_kopeks = vpn_deposit_bonus_service.INVOICE_AMOUNT_KOPEKS
+                    amount_rubles_rounded = amount_kopeks / 100
+                bonus_decision = await vpn_deposit_bonus_service.resolve_payment_decision(
+                    db,
+                    user_id=updated_payment.user_id,
+                    payment_amount_kopeks=amount_kopeks,
+                    metadata=bonus_metadata,
+                )
+                credit_amount_kopeks = (
+                    bonus_decision.credit_amount_kopeks
+                    if bonus_decision.is_campaign_payment
+                    else amount_kopeks
+                )
+                referral_amount_kopeks = (
+                    bonus_decision.referral_amount_kopeks
+                    if bonus_decision.is_campaign_payment
+                    else credit_amount_kopeks
+                )
+                description = (
+                    "Пополнение через CryptoBot "
+                    f"({updated_payment.amount} {updated_payment.asset} → {amount_rubles_rounded:.2f}₽)"
+                )
+                if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                    description = "Бонус за первое подключение VPN: оплачено 10₽, начислено 100₽"
                 transaction = await payment_service_module.create_transaction(
                     db,
                     user_id=updated_payment.user_id,
                     type=TransactionType.DEPOSIT,
-                    amount_kopeks=amount_kopeks,
-                    description=(
-                        "Пополнение через CryptoBot "
-                        f"({updated_payment.amount} {updated_payment.asset} → {amount_rubles_rounded:.2f}₽)"
-                    ),
+                    amount_kopeks=credit_amount_kopeks,
+                    description=description,
                     payment_method=PaymentMethod.CRYPTOBOT,
                     external_id=invoice_id,
                     is_completed=True,
@@ -288,7 +314,7 @@ class CryptoBotPaymentMixin:
                 old_balance = user.balance_kopeks
                 was_first_topup = not user.has_made_first_topup
 
-                user.balance_kopeks += amount_kopeks
+                user.balance_kopeks += credit_amount_kopeks
                 user.updated_at = datetime.utcnow()
 
                 referrer_info = format_referrer_info(user)
@@ -304,7 +330,7 @@ class CryptoBotPaymentMixin:
                     await process_referral_topup(
                         db,
                         user.id,
-                        amount_kopeks,
+                        referral_amount_kopeks,
                         getattr(self, "bot", None),
                     )
                 except Exception as error:
@@ -334,7 +360,7 @@ class CryptoBotPaymentMixin:
                     try:
                         keyboard = await self.build_topup_success_keyboard(user)
                         message_text = format_topup_success_message(
-                            settings.format_price(amount_kopeks)
+                            settings.format_price(credit_amount_kopeks)
                         )
                         user_notification = _UserNotificationPayload(
                             telegram_id=user.telegram_id,
@@ -357,6 +383,9 @@ class CryptoBotPaymentMixin:
                     checkout_snapshot = extract_checkout_snapshot(updated_payment)
                     has_saved_cart = await user_cart_service.has_user_cart(user.id)
                     auto_purchase_success = False
+                    if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                        has_saved_cart = False
+                        checkout_snapshot = None
                     if has_saved_cart or checkout_snapshot:
                         try:
                             auto_purchase_success = await auto_purchase_saved_cart_after_topup(
@@ -375,6 +404,10 @@ class CryptoBotPaymentMixin:
 
                         if auto_purchase_success:
                             has_saved_cart = False
+
+                    if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                        user_notification = None
+                        await vpn_deposit_bonus_service.send_success_message(bot_instance, user)
                 except Exception as error:
                     logger.error(
                         "Ошибка при работе с сохраненной корзиной для пользователя %s: %s",
@@ -382,6 +415,14 @@ class CryptoBotPaymentMixin:
                         error,
                         exc_info=True,
                     )
+
+                await vpn_deposit_bonus_service.record_payment_processed(
+                    db,
+                    user=user,
+                    transaction=transaction,
+                    decision=bonus_decision,
+                    provider="cryptobot",
+                )
 
                 if admin_notification:
                     await self._deliver_admin_topup_notification(admin_notification)

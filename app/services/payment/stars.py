@@ -24,6 +24,7 @@ from app.external.telegram_stars import TelegramStarsService
 from app.services.subscription_auto_purchase_service import (
     auto_purchase_saved_cart_after_topup,
 )
+from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 from app.utils.success_notifications import (
     build_success_management_keyboard,
     format_subscription_purchase_success,
@@ -112,12 +113,33 @@ class TelegramStarsMixin:
                 payload,
                 user_id,
             )
+            bonus_metadata = vpn_deposit_bonus_service.metadata_from_stars_payload(
+                user_id,
+                payload,
+            )
+            if bonus_metadata:
+                simple_payload = None
+                amount_kopeks = vpn_deposit_bonus_service.INVOICE_AMOUNT_KOPEKS
+
+            bonus_decision = await vpn_deposit_bonus_service.resolve_payment_decision(
+                db,
+                user_id=user_id,
+                payment_amount_kopeks=amount_kopeks,
+                metadata=bonus_metadata,
+            )
+            credit_amount_kopeks = (
+                bonus_decision.credit_amount_kopeks
+                if bonus_decision.is_campaign_payment
+                else amount_kopeks
+            )
 
             transaction_description = (
                 f"Оплата подписки через Telegram Stars ({stars_amount} ⭐)"
                 if simple_payload
                 else f"Пополнение через Telegram Stars ({stars_amount} ⭐)"
             )
+            if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                transaction_description = "Бонус за первое подключение VPN: оплачено 10₽, начислено 100₽"
             transaction_type = (
                 TransactionType.SUBSCRIPTION_PAYMENT
                 if simple_payload
@@ -128,7 +150,7 @@ class TelegramStarsMixin:
                 db=db,
                 user_id=user_id,
                 type=transaction_type,
-                amount_kopeks=amount_kopeks,
+                amount_kopeks=credit_amount_kopeks,
                 description=transaction_description,
                 payment_method=PaymentMethod.TELEGRAM_STARS,
                 external_id=telegram_payment_charge_id,
@@ -169,9 +191,11 @@ class TelegramStarsMixin:
                 user=user,
                 transaction=transaction,
                 amount_kopeks=amount_kopeks,
+                credit_amount_kopeks=credit_amount_kopeks,
                 stars_amount=stars_amount,
                 telegram_payment_charge_id=telegram_payment_charge_id,
                 checkout_snapshot=checkout_snapshot,
+                bonus_decision=bonus_decision,
             )
 
         except Exception as error:
@@ -431,7 +455,9 @@ class TelegramStarsMixin:
         amount_kopeks: int,
         stars_amount: int,
         telegram_payment_charge_id: str,
+        credit_amount_kopeks: Optional[int] = None,
         checkout_snapshot: Optional[dict] = None,
+        bonus_decision=None,
     ) -> bool:
         """Начисляет баланс пользователю после оплаты Stars и запускает автопокупку."""
 
@@ -440,7 +466,13 @@ class TelegramStarsMixin:
         was_first_topup = not user.has_made_first_topup
 
         # Обновляем баланс в БД.
-        user.balance_kopeks += amount_kopeks
+        credit_amount_kopeks = credit_amount_kopeks or amount_kopeks
+        referral_amount_kopeks = (
+            getattr(bonus_decision, "referral_amount_kopeks", 0)
+            if getattr(bonus_decision, "is_campaign_payment", False)
+            else credit_amount_kopeks
+        )
+        user.balance_kopeks += credit_amount_kopeks
         user.updated_at = datetime.utcnow()
 
         promo_group = user.get_primary_promo_group()
@@ -478,7 +510,7 @@ class TelegramStarsMixin:
                 await process_referral_topup(
                     db,
                     user.id,
-                    amount_kopeks,
+                    referral_amount_kopeks,
                     getattr(self, "bot", None),
                 )
             except Exception as error:  # pragma: no cover - диагностический лог
@@ -534,6 +566,9 @@ class TelegramStarsMixin:
             from app.services.user_cart_service import user_cart_service
 
             has_saved_cart = await user_cart_service.has_user_cart(user.id)
+            if getattr(bonus_decision, "is_campaign_payment", False) and not getattr(bonus_decision, "is_duplicate", False):
+                has_saved_cart = False
+                checkout_snapshot = None
             if has_saved_cart or checkout_snapshot:
                 try:
                     auto_purchase_success = await auto_purchase_saved_cart_after_topup(
@@ -567,4 +602,14 @@ class TelegramStarsMixin:
             settings.format_price(amount_kopeks),
         )
         self._last_auto_purchase_success = auto_purchase_success
+        if getattr(bonus_decision, "is_campaign_payment", False):
+            await vpn_deposit_bonus_service.record_payment_processed(
+                db,
+                user=user,
+                transaction=transaction,
+                decision=bonus_decision,
+                provider="telegram_stars",
+            )
+            if not getattr(bonus_decision, "is_duplicate", False):
+                await vpn_deposit_bonus_service.send_success_message(getattr(self, "bot", None), user)
         return True
