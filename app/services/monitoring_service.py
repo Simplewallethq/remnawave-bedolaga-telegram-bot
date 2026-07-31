@@ -60,6 +60,8 @@ from app.services.subscription_service import SubscriptionService
 from app.services.promo_offer_service import promo_offer_service
 from app.services.user_daily_traffic_usage_service import user_daily_traffic_usage_service
 from app.services.daily_subscription_metrics_service import daily_subscription_metrics_service
+from app.services.user_daily_metrics_service import user_daily_metrics_service
+from app.services.trial_expiry_daily_metrics_service import trial_expiry_daily_metrics_service
 from app.services.android_rate_request_service import android_rate_request_service
 from app.services.expired_subscription_feedback_service import expired_subscription_feedback_service
 from app.utils.pricing_utils import apply_percentage_discount
@@ -89,6 +91,8 @@ class MonitoringService:
         self.payment_service = PaymentService()
         self.user_daily_traffic_usage_service = user_daily_traffic_usage_service
         self.daily_subscription_metrics_service = daily_subscription_metrics_service
+        self.user_daily_metrics_service = user_daily_metrics_service
+        self.trial_expiry_daily_metrics_service = trial_expiry_daily_metrics_service
         self.bot = bot
         self._notified_users: Set[str] = set()
         self._last_cleanup = datetime.utcnow()
@@ -248,6 +252,8 @@ class MonitoringService:
                     await self._process_autopayments(db)
                 await self._cleanup_inactive_users(db)
                 await self._collect_daily_subscription_metrics(db)
+                await self._collect_user_daily_metrics(db)
+                await self._collect_trial_expiry_daily_metrics(db)
                 await self._collect_user_daily_traffic_usage(db)
                 await self._process_android_rate_requests(db)
                 await self._cleanup_cabinet_notifications(db)
@@ -1714,6 +1720,95 @@ class MonitoringService:
                 db,
                 "daily_subscription_metrics_snapshot_error",
                 f"Ошибка сбора snapshot-метрик подписок: {str(e)}",
+                {"error": str(e)},
+                is_success=False,
+            )
+
+    async def _collect_user_daily_metrics(self, db: AsyncSession):
+        try:
+            result = await self.user_daily_metrics_service.collect_missing_recent_days(db)
+
+            if result.get("skipped"):
+                reason = result.get("reason")
+                if reason == "already_collected":
+                    logger.debug(
+                        "Snapshot метрик пользователей за %s уже собран, пропускаем",
+                        result.get("date"),
+                    )
+                    return
+
+                await self._log_monitoring_event(
+                    db,
+                    "user_daily_metrics_snapshot_skipped",
+                    f"Сбор snapshot-метрик пользователей пропущен: {reason}",
+                    result,
+                    is_success=False,
+                )
+                return
+
+            await self._log_monitoring_event(
+                db,
+                "user_daily_metrics_snapshot",
+                (
+                    f"Проверены snapshot метрик пользователей за {result.get('range_start')}..{result.get('range_end')}: "
+                    f"создано={result.get('created')}, "
+                    f"пропущено={result.get('skipped_existing')}, "
+                    f"ошибок={result.get('failed')}"
+                ),
+                result,
+                is_success=(result.get("failed", 0) == 0),
+            )
+        except Exception as e:
+            logger.error(f"Ошибка сбора snapshot-метрик пользователей: {e}")
+            await self._log_monitoring_event(
+                db,
+                "user_daily_metrics_snapshot_error",
+                f"Ошибка сбора snapshot-метрик пользователей: {str(e)}",
+                {"error": str(e)},
+                is_success=False,
+            )
+
+    async def _collect_trial_expiry_daily_metrics(self, db: AsyncSession):
+        try:
+            result = await self.trial_expiry_daily_metrics_service.collect_missing_ready_cohorts(db)
+
+            if result.get("skipped"):
+                reason = result.get("reason")
+                if reason == "already_collected":
+                    logger.debug(
+                        "Snapshot конверсии истёкших триалов за %s уже собран, пропускаем",
+                        result.get("date"),
+                    )
+                    return
+
+                await self._log_monitoring_event(
+                    db,
+                    "trial_expiry_daily_metrics_snapshot_skipped",
+                    f"Сбор конверсии истёкших триалов пропущен: {reason}",
+                    result,
+                    is_success=False,
+                )
+                return
+
+            await self._log_monitoring_event(
+                db,
+                "trial_expiry_daily_metrics_snapshot",
+                (
+                    f"Проверены snapshot конверсии истёкших триалов за "
+                    f"{result.get('range_start')}..{result.get('range_end')}: "
+                    f"создано={result.get('created')}, "
+                    f"пропущено={result.get('skipped_existing')}, "
+                    f"ошибок={result.get('failed')}"
+                ),
+                result,
+                is_success=(result.get("failed", 0) == 0),
+            )
+        except Exception as e:
+            logger.error(f"Ошибка сбора конверсии истёкших триалов: {e}")
+            await self._log_monitoring_event(
+                db,
+                "trial_expiry_daily_metrics_snapshot_error",
+                f"Ошибка сбора конверсии истёкших триалов: {str(e)}",
                 {"error": str(e)},
                 is_success=False,
             )

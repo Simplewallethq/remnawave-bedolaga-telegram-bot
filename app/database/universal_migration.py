@@ -5573,6 +5573,178 @@ async def create_daily_subscription_metrics_table() -> bool:
         return False
 
 
+async def create_user_daily_metrics_table() -> bool:
+    table_exists = await check_table_exists('user_daily_metrics')
+    if table_exists:
+        logger.info("Таблица user_daily_metrics уже существует")
+        return True
+
+    columns = """
+                    date DATE NOT NULL,
+                    snapshot_at {datetime_type} NOT NULL,
+                    new_users_count INTEGER NOT NULL DEFAULT 0,
+                    new_telegram_users_count INTEGER NOT NULL DEFAULT 0,
+                    new_bot_users_count INTEGER NOT NULL DEFAULT 0,
+                    new_web_users_count INTEGER NOT NULL DEFAULT 0,
+                    new_app_users_count INTEGER NOT NULL DEFAULT 0,
+                    new_email_users_count INTEGER NOT NULL DEFAULT 0,
+                    new_referred_users_count INTEGER NOT NULL DEFAULT 0,
+                    total_users_count INTEGER NOT NULL DEFAULT 0,
+                    active_users_count INTEGER NOT NULL DEFAULT 0,
+                    blocked_users_count INTEGER NOT NULL DEFAULT 0,
+                    deleted_users_count INTEGER NOT NULL DEFAULT 0,
+                    telegram_users_count INTEGER NOT NULL DEFAULT 0,
+                    bot_users_count INTEGER NOT NULL DEFAULT 0,
+                    web_users_count INTEGER NOT NULL DEFAULT 0,
+                    app_users_count INTEGER NOT NULL DEFAULT 0,
+                    email_users_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_remnawave_uuid_count INTEGER NOT NULL DEFAULT 0,
+                    users_connected_to_vpn_count INTEGER NOT NULL DEFAULT 0,
+                    users_without_vpn_connection_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_first_topup_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_paid_subscription_history_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_positive_balance_count INTEGER NOT NULL DEFAULT 0,
+                    total_balance_kopeks BIGINT NOT NULL DEFAULT 0,
+                    referred_users_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_referral_code_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_custom_referral_commission_count INTEGER NOT NULL DEFAULT 0,
+                    qualified_referrers_count INTEGER NOT NULL DEFAULT 0,
+                    total_qualified_referrals_count INTEGER NOT NULL DEFAULT 0,
+                    mobile_app_users_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_tg_user_id_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_acquisition_source_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_attribution_source_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_attribution_campaign_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_promo_group_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_auto_promo_group_count INTEGER NOT NULL DEFAULT 0,
+                    users_with_active_promo_offer_count INTEGER NOT NULL DEFAULT 0,
+                    legacy_pricing_users_count INTEGER NOT NULL DEFAULT 0,
+                    new_pricing_users_count INTEGER NOT NULL DEFAULT 0,
+                    created_at {datetime_type} NOT NULL DEFAULT {now_expr},
+                    updated_at {datetime_type} NOT NULL DEFAULT {now_expr},
+                    CONSTRAINT uq_user_daily_metrics_date UNIQUE (date)
+    """
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = f"""
+                CREATE TABLE user_daily_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+{columns.format(datetime_type='DATETIME', now_expr='CURRENT_TIMESTAMP')}
+                );
+
+                CREATE INDEX ix_user_daily_metrics_date ON user_daily_metrics(date);
+                """
+            elif db_type == 'postgresql':
+                create_sql = f"""
+                CREATE TABLE IF NOT EXISTS user_daily_metrics (
+                    id SERIAL PRIMARY KEY,
+{columns.format(datetime_type='TIMESTAMP', now_expr='NOW()')}
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_user_daily_metrics_date ON user_daily_metrics(date);
+                """
+            elif db_type == 'mysql':
+                create_sql = f"""
+                CREATE TABLE IF NOT EXISTS user_daily_metrics (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+{columns.format(datetime_type='DATETIME', now_expr='CURRENT_TIMESTAMP')}
+                );
+
+                CREATE INDEX ix_user_daily_metrics_date ON user_daily_metrics(date);
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица user_daily_metrics успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы user_daily_metrics: {e}")
+        return False
+
+
+async def create_trial_expiry_daily_metrics_table() -> bool:
+    table_exists = await check_table_exists('trial_expiry_daily_metrics')
+    if table_exists:
+        logger.info("Таблица trial_expiry_daily_metrics уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE trial_expiry_daily_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date DATE NOT NULL,
+                    snapshot_at DATETIME NOT NULL,
+                    trial_ended_count INTEGER NOT NULL DEFAULT 0,
+                    trial_paid_7d_count INTEGER NOT NULL DEFAULT 0,
+                    connected_trial_ended_count INTEGER NOT NULL DEFAULT 0,
+                    connected_trial_paid_7d_count INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_trial_expiry_daily_metrics_date UNIQUE (date)
+                );
+
+                CREATE INDEX ix_trial_expiry_daily_metrics_date ON trial_expiry_daily_metrics(date);
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS trial_expiry_daily_metrics (
+                    id SERIAL PRIMARY KEY,
+                    date DATE NOT NULL,
+                    snapshot_at TIMESTAMP NOT NULL,
+                    trial_ended_count INTEGER NOT NULL DEFAULT 0,
+                    trial_paid_7d_count INTEGER NOT NULL DEFAULT 0,
+                    connected_trial_ended_count INTEGER NOT NULL DEFAULT 0,
+                    connected_trial_paid_7d_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_trial_expiry_daily_metrics_date UNIQUE (date)
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_trial_expiry_daily_metrics_date ON trial_expiry_daily_metrics(date);
+                """
+            elif db_type == 'mysql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS trial_expiry_daily_metrics (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    date DATE NOT NULL,
+                    snapshot_at DATETIME NOT NULL,
+                    trial_ended_count INT NOT NULL DEFAULT 0,
+                    trial_paid_7d_count INT NOT NULL DEFAULT 0,
+                    connected_trial_ended_count INT NOT NULL DEFAULT 0,
+                    connected_trial_paid_7d_count INT NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_trial_expiry_daily_metrics_date UNIQUE (date)
+                );
+
+                CREATE INDEX ix_trial_expiry_daily_metrics_date ON trial_expiry_daily_metrics(date);
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица trial_expiry_daily_metrics успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы trial_expiry_daily_metrics: {e}")
+        return False
+
+
 async def add_subscription_is_partner_column() -> bool:
     """Adds Subscription.is_partner boolean + CHECK constraint enforcing
     that is_trial and is_partner are mutually exclusive.
@@ -7522,6 +7694,20 @@ async def run_universal_migration():
         else:
             logger.warning("⚠️ Проблемы с таблицей daily_subscription_metrics")
 
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ USER_DAILY_METRICS ===")
+        user_daily_metrics_ready = await create_user_daily_metrics_table()
+        if user_daily_metrics_ready:
+            logger.info("✅ Таблица user_daily_metrics готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей user_daily_metrics")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ TRIAL_EXPIRY_DAILY_METRICS ===")
+        trial_expiry_daily_metrics_ready = await create_trial_expiry_daily_metrics_table()
+        if trial_expiry_daily_metrics_ready:
+            logger.info("✅ Таблица trial_expiry_daily_metrics готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей trial_expiry_daily_metrics")
+
         logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ is_partner В SUBSCRIPTIONS ===")
         is_partner_ready = await add_subscription_is_partner_column()
         if is_partner_ready:
@@ -7762,6 +7948,8 @@ async def check_migration_status():
             "subscription_temporary_access_table": False,
             "user_daily_traffic_usage_table": False,
             "daily_subscription_metrics_table": False,
+            "user_daily_metrics_table": False,
+            "trial_expiry_daily_metrics_table": False,
             "advertising_campaigns_table": False,
             "advertising_campaign_registrations_table": False,
             "users_raw_start_payload_column": False,
@@ -7802,6 +7990,8 @@ async def check_migration_status():
         status["subscription_temporary_access_table"] = await check_table_exists('subscription_temporary_access')
         status["user_daily_traffic_usage_table"] = await check_table_exists('user_daily_traffic_usage')
         status["daily_subscription_metrics_table"] = await check_table_exists('daily_subscription_metrics')
+        status["user_daily_metrics_table"] = await check_table_exists('user_daily_metrics')
+        status["trial_expiry_daily_metrics_table"] = await check_table_exists('trial_expiry_daily_metrics')
         status["advertising_campaigns_table"] = await check_table_exists('advertising_campaigns')
         status["advertising_campaign_registrations_table"] = await check_table_exists('advertising_campaign_registrations')
         status["users_raw_start_payload_column"] = await check_column_exists('users', 'raw_start_payload')
@@ -7913,6 +8103,8 @@ async def check_migration_status():
             "subscription_temporary_access_table": "Таблица subscription_temporary_access",
             "user_daily_traffic_usage_table": "Таблица дневного трафика пользователей",
             "daily_subscription_metrics_table": "Таблица дневных snapshot-метрик подписок",
+            "user_daily_metrics_table": "Таблица дневных snapshot-метрик пользователей",
+            "trial_expiry_daily_metrics_table": "Таблица дневной конверсии истёкших триалов",
             "advertising_campaigns_table": "Таблица advertising_campaigns",
             "advertising_campaign_registrations_table": "Таблица advertising_campaign_registrations",
             "users_raw_start_payload_column": "Колонка raw_start_payload у пользователей",

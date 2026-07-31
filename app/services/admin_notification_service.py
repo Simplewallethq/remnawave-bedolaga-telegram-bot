@@ -241,6 +241,11 @@ class AdminNotificationService:
         charged_amount_kopeks: Optional[int] = None,
     ) -> bool:
         try:
+            trial_duration_days = settings.TRIAL_DURATION_DAYS
+            if subscription.start_date and subscription.end_date:
+                trial_seconds = (subscription.end_date - subscription.start_date).total_seconds()
+                trial_duration_days = max(0, int(round(trial_seconds / 86400)))
+
             await self._record_subscription_event(
                 db,
                 event_type="activation",
@@ -252,7 +257,9 @@ class AdminNotificationService:
                 occurred_at=datetime.utcnow(),
                 extra={
                     "charged_amount_kopeks": charged_amount_kopeks,
-                    "trial_duration_days": settings.TRIAL_DURATION_DAYS,
+                    "trial_duration_days": trial_duration_days,
+                    "trial_started_at": subscription.start_date.isoformat() if subscription.start_date else None,
+                    "trial_ended_at": subscription.end_date.isoformat() if subscription.end_date else None,
                     "traffic_limit_gb": settings.TRIAL_TRAFFIC_LIMIT_GB,
                     "device_limit": subscription.device_limit,
                 },

@@ -1073,6 +1073,87 @@ class DailySubscriptionMetric(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class UserDailyMetric(Base):
+    __tablename__ = "user_daily_metrics"
+    __table_args__ = (
+        UniqueConstraint("date", name="uq_user_daily_metrics_date"),
+        Index("ix_user_daily_metrics_date", "date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False)
+    snapshot_at = Column(DateTime, nullable=False)
+
+    new_users_count = Column(Integer, nullable=False, default=0)
+    new_telegram_users_count = Column(Integer, nullable=False, default=0)
+    new_bot_users_count = Column(Integer, nullable=False, default=0)
+    new_web_users_count = Column(Integer, nullable=False, default=0)
+    new_app_users_count = Column(Integer, nullable=False, default=0)
+    new_email_users_count = Column(Integer, nullable=False, default=0)
+    new_referred_users_count = Column(Integer, nullable=False, default=0)
+
+    total_users_count = Column(Integer, nullable=False, default=0)
+    active_users_count = Column(Integer, nullable=False, default=0)
+    blocked_users_count = Column(Integer, nullable=False, default=0)
+    deleted_users_count = Column(Integer, nullable=False, default=0)
+
+    telegram_users_count = Column(Integer, nullable=False, default=0)
+    bot_users_count = Column(Integer, nullable=False, default=0)
+    web_users_count = Column(Integer, nullable=False, default=0)
+    app_users_count = Column(Integer, nullable=False, default=0)
+    email_users_count = Column(Integer, nullable=False, default=0)
+
+    users_with_remnawave_uuid_count = Column(Integer, nullable=False, default=0)
+    users_connected_to_vpn_count = Column(Integer, nullable=False, default=0)
+    users_without_vpn_connection_count = Column(Integer, nullable=False, default=0)
+
+    users_with_first_topup_count = Column(Integer, nullable=False, default=0)
+    users_with_paid_subscription_history_count = Column(Integer, nullable=False, default=0)
+    users_with_positive_balance_count = Column(Integer, nullable=False, default=0)
+    total_balance_kopeks = Column(BigInteger, nullable=False, default=0)
+
+    referred_users_count = Column(Integer, nullable=False, default=0)
+    users_with_referral_code_count = Column(Integer, nullable=False, default=0)
+    users_with_custom_referral_commission_count = Column(Integer, nullable=False, default=0)
+    qualified_referrers_count = Column(Integer, nullable=False, default=0)
+    total_qualified_referrals_count = Column(Integer, nullable=False, default=0)
+
+    mobile_app_users_count = Column(Integer, nullable=False, default=0)
+    users_with_tg_user_id_count = Column(Integer, nullable=False, default=0)
+    users_with_acquisition_source_count = Column(Integer, nullable=False, default=0)
+    users_with_attribution_source_count = Column(Integer, nullable=False, default=0)
+    users_with_attribution_campaign_count = Column(Integer, nullable=False, default=0)
+
+    users_with_promo_group_count = Column(Integer, nullable=False, default=0)
+    users_with_auto_promo_group_count = Column(Integer, nullable=False, default=0)
+    users_with_active_promo_offer_count = Column(Integer, nullable=False, default=0)
+    legacy_pricing_users_count = Column(Integer, nullable=False, default=0)
+    new_pricing_users_count = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class TrialExpiryDailyMetric(Base):
+    __tablename__ = "trial_expiry_daily_metrics"
+    __table_args__ = (
+        UniqueConstraint("date", name="uq_trial_expiry_daily_metrics_date"),
+        Index("ix_trial_expiry_daily_metrics_date", "date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False)
+    snapshot_at = Column(DateTime, nullable=False)
+
+    trial_ended_count = Column(Integer, nullable=False, default=0)
+    trial_paid_7d_count = Column(Integer, nullable=False, default=0)
+    connected_trial_ended_count = Column(Integer, nullable=False, default=0)
+    connected_trial_paid_7d_count = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class CabinetOtp(Base):
     """Email-код подтверждения регистрации в веб-кабинете (хранится только HMAC)."""
 
