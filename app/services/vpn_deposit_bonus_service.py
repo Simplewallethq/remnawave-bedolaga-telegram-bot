@@ -16,7 +16,7 @@ from app.database.models import InteractiveNotificationLog, PromoOfferLog, User
 
 logger = logging.getLogger(__name__)
 
-IS_DEBUG = True
+IS_DEBUG = False
 DEBUG_USER_ID = 18835
 
 
