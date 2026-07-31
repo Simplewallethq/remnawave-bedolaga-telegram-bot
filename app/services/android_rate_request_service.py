@@ -275,6 +275,7 @@ class AndroidRateRequestService:
                 and_(
                     User.telegram_id.isnot(None),
                     User.has_used_mobile_app == True,  # noqa: E712
+                    func.lower(func.coalesce(User.last_app_name, "")).like("%android%"),
                     User.id > after_user_id,
                     User.status == ModelUserStatus.ACTIVE.value,
                     Subscription.status.in_(

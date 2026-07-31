@@ -304,6 +304,7 @@ async def test_candidate_query_requires_android_app_usage():
     assert str(TELEGRAM_ID) not in captured["sql"]
     sql = captured["sql"].lower()
     assert "users.has_used_mobile_app = true" in sql
+    assert "lower(coalesce(users.last_app_name, '')) like '%android%'" in sql
     assert "subscriptions.status in ('active', 'trial')" in sql
     assert "subscriptions.is_trial = false" not in sql
     assert "user_daily_traffic_usage" in captured["sql"]
