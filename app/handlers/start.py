@@ -71,6 +71,7 @@ from app.services.pinned_message_service import (
 )
 from app.utils.user_utils import generate_unique_referral_code
 from app.utils.photo_message import edit_or_answer_photo
+from app.utils.fsm import clear_state_preserving_pending_start_payload
 from app.database.crud.subscription import decrement_subscription_server_counts
 from app.services.blacklist_service import blacklist_service
 from app.database.crud.device_link import get_device_link, create_device_link
@@ -728,6 +729,11 @@ async def _send_cabinet_login_link(message: types.Message, user, texts) -> None:
 async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession, db_user=None):
     logger.info(f"🚀 START: Обработка /start от {message.from_user.id}")
 
+    start_args = message.text.split()
+    if len(start_args) == 1:
+        # A plain /start is global navigation, not a continuation of an old flow.
+        await clear_state_preserving_pending_start_payload(state)
+
     data = await state.get_data() or {}
     had_pending_payload = "pending_start_payload" in data
     pending_start_payload = data.pop("pending_start_payload", None)
@@ -737,7 +743,6 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
 
     referral_code = None
     campaign = None
-    start_args = message.text.split()
     start_parameter = None
 
     if len(start_args) > 1:
@@ -2540,4 +2545,3 @@ def register_handlers(dp: Dispatcher):
     logger.info("✅ Зарегистрирован required_sub_channel_check")
 
     logger.info("🔧 === КОНЕЦ регистрации обработчиков start.py ===")
-

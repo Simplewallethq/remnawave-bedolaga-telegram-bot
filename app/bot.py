@@ -18,6 +18,7 @@ from app.services.maintenance_service import maintenance_service
 from app.utils.cache import cache 
 
 from app.handlers import (
+    commands,
     start,
     menu,
     subscription,
@@ -178,6 +179,7 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     dp.pre_checkout_query.middleware(AuthMiddleware())
     dp.message.middleware(SubscriptionStatusMiddleware())
     dp.callback_query.middleware(SubscriptionStatusMiddleware())
+    commands.register_handlers(dp)
     start.register_handlers(dp)
     menu.register_handlers(dp)
     subscription.register_handlers(dp)
