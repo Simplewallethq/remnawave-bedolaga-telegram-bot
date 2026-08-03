@@ -8,6 +8,7 @@ from app.webapi.docs import add_redoc_endpoint
 
 from .middleware import RequestLoggingMiddleware
 from .routes import (
+    app_updates,
     app_users,
     auth_otp,
     broadcasts,
@@ -266,6 +267,7 @@ def create_web_api_app() -> FastAPI:
     # Публичный (без API-токена): резолв share-страницы «Поделиться доступом».
     # Под /cabinet — наружу у cabinetapi проксируется только /cabinet/*.
     app.include_router(share.router, prefix="/cabinet/share", tags=["share"])
+    app.include_router(app_updates.router, prefix="/cabinet/app", tags=["app-updates"])
     app.include_router(app_users.router, prefix="/api/users", tags=["app-users"])
     app.include_router(plans.router, prefix="/api/plans", tags=["plans"])
     app.include_router(auth_otp.router, prefix="/api/auth", tags=["auth-otp"])

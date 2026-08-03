@@ -112,6 +112,7 @@ class BotConfigurationService:
         "HAPP": "🅷 Happ",
         "SKIP": "⚡ Быстрый старт",
         "ADDITIONAL": "📱 Дополнительные приложения",
+        "APP_UPDATE": "🖥️ Обновления приложения",
         "DATABASE": "💾 База данных",
         "POSTGRES": "🐘 PostgreSQL",
         "SQLITE": "🧱 SQLite",
@@ -169,6 +170,7 @@ class BotConfigurationService:
         "HAPP": "Интеграция Happ и связанные ссылки.",
         "SKIP": "Настройки быстрого старта и гайд по подключению.",
         "ADDITIONAL": "Конфигурация app-config.json, deep links и кеша.",
+        "APP_UPDATE": "Манифест автообновления десктопного приложения: версия, ссылка, хеш.",
         "DATABASE": "Режим работы базы данных и пути до файлов.",
         "POSTGRES": "Параметры подключения к PostgreSQL.",
         "SQLITE": "Файл SQLite и резервные параметры.",
@@ -299,6 +301,7 @@ class BotConfigurationService:
     }
 
     CATEGORY_PREFIX_OVERRIDES: Dict[str, str] = {
+        "APP_UPDATE_": "APP_UPDATE",
         "SUPPORT_": "SUPPORT",
         "ADMIN_NOTIFICATIONS": "ADMIN_NOTIFICATIONS",
         "ADMIN_REPORTS": "ADMIN_REPORTS",

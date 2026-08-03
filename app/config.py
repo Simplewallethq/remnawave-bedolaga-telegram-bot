@@ -448,6 +448,21 @@ class Settings(BaseSettings):
     LETO_APP_DOWNLOAD_LINK_WINDOWS: Optional[str] = None
     LETO_APP_DOWNLOAD_LINK_MACOS: Optional[str] = None
 
+    # Автообновление десктопного приложения (публичный манифест /cabinet/app/update).
+    # Правится в админке: релиз = смена версии/ссылки/хеша без редеплоя.
+    APP_UPDATE_WINDOWS_ENABLED: bool = False
+    APP_UPDATE_WINDOWS_VERSION: Optional[str] = None
+    APP_UPDATE_WINDOWS_URL: Optional[str] = None
+    # Запасные ссылки через запятую (напр. зеркало на GitHub Releases):
+    # апдейтер идёт по списку сверху вниз, если основная недоступна.
+    APP_UPDATE_WINDOWS_MIRRORS: Optional[str] = None
+    # SHA-256 установщика: без него апдейтер не может проверить, что скачал
+    # именно наш файл (подмена зеркала = запуск чужого exe у пользователя).
+    APP_UPDATE_WINDOWS_SHA256: Optional[str] = None
+    # Версия, ниже которой обновление обязательное.
+    APP_UPDATE_WINDOWS_MIN_VERSION: Optional[str] = None
+    APP_UPDATE_WINDOWS_NOTES: Optional[str] = None
+
     # Страница «Поделиться доступом» (/s/{token} на сайте)
     SHARE_SITE_BASE_URL: str = ""  # напр. https://info.letovpn.com
     SHARE_MAX_ACTIVATIONS: int = 10
@@ -1450,6 +1465,44 @@ class Settings(BaseSettings):
         }
         link = links.get(platform_key)
         return link if link else None
+
+    def get_app_update_manifest(self, platform: str) -> Optional[dict]:
+        """Манифест автообновления приложения для указанной платформы.
+
+        None — канал обновлений выключен или не заполнен (версия/ссылка).
+        Пока поддерживается только Windows: для новой платформы достаточно
+        добавить блок APP_UPDATE_<PLATFORM>_* и ветку здесь.
+        """
+
+        platform_key = platform.strip().lower()
+        if platform_key == "pc":
+            platform_key = "windows"
+        if platform_key != "windows":
+            return None
+
+        if not self.APP_UPDATE_WINDOWS_ENABLED:
+            return None
+
+        version = (self.APP_UPDATE_WINDOWS_VERSION or "").strip()
+        url = (self.APP_UPDATE_WINDOWS_URL or "").strip()
+        if not version or not url:
+            return None
+
+        mirrors = [
+            item.strip()
+            for item in (self.APP_UPDATE_WINDOWS_MIRRORS or "").split(",")
+            if item.strip()
+        ]
+
+        return {
+            "platform": "windows",
+            "version": version,
+            "url": url,
+            "mirrors": mirrors,
+            "sha256": (self.APP_UPDATE_WINDOWS_SHA256 or "").strip().lower() or None,
+            "min_supported_version": (self.APP_UPDATE_WINDOWS_MIN_VERSION or "").strip() or None,
+            "notes": (self.APP_UPDATE_WINDOWS_NOTES or "").strip() or None,
+        }
 
     def get_share_platform_map(self) -> dict:
         """Платформенная карта share-страницы: ОС -> метод + ссылки магазинов.
