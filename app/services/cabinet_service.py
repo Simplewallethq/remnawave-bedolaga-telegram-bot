@@ -40,9 +40,11 @@ from app.services.cold_solo_offer_service import cold_solo_offer_service
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.remnawave_service import RemnaWaveService
 from app.utils.subscription_utils import (
+    build_incy_deep_link,
     convert_subscription_link_to_happ_scheme,
     get_display_subscription_link,
     get_happ_cryptolink_redirect_link,
+    get_raw_subscription_link,
 )
 
 logger = logging.getLogger(__name__)
@@ -102,6 +104,19 @@ def _happ_connect_link(sub: Subscription) -> Optional[str]:
     return redirect_link or happ_scheme_link or subscription_link
 
 
+def _incy_connect_link(sub: Subscription) -> Optional[str]:
+    """Incy-ссылка для кнопки «Подключиться» на Apple-устройствах.
+
+    Incy добавляет подписку по обычной ссылке из Remnawave, а не по
+    криптоссылке — как и в /cabinet/share/resolve. Redirect-страница
+    (HAPP_CRYPTOLINK_REDIRECT_TEMPLATE) тут не нужна: она обходит запрет
+    Telegram на кастомные схемы в inline-кнопках, а в браузере incy://
+    открывается напрямую.
+    """
+    subscription_link = get_raw_subscription_link(sub) or get_display_subscription_link(sub)
+    return build_incy_deep_link(subscription_link)
+
+
 def build_subscription(user: User) -> Optional[Dict[str, Any]]:
     sub: Optional[Subscription] = user.subscription
     if not sub:
@@ -125,6 +140,7 @@ def build_subscription(user: User) -> Optional[Dict[str, Any]]:
         "autoRenew": bool(sub.autopay_enabled),
         "subscriptionUrl": sub.subscription_url,
         "happLink": _happ_connect_link(sub),
+        "incyLink": _incy_connect_link(sub),
     }
 
 
