@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6589,6 +6589,273 @@ async def update_plan_descriptions_vpn_wording() -> bool:
         return False
 
 
+_LEGACY_MIGRATION_PLAN_CODES = ("solo", "plus", "pro")
+_LEGACY_MIGRATION_PERIOD_DAYS = 30
+
+
+def _pick_plan_for_legacy_subscription(
+    device_limit: Optional[int],
+    traffic_limit_gb: Optional[int],
+    plans: List[dict],
+) -> Tuple[int, int, int]:
+    """Map a legacy à-la-carte subscription onto a tiered plan.
+
+    plans — [{'id','code','device_limit','traffic_limit_gb'}, ...] sorted by device_limit.
+    Returns (plan_id, new_device_limit, new_traffic_limit_gb).
+
+    Rules:
+      * cheapest plan whose device_limit covers the legacy one (1→Solo, 2-3→Plus, 4-10→Pro);
+        above every plan's limit (legacy allows up to MAX_DEVICES_LIMIT=20) we take the top
+        plan but KEEP the higher legacy limit — a migration must never take devices away.
+      * traffic: the plan's value (0 = unlimited for Solo/Plus/Pro), unless that would be a
+        downgrade — a legacy subscription that already has unlimited or a bigger quota than
+        the plan keeps what it has.
+    """
+    legacy_devices = device_limit if device_limit and device_limit > 0 else 1
+
+    plan = next((p for p in plans if p["device_limit"] >= legacy_devices), None)
+    if plan is None:
+        plan = plans[-1]
+
+    new_device_limit = max(legacy_devices, plan["device_limit"])
+
+    current_traffic = traffic_limit_gb or 0
+    plan_traffic = plan["traffic_limit_gb"] or 0
+    if plan_traffic == 0:
+        new_traffic_gb = 0  # план безлимитный — всегда апгрейд
+    elif current_traffic == 0 or current_traffic > plan_traffic:
+        new_traffic_gb = current_traffic  # у подписки больше/безлимит — не понижаем
+    else:
+        new_traffic_gb = plan_traffic
+
+    return plan["id"], new_device_limit, new_traffic_gb
+
+
+async def _load_migration_target_plans(conn) -> Optional[List[dict]]:
+    """Active Solo/Plus/Pro rows ordered by device_limit. None if the catalogue is incomplete."""
+    true_literal = "1" if await get_database_type() == 'sqlite' else "true"
+    rows = (await conn.execute(text(
+        "SELECT id, code, device_limit, traffic_limit_gb FROM subscription_plans "
+        f"WHERE code IN ('solo', 'plus', 'pro') AND is_active = {true_literal}"
+    ))).fetchall()
+
+    plans = [
+        {
+            "id": row[0],
+            "code": row[1],
+            "device_limit": int(row[2] or 1),
+            "traffic_limit_gb": int(row[3] or 0),
+        }
+        for row in rows
+    ]
+    found = {p["code"] for p in plans}
+    if not set(_LEGACY_MIGRATION_PLAN_CODES).issubset(found):
+        logger.warning(
+            "⚠️ Перевод легаси-подписок пропущен: в каталоге нет активных тарифов %s",
+            sorted(set(_LEGACY_MIGRATION_PLAN_CODES) - found),
+        )
+        return None
+
+    plans.sort(key=lambda p: p["device_limit"])
+    return plans
+
+
+async def _push_limits_to_panel(payloads: List[Tuple[str, int, int]]) -> None:
+    """Send hwid_device_limit / traffic_limit_bytes to RemnaWave for migrated subscriptions.
+
+    Uses the partial PATCH (api.update_user) on purpose instead of
+    SubscriptionService.create_remnawave_user: the latter calls reset_user_devices(), which
+    would unbind every migrated user's devices, and it also forces status=ACTIVE and
+    rewrites active_internal_squads — none of which this migration should touch.
+    Best-effort per user: one failure must not abort the pass (the self-healing sweep on the
+    next startup retries it).
+    """
+    if not payloads:
+        return
+
+    from app.services.subscription_service import SubscriptionService
+
+    service = SubscriptionService()
+    if not service.is_configured:
+        logger.warning(
+            "⚠️ RemnaWave API не настроен — лимиты для %d подписок не отправлены в панель "
+            "(будут досланы при следующем запуске)",
+            len(payloads),
+        )
+        return
+
+    pushed = 0
+    async with service.get_api_client() as api:
+        for uuid, device_limit, traffic_gb in payloads:
+            try:
+                await api.update_user(
+                    uuid=uuid,
+                    hwid_device_limit=device_limit,
+                    traffic_limit_bytes=0 if not traffic_gb else traffic_gb * 1024 * 1024 * 1024,
+                )
+                pushed += 1
+            except Exception as push_error:
+                logger.warning(
+                    f"⚠️ Не удалось отправить лимиты в панель для {uuid}: {push_error}"
+                )
+    logger.info(f"  → Лимиты отправлены в панель: {pushed}/{len(payloads)}")
+
+
+async def _heal_plan_subscriptions_below_plan_limit() -> None:
+    """Catch-up sweep: raise plan subscriptions whose device_limit dropped below their plan.
+
+    Happens when the DB update landed but the panel push failed — the panel→DB sync
+    (`_update_subscription_from_panel_data`) then reverts device_limit to the panel value.
+    Only touches rows strictly BELOW the plan limit, so Pro subscriptions that kept a higher
+    legacy limit (11-20 devices) are left alone.
+
+    Side effect worth knowing: if an admin deliberately lowered a tariff user's device limit
+    below their plan, this sweep puts it back.
+    """
+    healed: List[Tuple[str, int, int]] = []
+    async with engine.begin() as conn:
+        rows = (await conn.execute(text(
+            "SELECT s.id, p.device_limit, s.traffic_limit_gb, u.remnawave_uuid "
+            "FROM subscriptions s "
+            "JOIN subscription_plans p ON p.id = s.plan_id "
+            "JOIN users u ON u.id = s.user_id "
+            "WHERE s.plan_id IS NOT NULL AND s.device_limit < p.device_limit"
+        ))).fetchall()
+
+        for sub_id, plan_device_limit, traffic_gb, remnawave_uuid in rows:
+            await conn.execute(
+                text("UPDATE subscriptions SET device_limit = :d WHERE id = :id"),
+                {"d": int(plan_device_limit), "id": sub_id},
+            )
+            if remnawave_uuid:
+                healed.append((remnawave_uuid, int(plan_device_limit), int(traffic_gb or 0)))
+
+    if rows:
+        logger.info(f"  → Восстановлен плановый лимит устройств у подписок: {len(rows)}")
+        await _push_limits_to_panel(healed)
+
+
+async def migrate_legacy_subscriptions_to_plans() -> bool:
+    """One-off transfer of active paid legacy subscriptions (plan_id IS NULL) onto tariffs.
+
+    Gated by LEGACY_TARIFF_MIGRATION_MODE (off | dry | apply) and optionally narrowed to a
+    pilot via LEGACY_TARIFF_MIGRATION_TELEGRAM_IDS. Idempotent: the WHERE clause only matches
+    subscriptions that still have no plan.
+
+    Scope: status='active', end_date in the future, not trial, not partner. end_date,
+    start_date and connected_squads are preserved as-is; only plan_id, plan_period_days,
+    device_limit and traffic_limit_gb change, and never downwards.
+
+    A DB-only update is not enough — the RemnaWave panel keeps enforcing the old HWID limit
+    and the panel→DB sync would revert device_limit — so every changed subscription is also
+    pushed to the panel (same hazard documented in update_plus_plan_device_limit_to_three).
+    """
+    mode = settings.get_legacy_tariff_migration_mode()
+    if mode == "off":
+        return True
+
+    try:
+        pilot_ids = settings.get_legacy_tariff_migration_telegram_ids()
+        now = datetime.utcnow()
+        db_type = await get_database_type()
+        false_literal = "0" if db_type == 'sqlite' else "false"
+
+        updates: List[dict] = []
+        payloads: List[Tuple[str, int, int]] = []
+        by_plan: dict = {}
+        kept_higher_limit = 0
+
+        async with engine.begin() as conn:
+            plans = await _load_migration_target_plans(conn)
+            if plans is None:
+                return True
+            plans_by_id = {p["id"]: p["code"] for p in plans}
+
+            query = (
+                "SELECT s.id, s.device_limit, s.traffic_limit_gb, u.remnawave_uuid, u.telegram_id "
+                "FROM subscriptions s JOIN users u ON u.id = s.user_id "
+                "WHERE s.plan_id IS NULL "
+                f"AND COALESCE(s.is_trial, {false_literal}) = {false_literal} "
+                f"AND COALESCE(s.is_partner, {false_literal}) = {false_literal} "
+                "AND s.status = 'active' AND s.end_date > :now"
+            )
+            params: dict = {"now": now}
+            if pilot_ids:
+                placeholders = ", ".join(f":tg{i}" for i in range(len(pilot_ids)))
+                query += f" AND u.telegram_id IN ({placeholders})"
+                params.update({f"tg{i}": tid for i, tid in enumerate(pilot_ids)})
+
+            candidates = (await conn.execute(text(query), params)).fetchall()
+
+            for sub_id, device_limit, traffic_gb, remnawave_uuid, telegram_id in candidates:
+                plan_id, new_device_limit, new_traffic_gb = _pick_plan_for_legacy_subscription(
+                    device_limit, traffic_gb, plans
+                )
+                plan_code = plans_by_id[plan_id]
+                by_plan[plan_code] = by_plan.get(plan_code, 0) + 1
+                legacy_devices = device_limit if device_limit and device_limit > 0 else 1
+                if new_device_limit > max(p["device_limit"] for p in plans):
+                    kept_higher_limit += 1
+
+                logger.info(
+                    "  → tg=%s: %s устр. / %s → тариф %s, %s устр. / %s",
+                    telegram_id,
+                    legacy_devices,
+                    "безлимит" if not traffic_gb else f"{traffic_gb} ГБ",
+                    plan_code,
+                    new_device_limit,
+                    "безлимит" if not new_traffic_gb else f"{new_traffic_gb} ГБ",
+                )
+
+                updates.append({
+                    "id": sub_id,
+                    "plan_id": plan_id,
+                    "device_limit": new_device_limit,
+                    "traffic_gb": new_traffic_gb,
+                })
+                if remnawave_uuid:
+                    payloads.append((remnawave_uuid, new_device_limit, new_traffic_gb))
+
+            summary = ", ".join(f"{code}: {by_plan.get(code, 0)}" for code in _LEGACY_MIGRATION_PLAN_CODES)
+            logger.info(
+                "  → Кандидатов на перевод: %d (%s), с сохранённым повышенным лимитом устройств: %d",
+                len(updates), summary, kept_higher_limit,
+            )
+
+            if mode == "dry":
+                logger.info("  → Режим dry — изменения не применяются")
+                return True
+
+            for item in updates:
+                # plan_id IS NULL в WHERE — защита от гонки с параллельной покупкой тарифа.
+                await conn.execute(
+                    text(
+                        "UPDATE subscriptions SET plan_id = :plan_id, "
+                        "plan_period_days = :period, device_limit = :device_limit, "
+                        "traffic_limit_gb = :traffic_gb, updated_at = :now "
+                        "WHERE id = :id AND plan_id IS NULL"
+                    ),
+                    {
+                        "plan_id": item["plan_id"],
+                        "period": _LEGACY_MIGRATION_PERIOD_DAYS,
+                        "device_limit": item["device_limit"],
+                        "traffic_gb": item["traffic_gb"],
+                        "now": now,
+                        "id": item["id"],
+                    },
+                )
+
+        if updates:
+            logger.info(f"  → Переведено подписок на тарифы: {len(updates)}")
+            await _push_limits_to_panel(payloads)
+
+        await _heal_plan_subscriptions_below_plan_limit()
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка перевода легаси-подписок на тарифы: {e}")
+        return False
+
+
 async def create_advertising_campaigns_table() -> bool:
     if await check_table_exists('advertising_campaigns'):
         logger.info("ℹ️ Таблица advertising_campaigns уже существует")
@@ -7776,6 +8043,13 @@ async def run_universal_migration():
                 logger.info("✅ Формулировка описаний тарифов актуальна")
             else:
                 logger.warning("⚠️ Проблемы с обновлением описаний тарифов")
+
+            if settings.get_legacy_tariff_migration_mode() != "off":
+                logger.info("=== ПЕРЕВОД ЛЕГАСИ-ПОДПИСОК НА ТАРИФЫ ===")
+                if await migrate_legacy_subscriptions_to_plans():
+                    logger.info("✅ Перевод легаси-подписок на тарифы завершён")
+                else:
+                    logger.warning("⚠️ Проблемы с переводом легаси-подписок на тарифы")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ ADVERTISING_CAMPAIGNS ===")
         ad_campaigns_ready = await create_advertising_campaigns_table()

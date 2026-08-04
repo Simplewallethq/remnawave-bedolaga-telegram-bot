@@ -223,6 +223,14 @@ class Settings(BaseSettings):
     # 2026-06-09T12:00:00 UTC = 2026-06-09 15:00 МСК.
     TARIFFS_NEW_PRICING_CUTOFF: str = "2026-06-09T12:00:00"
 
+    # Разовый перевод легаси-подписок (plan_id IS NULL) на тарифы при старте бота.
+    # off   — выключено (по умолчанию; чужие инсталляции не должны мигрировать внезапно)
+    # dry   — только отчёт в логах, БД и панель не трогаем
+    # apply — выполнить перевод
+    LEGACY_TARIFF_MIGRATION_MODE: str = "off"
+    # Необязательный пилот: CSV telegram_id, ограничивающий выборку миграции.
+    LEGACY_TARIFF_MIGRATION_TELEGRAM_IDS: str = ""
+
     # Настройки простой покупки
     SIMPLE_SUBSCRIPTION_ENABLED: bool = True
     SIMPLE_SUBSCRIPTION_PERIOD_DAYS: int = 30
@@ -912,6 +920,25 @@ class Settings(BaseSettings):
         if parsed.tzinfo is not None:
             parsed = parsed.astimezone(dt_timezone.utc).replace(tzinfo=None)
         return parsed
+
+    def get_legacy_tariff_migration_mode(self) -> str:
+        """Normalized mode of the one-off legacy→tariff migration: off | dry | apply."""
+        raw = str(getattr(self, "LEGACY_TARIFF_MIGRATION_MODE", "off") or "off").strip().lower()
+        return raw if raw in {"off", "dry", "apply"} else "off"
+
+    def get_legacy_tariff_migration_telegram_ids(self) -> List[int]:
+        """Optional pilot allow-list for the legacy→tariff migration. Empty = everyone."""
+        raw = str(getattr(self, "LEGACY_TARIFF_MIGRATION_TELEGRAM_IDS", "") or "")
+        ids: List[int] = []
+        for chunk in raw.replace(";", ",").split(","):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            try:
+                ids.append(int(chunk))
+            except ValueError:
+                continue
+        return ids
 
     def is_auto_purchase_after_topup_enabled(self) -> bool:
         value = getattr(self, "AUTO_PURCHASE_AFTER_TOPUP_ENABLED", False)
