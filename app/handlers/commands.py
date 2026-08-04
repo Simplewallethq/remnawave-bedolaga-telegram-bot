@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import User
 from app.handlers import menu, subscription
+from app.localization.language import resolve_telegram_language
+from app.localization.texts import get_texts
 from app.utils.fsm import clear_state_preserving_pending_start_payload
 
 
@@ -23,8 +25,14 @@ class _CommandScreenCallback:
             await self.message.edit_text(text)
 
 
-async def _create_screen_callback(message: types.Message) -> _CommandScreenCallback:
-    screen_message = await message.answer("Loading...")
+async def _create_screen_callback(
+    message: types.Message,
+    language: str | None = None,
+) -> _CommandScreenCallback:
+    texts = get_texts(
+        language or resolve_telegram_language(getattr(message.from_user, "language_code", None))
+    )
+    screen_message = await message.answer(texts.t("LOADING", "Loading..."))
     return _CommandScreenCallback(message, screen_message)
 
 
@@ -45,7 +53,7 @@ async def command_subscription(
 ) -> None:
     await clear_state_preserving_pending_start_payload(state)
     await subscription.purchase.handle_subscription_menu(
-        await _create_screen_callback(message), db_user, db
+        await _create_screen_callback(message, getattr(db_user, "language", None)), db_user, db
     )
 
 
@@ -56,7 +64,9 @@ async def command_referrals(
     db: AsyncSession,
 ) -> None:
     await clear_state_preserving_pending_start_payload(state)
-    await menu.handle_referral(await _create_screen_callback(message), db_user, db)
+    await menu.handle_referral(
+        await _create_screen_callback(message, getattr(db_user, "language", None)), db_user, db
+    )
 
 
 async def command_profile(
@@ -66,7 +76,9 @@ async def command_profile(
     db: AsyncSession,
 ) -> None:
     await clear_state_preserving_pending_start_payload(state)
-    await menu.handle_profile(await _create_screen_callback(message), db_user, db)
+    await menu.handle_profile(
+        await _create_screen_callback(message, getattr(db_user, "language", None)), db_user, db
+    )
 
 
 async def command_support(
@@ -76,7 +88,9 @@ async def command_support(
     db: AsyncSession,
 ) -> None:
     await clear_state_preserving_pending_start_payload(state)
-    await menu.handle_support(await _create_screen_callback(message), db_user, db)
+    await menu.handle_support(
+        await _create_screen_callback(message, getattr(db_user, "language", None)), db_user, db
+    )
 
 
 def register_handlers(dp: Dispatcher) -> None:

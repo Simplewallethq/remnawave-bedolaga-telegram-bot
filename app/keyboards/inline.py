@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings, PERIOD_PRICES, TRAFFIC_PRICES
 from app.localization.loader import DEFAULT_LANGUAGE
+from app.localization.language import INTERFACE_LANGUAGES
 from app.localization.texts import get_texts
 from app.utils.install_referrer import build_personal_play_link
 from app.utils.miniapp_buttons import build_miniapp_or_callback_button
@@ -327,7 +328,7 @@ def get_language_selection_keyboard(
     include_back: bool = False,
     language: str = DEFAULT_LANGUAGE,
 ) -> InlineKeyboardMarkup:
-    available_languages = settings.get_available_languages()
+    available_languages = INTERFACE_LANGUAGES
 
     buttons: List[List[InlineKeyboardButton]] = []
     row: List[InlineKeyboardButton] = []
@@ -3153,6 +3154,26 @@ def get_onboarding_welcome_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineK
     ])
 
 
+def get_onboarding_trial_install_keyboard(
+    install_url: Optional[str],
+    language: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    texts = get_texts(language)
+    buttons: List[List[InlineKeyboardButton]] = []
+
+    if install_url:
+        buttons.append([InlineKeyboardButton(
+            text=texts.t("ONBOARDING_INSTALL_VPN_BUTTON", "🛡 Установить VPN"),
+            url=install_url,
+        )])
+
+    buttons.append([InlineKeyboardButton(
+        text=texts.t("ONBOARDING_MAIN_MENU_BUTTON", "🏠 Основное меню"),
+        callback_data="main_menu",
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def get_onboarding_device_selection_keyboard(
     language: str = DEFAULT_LANGUAGE,
 ) -> InlineKeyboardMarkup:
@@ -3482,19 +3503,30 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
     if balance_kopeks >= price_kopeks > 0:
         balance_rub = balance_kopeks / 100
         buttons.append([InlineKeyboardButton(
-            text=f"💰 Оплатить с баланса ({balance_rub:.0f}₽)",
+            text=texts.t("PAYMENT_PAY_BALANCE", "💰 Оплатить с баланса ({balance}₽)").format(
+                balance=f"{balance_rub:.0f}",
+            ),
             callback_data=_build_callback("balance")
         )])
 
     # Telegram Stars
     if settings.TELEGRAM_STARS_ENABLED:
-        buttons.append([InlineKeyboardButton(text="⭐️ Telegram Stars", callback_data=_build_callback("stars"))])
+        buttons.append([InlineKeyboardButton(
+            text=texts.t("PAYMENT_METHOD_STARS", "⭐️ Telegram Stars"),
+            callback_data=_build_callback("stars"),
+        )])
     
     # YooKassa (SBP or Card)
     if settings.is_yookassa_enabled():
         if settings.YOOKASSA_SBP_ENABLED:
-            buttons.append([InlineKeyboardButton(text="🏦 СБП (YooKassa)", callback_data=_build_callback("yookassa_sbp"))])
-        buttons.append([InlineKeyboardButton(text="💳 Карта (YooKassa)", callback_data=_build_callback("yookassa"))])
+            buttons.append([InlineKeyboardButton(
+                text=texts.t("PAYMENT_METHOD_SBP_YOOKASSA", "🏦 СБП (YooKassa)"),
+                callback_data=_build_callback("yookassa_sbp"),
+            )])
+        buttons.append([InlineKeyboardButton(
+            text=texts.t("PAYMENT_METHOD_CARD_YOOKASSA", "💳 Карта (YooKassa)"),
+            callback_data=_build_callback("yookassa"),
+        )])
     
     # Platega
     if (
@@ -3503,7 +3535,10 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
         and not settings.is_platega_universal_enabled()
     ):
         platega_name = settings.get_platega_display_name()
-        buttons.append([InlineKeyboardButton(text="💳 СБП/Банковская карта", callback_data=_build_callback("platega"))])
+        buttons.append([InlineKeyboardButton(
+            text=texts.t("PAYMENT_METHOD_SBP_CARD", "💳 СБП/Банковская карта"),
+            callback_data=_build_callback("platega"),
+        )])
 
     if settings.is_platega_universal_enabled():
         buttons.append([InlineKeyboardButton(
@@ -3513,11 +3548,17 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
 
     # PayPalych (pal24)
     if settings.is_pal24_enabled():
-        buttons.append([InlineKeyboardButton(text="🏦 СБП (PayPalych)", callback_data=_build_callback("pal24"))])
+        buttons.append([InlineKeyboardButton(
+            text=texts.t("PAYMENT_METHOD_SBP_PAYPALYCH", "🏦 СБП (PayPalych)"),
+            callback_data=_build_callback("pal24"),
+        )])
     
     # WATA
     if settings.is_wata_enabled():
-        buttons.append([InlineKeyboardButton(text="💳 Карта (WATA)", callback_data=_build_callback("wata"))])
+        buttons.append([InlineKeyboardButton(
+            text=texts.t("PAYMENT_METHOD_CARD_WATA", "💳 Карта (WATA)"),
+            callback_data=_build_callback("wata"),
+        )])
     
     # Mulenpay
     if settings.is_mulenpay_enabled():

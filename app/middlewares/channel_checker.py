@@ -13,7 +13,7 @@ from app.database.crud.subscription import deactivate_subscription
 from app.database.crud.user import get_user_by_telegram_id
 from app.database.models import SubscriptionStatus
 from app.keyboards.inline import get_channel_sub_keyboard
-from app.localization.loader import DEFAULT_LANGUAGE
+from app.localization.language import resolve_telegram_language
 from app.localization.texts import get_texts
 from app.utils.check_reg_process import is_registration_process
 from app.services.subscription_service import SubscriptionService
@@ -114,7 +114,16 @@ class ChannelCheckerMiddleware(BaseMiddleware):
                 await self._capture_start_payload(state, event, bot)
 
                 if isinstance(event, CallbackQuery) and event.data == "sub_channel_check":
-                    await event.answer("❌ Вы еще не подписались на канал! Подпишитесь и попробуйте снова.", show_alert=True)
+                    texts = get_texts(
+                        resolve_telegram_language(getattr(event.from_user, "language_code", None))
+                    )
+                    await event.answer(
+                        texts.t(
+                            "CHANNEL_SUBSCRIBE_REQUIRED_ALERT",
+                            "❌ Вы еще не подписались на канал! Подпишитесь и попробуйте снова.",
+                        ),
+                        show_alert=True,
+                    )
                     return
 
                 return await self._deny_message(event, bot, channel_link, channel_id)
@@ -325,9 +334,9 @@ class ChannelCheckerMiddleware(BaseMiddleware):
             elif event.callback_query and event.callback_query.from_user:
                 user = event.callback_query.from_user
 
-        language = DEFAULT_LANGUAGE
-        if user and user.language_code:
-            language = user.language_code.split('-')[0]
+        language = resolve_telegram_language(
+            getattr(user, "language_code", None) if user else None
+        )
 
         texts = get_texts(language)
         channel_sub_kb = get_channel_sub_keyboard(channel_link, language=language)

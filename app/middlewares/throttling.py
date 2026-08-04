@@ -6,6 +6,9 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery, TelegramObject
 from aiogram.fsm.context import FSMContext
 
+from app.localization.language import resolve_telegram_language
+from app.localization.texts import get_texts
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,6 +37,9 @@ class ThrottlingMiddleware(BaseMiddleware):
         
         if now - last_call < self.rate_limit:
             logger.warning(f"🚫 Throttling для пользователя {user_id}")
+            texts = get_texts(
+                resolve_telegram_language(getattr(event.from_user, "language_code", None))
+            )
 
             # Для сообщений: молчим только если это состояние работы с тикетами; иначе показываем блок
             if isinstance(event, Message):
@@ -53,11 +59,14 @@ class ThrottlingMiddleware(BaseMiddleware):
                 if is_ticket_state:
                     return
                 # В остальных случаях — явный блок
-                await event.answer("⏳ Пожалуйста, не отправляйте сообщения так часто!")
+                await event.answer(texts.t("THROTTLE_MESSAGE", "⏳ Пожалуйста, не отправляйте сообщения так часто!"))
                 return
             # Для callback допустим краткое уведомление
             elif isinstance(event, CallbackQuery):
-                await event.answer("⏳ Слишком быстро! Подождите немного.", show_alert=True)
+                await event.answer(
+                    texts.t("THROTTLE_ALERT", "⏳ Слишком быстро! Подождите немного."),
+                    show_alert=True,
+                )
                 return
         
         self.user_buckets[user_id] = now
