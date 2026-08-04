@@ -18,7 +18,7 @@ async def start_tribute_payment(
     texts = get_texts(db_user.language)
 
     if not settings.TRIBUTE_ENABLED:
-        await callback.answer("❌ Оплата картой временно недоступна", show_alert=True)
+        await callback.answer(texts.t("PAYMENT_UNAVAILABLE_CARD"), show_alert=True)
         return
 
     try:
@@ -32,12 +32,12 @@ async def start_tribute_payment(
         )
 
         if not payment_url:
-            await callback.answer("❌ Ошибка создания платежа", show_alert=True)
+            await callback.answer(texts.t("PAYMENT_CREATE_ERROR"), show_alert=True)
             return
 
         keyboard = types.InlineKeyboardMarkup(
             inline_keyboard=[
-                [types.InlineKeyboardButton(text="💳 Перейти к оплате", url=payment_url)],
+                [types.InlineKeyboardButton(text=texts.t("PAYMENT_GO_TO"), url=payment_url)],
                 [types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")],
             ]
         )
@@ -66,6 +66,6 @@ async def start_tribute_payment(
 
     except Exception as e:
         logger.error(f"Ошибка создания Tribute платежа: {e}")
-        await callback.answer("❌ Ошибка создания платежа", show_alert=True)
+        await callback.answer(texts.t("PAYMENT_CREATE_ERROR"), show_alert=True)
 
     await callback.answer()

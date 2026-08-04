@@ -247,7 +247,7 @@ async def handle_subscription_cancel(
     from app.handlers.menu import show_main_menu
     await show_main_menu(callback, db_user, db)
 
-    await callback.answer("❌ Покупка отменена")
+    await callback.answer(texts.t("PURCHASE_CANCELLED", "❌ Покупка отменена"))
 async def _show_previous_configuration_step(
         callback: types.CallbackQuery,
         state: FSMContext,
@@ -281,4 +281,3 @@ async def _show_previous_configuration_step(
         parse_mode="HTML",
     )
     await state.set_state(SubscriptionStates.selecting_period)
-

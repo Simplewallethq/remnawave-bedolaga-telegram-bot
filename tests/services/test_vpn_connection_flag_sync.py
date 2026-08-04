@@ -297,7 +297,7 @@ async def test_trial_inactivity_24h_uses_flag_not_traffic(monkeypatch):
     service._send_trial_inactive_notification.assert_awaited_once_with(user, subscription, 24)
 
 
-async def test_trial_inactive_sender_uses_hardcoded_1h_message_and_buttons():
+async def test_trial_inactive_sender_localizes_1h_message_and_buttons():
     user = SimpleNamespace(id=1, telegram_id=123, language="en")
     subscription = SimpleNamespace(end_date=datetime.utcnow() + timedelta(days=1))
 
@@ -311,18 +311,18 @@ async def test_trial_inactive_sender_uses_hardcoded_1h_message_and_buttons():
     buttons = [row[0] for row in keyboard.inline_keyboard]
 
     assert call_kwargs["text"] == (
-        "👋 <b>Застрял на подключении?</b>\n\n"
-        "Доступ уже активен — покажем, как подключиться за минуту."
+        "👋 <b>Stuck connecting?</b>\n\n"
+        "Your access is already active — we'll show you how to connect in a minute."
     )
     assert len(keyboard.inline_keyboard) == 2
     assert [(button.text, button.callback_data) for button in buttons] == [
-        ("📲 Подключиться", "subscription_connect"),
-        ("🆘 Поддержка", "menu_support"),
+        ("🔗 Connect", "subscription_connect"),
+        ("🆘 Support", "menu_support"),
     ]
     assert all(button.text != "📱 Моя подписка" for button in buttons)
 
 
-async def test_trial_inactive_sender_uses_hardcoded_24h_message_and_buttons():
+async def test_trial_inactive_sender_localizes_24h_message_and_buttons():
     user = SimpleNamespace(id=1, telegram_id=123, language="en")
     subscription = SimpleNamespace(end_date=datetime.utcnow() + timedelta(days=1))
 
@@ -336,14 +336,13 @@ async def test_trial_inactive_sender_uses_hardcoded_24h_message_and_buttons():
     buttons = [row[0] for row in keyboard.inline_keyboard]
 
     assert call_kwargs["text"] == (
-        "⏳ <b>Твой тест уходит впустую</b>\n\n"
-        "Сутки прошли, а VPN так и не подключён. Давай исправим —\n"
-        "это пара минут."
+        "⏳ <b>Your trial is going unused</b>\n\n"
+        "A day has passed and VPN is still not connected. Let's fix it — it only takes a couple of minutes."
     )
     assert len(keyboard.inline_keyboard) == 2
     assert [(button.text, button.callback_data) for button in buttons] == [
-        ("📲 Подключиться", "subscription_connect"),
-        ("🆘 Поддержка", "menu_support"),
+        ("🔗 Connect", "subscription_connect"),
+        ("🆘 Support", "menu_support"),
     ]
     assert all(button.text != "📱 Моя подписка" for button in buttons)
 

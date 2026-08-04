@@ -23,6 +23,7 @@ from app.services.expired_subscription_offer_service import (
 )
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
+from app.localization.texts import get_texts
 
 
 logger = logging.getLogger(__name__)
@@ -585,6 +586,7 @@ class InteractiveNotificationService:
     ) -> Optional[int]:
         if not self.bot or candidate.user.telegram_id is None:
             return None
+        texts = get_texts(candidate.user.language)
 
         if slot_key == hot_invoice_offer_service.FIRST_SLOT_KEY:
             minutes_left = hot_invoice_offer_service.invoice_minutes_left(
@@ -598,7 +600,10 @@ class InteractiveNotificationService:
             )
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="✅ Завершить оплату", url=candidate.payment.redirect_url)]
+                    [InlineKeyboardButton(
+                        text=texts.t("NOTIFICATION_COMPLETE_PAYMENT_BUTTON", "✅ Завершить оплату"),
+                        url=candidate.payment.redirect_url,
+                    )]
                 ]
             )
         elif slot_key == hot_invoice_offer_service.SECOND_SLOT_KEY:
@@ -608,7 +613,10 @@ class InteractiveNotificationService:
             )
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="💎 Вернуться к оплате", callback_data="menu_buy")]
+                    [InlineKeyboardButton(
+                        text=texts.t("NOTIFICATION_RETURN_TO_PAYMENT_BUTTON", "💎 Вернуться к оплате"),
+                        callback_data="menu_buy",
+                    )]
                 ]
             )
         elif slot_key == hot_invoice_offer_service.THIRD_SLOT_KEY:
@@ -618,8 +626,14 @@ class InteractiveNotificationService:
             )
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="💎 Оформить", callback_data="menu_buy")],
-                    [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu_support")],
+                    [InlineKeyboardButton(
+                        text=texts.t("NOTIFICATION_PURCHASE_BUTTON", "💎 Оформить"),
+                        callback_data="menu_buy",
+                    )],
+                    [InlineKeyboardButton(
+                        text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"),
+                        callback_data="menu_support",
+                    )],
                 ]
             )
         else:

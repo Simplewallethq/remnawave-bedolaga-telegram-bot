@@ -34,11 +34,10 @@ from app.keyboards.inline import (
     get_main_menu_keyboard,
     get_main_menu_keyboard_async,
     get_post_registration_keyboard,
-    get_language_selection_keyboard,
     get_welcome_keyboard,
     get_new_main_menu_keyboard,
     get_onboarding_device_selection_keyboard,
-    get_onboarding_welcome_keyboard,
+    get_onboarding_trial_install_keyboard,
 )
 from app.database.crud.subscription import (
     create_trial_subscription,
@@ -57,6 +56,7 @@ from app.services.trial_activation_service import (
 )
 from app.handlers.menu import get_main_menu_text
 from app.localization.loader import DEFAULT_LANGUAGE
+from app.localization.language import resolve_telegram_language
 from app.localization.texts import get_texts, get_rules, get_privacy_policy
 from app.services.referral_service import process_referral_registration
 from app.services.campaign_service import AdvertisingCampaignService
@@ -333,7 +333,7 @@ async def _auto_activate_partner_and_show_device_selection(
 ) -> bool:
     """Activate partner subscription during registration and show device selection.
 
-    Mirrors _auto_activate_trial_and_show_device_selection. If partner activation
+    Mirrors the trial activation flow. If partner activation
     falls back (e.g. user already has paid sub, or token replayed), caller is
     responsible for the fallback UX.
     """
@@ -383,7 +383,7 @@ async def _auto_activate_partner_and_show_device_selection(
     return True
 
 
-async def _auto_activate_trial_and_show_device_selection(
+async def _auto_activate_trial_and_show_install_prompt(
     bot,
     db: AsyncSession,
     user,
@@ -392,7 +392,7 @@ async def _auto_activate_trial_and_show_device_selection(
     language: str | None = None,
 ):
     """
-    Auto-activate trial subscription during registration and show device selection.
+    Auto-activate trial subscription during registration and show the install prompt.
     Used by both complete_registration (message) and complete_registration_from_callback (callback).
     """
     ok = await activate_trial_for_user(bot, db, user)
@@ -400,45 +400,74 @@ async def _auto_activate_trial_and_show_device_selection(
         # Fallback: show main menu if trial activation fails
         return False
 
-    # Show device selection directly (Screen 2)
-    lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
-    texts = get_texts(lang)
-    # Ключ на этом экране не показываем — он есть внутри платформенных инструкций.
-    device_selection_text = texts.t(
-        "ONBOARDING_DEVICE_SELECTION_TEXT",
-        "Для подключения основного или дополнительного устройства выбери платформу:",
+    await _show_trial_install_prompt(
+        db,
+        user,
+        message_or_callback,
+        is_callback=is_callback,
+        language=language,
     )
 
-    image_path = os.path.join("images", "device_selection_screen.png")
-    if not os.path.exists(image_path):
-        image_path = None
+    return True
 
-    keyboard = get_onboarding_device_selection_keyboard(lang)
+
+async def _show_trial_install_prompt(
+    db: AsyncSession,
+    user,
+    message_or_callback,
+    *,
+    is_callback: bool,
+    language: str | None,
+) -> None:
+    subscription = getattr(user, "subscription", None)
+    if not subscription or getattr(subscription, "actual_status", None) not in {"trial", "active"}:
+        logger.error(
+            "Trial install prompt skipped for %s: subscription is not active",
+            getattr(user, "telegram_id", "unknown"),
+        )
+        return
+
+    lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
+    texts = get_texts(lang)
+    install_url = None
+    site_base_url = settings.get_share_site_base_url()
+
+    if site_base_url:
+        try:
+            from app.database.crud.share_token import get_or_create_share_token
+
+            token = await get_or_create_share_token(
+                db,
+                subscription.id,
+                max_activations=settings.SHARE_MAX_ACTIVATIONS,
+            )
+            install_url = f"{site_base_url}/s/{token.token}"
+        except Exception as error:  # noqa: BLE001
+            logger.error(
+                "Failed to create install URL for user %s: %s",
+                getattr(user, "telegram_id", "unknown"),
+                error,
+            )
+    else:
+        logger.error("SHARE_SITE_BASE_URL is not configured; install button is unavailable")
+
+    text = texts.t(
+        "ONBOARDING_TRIAL_INSTALL_TEXT",
+        "Привет, тебе доступна бесплатная подписка на 3 дня! "
+        "Установи приложение и пользуйся - займет меньше минуты.",
+    )
+    keyboard = get_onboarding_trial_install_keyboard(install_url, lang)
 
     if is_callback:
         await edit_or_answer_photo(
             callback=message_or_callback,
-            caption=device_selection_text,
+            caption=text,
             keyboard=keyboard,
-            photo_path=image_path,
+            force_text=True,
             parse_mode="HTML",
         )
     else:
-        if image_path:
-            await message_or_callback.answer_photo(
-                photo=types.FSInputFile(image_path),
-                caption=device_selection_text,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
-        else:
-            await message_or_callback.answer(
-                device_selection_text,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
-
-    return True
+        await message_or_callback.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 async def _activate_trial_or_deny_for_device(
@@ -488,7 +517,7 @@ async def _activate_trial_or_deny_for_device(
             logger.error("Не удалось отправить сообщение об отказе в триале: %s", e)
         return True
 
-    return await _auto_activate_trial_and_show_device_selection(
+    return await _auto_activate_trial_and_show_install_prompt(
         bot, db, user, message_or_callback, is_callback=is_callback, language=language
     )
 
@@ -649,20 +678,6 @@ async def handle_potential_referral_code(
     return True
 
 
-def _get_language_prompt_text() -> str:
-    return "🌐 Выберите язык / Choose your language:"
-
-
-async def _prompt_language_selection(message: types.Message, state: FSMContext) -> None:
-    logger.info(f"🌐 LANGUAGE: Запрос выбора языка для пользователя {message.from_user.id}")
-
-    await state.set_state(RegistrationStates.waiting_for_language)
-    await message.answer(
-        _get_language_prompt_text(),
-        reply_markup=get_language_selection_keyboard(),
-    )
-
-
 async def _continue_registration_after_language(
     *,
     message: types.Message | None,
@@ -728,6 +743,7 @@ async def _send_cabinet_login_link(message: types.Message, user, texts) -> None:
 
 async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession, db_user=None):
     logger.info(f"🚀 START: Обработка /start от {message.from_user.id}")
+    telegram_language_code = getattr(message.from_user, "language_code", None)
 
     start_args = message.text.split()
     if len(start_args) == 1:
@@ -859,6 +875,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
         logger.info(f"✅ Активный пользователь найден: {user.telegram_id}")
 
         profile_updated = False
+        resolved_language = resolve_telegram_language(telegram_language_code)
 
         if user.username != message.from_user.username:
             old_username = user.username
@@ -876,6 +893,14 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             old_last_name = user.last_name
             user.last_name = message.from_user.last_name
             logger.info(f"📝 Фамилия обновлена: '{old_last_name}' → '{user.last_name}'")
+            profile_updated = True
+
+        if getattr(user, "language_code", None) != telegram_language_code:
+            user.language_code = telegram_language_code
+            profile_updated = True
+
+        if user.language != resolved_language:
+            user.language = resolved_language
             profile_updated = True
 
         user.last_activity = datetime.utcnow()
@@ -1116,119 +1141,17 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
         logger.info(f"🆕 Новый пользователь, начинаем регистрацию")
 
     data = await state.get_data() or {}
-    if not data.get('language'):
-        if settings.is_language_selection_enabled():
-            await _prompt_language_selection(message, state)
-            return
-
-        default_language = (
-            (settings.DEFAULT_LANGUAGE or DEFAULT_LANGUAGE)
-            if isinstance(settings.DEFAULT_LANGUAGE, str)
-            else DEFAULT_LANGUAGE
-        )
-        normalized_default = default_language.split("-")[0].lower()
-        data['language'] = normalized_default
-        await state.set_data(data)
-        logger.info(
-            "🌐 LANGUAGE: выбор языка отключен, устанавливаем язык по умолчанию '%s'",
-            normalized_default,
-        )
+    data['language'] = resolve_telegram_language(telegram_language_code)
+    await state.set_data(data)
+    logger.info(
+        "🌐 LANGUAGE: Telegram locale '%s' resolved to '%s'",
+        telegram_language_code,
+        data['language'],
+    )
 
     await _continue_registration_after_language(
         message=message,
         callback=None,
-        state=state,
-        db=db,
-    )
-
-
-async def process_language_selection(
-    callback: types.CallbackQuery,
-    state: FSMContext,
-    db: AsyncSession,
-):
-    logger.info(
-        f"🌐 LANGUAGE: Пользователь {callback.from_user.id} выбрал язык ({callback.data})"
-    )
-
-    if not settings.is_language_selection_enabled():
-        data = await state.get_data() or {}
-        default_language = (
-            (settings.DEFAULT_LANGUAGE or DEFAULT_LANGUAGE)
-            if isinstance(settings.DEFAULT_LANGUAGE, str)
-            else DEFAULT_LANGUAGE
-        )
-        normalized_default = default_language.split("-")[0].lower()
-        data['language'] = normalized_default
-        await state.set_data(data)
-
-        texts = get_texts(normalized_default)
-
-        try:
-            await callback.message.edit_text(
-                texts.t(
-                    "LANGUAGE_SELECTION_DISABLED",
-                    "⚙️ Выбор языка временно недоступен. Используем язык по умолчанию.",
-                )
-            )
-        except Exception:
-            await callback.message.answer(
-                texts.t(
-                    "LANGUAGE_SELECTION_DISABLED",
-                    "⚙️ Выбор языка временно недоступен. Используем язык по умолчанию.",
-                )
-            )
-
-        await callback.answer()
-
-        await _continue_registration_after_language(
-            message=None,
-            callback=callback,
-            state=state,
-            db=db,
-        )
-        return
-
-    selected_raw = (callback.data or "").split(":", 1)[-1]
-    normalized_selected = selected_raw.strip().lower()
-
-    available_map = {
-        lang.strip().lower(): lang.strip()
-        for lang in settings.get_available_languages()
-        if isinstance(lang, str) and lang.strip()
-    }
-
-    if normalized_selected not in available_map:
-        logger.warning(
-            f"⚠️ LANGUAGE: Выбран недоступный язык '{normalized_selected}' пользователем {callback.from_user.id}"
-        )
-        await callback.answer("❌ Unsupported language", show_alert=True)
-        return
-
-    resolved_language = available_map[normalized_selected].lower()
-
-    data = await state.get_data() or {}
-    data['language'] = resolved_language
-    await state.set_data(data)
-
-    texts = get_texts(resolved_language)
-
-    try:
-        await callback.message.edit_text(
-            texts.t("LANGUAGE_SELECTED", "🌐 Язык интерфейса обновлен."),
-        )
-    except Exception as error:
-        logger.warning(
-            f"⚠️ LANGUAGE: Не удалось обновить сообщение выбора языка: {error}")
-        await callback.message.answer(
-            texts.t("LANGUAGE_SELECTED", "🌐 Язык интерфейса обновлен."),
-        )
-
-    await callback.answer()
-
-    await _continue_registration_after_language(
-        message=None,
-        callback=callback,
         state=state,
         db=db,
     )
@@ -2253,14 +2176,16 @@ async def required_sub_channel_check(
     db: AsyncSession,
     db_user=None
 ):
-    language = DEFAULT_LANGUAGE
+    telegram_language_code = getattr(query.from_user, "language_code", None)
+    language = resolve_telegram_language(telegram_language_code)
     texts = get_texts(language)
 
     try:
         state_data = await state.get_data() or {}
+        state_data['language'] = language
 
         pending_start_payload = state_data.pop("pending_start_payload", None)
-        state_updated = pending_start_payload is not None
+        state_updated = True
 
         if pending_start_payload:
             logger.info(
@@ -2312,10 +2237,13 @@ async def required_sub_channel_check(
         if not user:
             user = await get_user_by_telegram_id(db, query.from_user.id)
 
-        if user and getattr(user, "language", None):
-            language = user.language
-        elif state_data.get("language"):
-            language = state_data["language"]
+        if user and (
+            user.language != language
+            or getattr(user, "language_code", None) != telegram_language_code
+        ):
+            user.language = language
+            user.language_code = telegram_language_code
+            await db.commit()
 
         texts = get_texts(language)
 
@@ -2508,13 +2436,6 @@ def register_handlers(dp: Dispatcher):
         StateFilter(RegistrationStates.waiting_for_privacy_policy_accept)
     )
     logger.info("✅ Зарегистрирован process_privacy_policy_accept")
-
-    dp.callback_query.register(
-        process_language_selection,
-        F.data.startswith("language_select:"),
-        StateFilter(RegistrationStates.waiting_for_language)
-    )
-    logger.info("✅ Зарегистрирован process_language_selection")
 
     dp.callback_query.register(
         process_referral_code_skip,

@@ -24,7 +24,7 @@ async def test_connect_command_reuses_howto_handler(monkeypatch):
     await commands.command_connect(message, state, db)
 
     state.clear.assert_awaited_once()
-    message.answer.assert_awaited_once_with("Loading...")
+    message.answer.assert_awaited_once_with("⏳ Loading...")
     callback, received_state, received_db = handler.await_args.args
     assert callback.message is message.answer.return_value
     assert callback.from_user is message.from_user

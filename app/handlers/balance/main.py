@@ -20,6 +20,7 @@ from app.keyboards.inline import (
     get_back_keyboard, get_pagination_keyboard
 )
 from app.localization.texts import get_texts
+from app.localization.language import resolve_telegram_language
 from app.services.payment_service import PaymentService
 from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 from app.utils.success_notifications import (
@@ -386,12 +387,13 @@ async def show_vpn_deposit_bonus_payment_methods(
     db: AsyncSession,
     state: FSMContext,
 ):
+    texts = get_texts(db_user.language)
     campaign_metadata = await vpn_deposit_bonus_service.get_payable_campaign_metadata(
         db,
         db_user.id,
     )
     if not campaign_metadata:
-        await callback.answer("Предложение уже истекло", show_alert=True)
+        await callback.answer(texts.t("OFFER_EXPIRED"), show_alert=True)
         return
 
     await state.clear()
@@ -402,13 +404,7 @@ async def show_vpn_deposit_bonus_payment_methods(
         payment_method="select_after",
     )
 
-    texts = get_texts(db_user.language)
-    prompt = (
-        "💳 <b>Бонус 100₽ на баланс</b>\n\n"
-        "Сумма к оплате: 10₽\n"
-        "После успешной оплаты начислим 100₽ на баланс.\n\n"
-        "Выберите способ оплаты:"
-    )
+    prompt = texts.t("VPN_DEPOSIT_BONUS_PAYMENT_PROMPT")
     keyboard = get_payment_methods_keyboard(
         vpn_deposit_bonus_service.INVOICE_AMOUNT_KOPEKS,
         db_user.language,
@@ -453,15 +449,15 @@ async def handle_successful_topup_with_cart(
             
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
                 [types.InlineKeyboardButton(
-                    text="🛒 Вернуться к оформлению подписки", 
+                    text=texts.t("RETURN_TO_SAVED_CART"),
                     callback_data="return_to_saved_cart"
                 )],
                 [types.InlineKeyboardButton(
-                    text="💰 Мой баланс", 
+                    text=texts.t("MY_BALANCE_BUTTON"),
                     callback_data="menu_balance"
                 )],
                 [types.InlineKeyboardButton(
-                    text="🏠 Главное меню", 
+                    text=texts.t("ONBOARDING_MAIN_MENU_BUTTON"),
                     callback_data="back_to_menu"
                 )]
             ])
@@ -496,28 +492,14 @@ async def request_support_topup(
         )
         return
 
-    support_text = f"""
-🛠️ <b>Пополнение через поддержку</b>
-
-Для пополнения баланса обратитесь в техподдержку:
-{settings.get_support_contact_display_html()}
-
-Укажите:
-• ID: {db_user.telegram_id}
-• Сумму пополнения
-• Способ оплаты
-
-⏰ Время обработки: 1-24 часа
-
-<b>Доступные способы:</b>
-• Криптовалюта
-• Переводы между банками
-• Другие платежные системы
-"""
+    support_text = texts.t("SUPPORT_TOPUP_TEXT").format(
+        support_contact=settings.get_support_contact_display_html(),
+        telegram_id=db_user.telegram_id,
+    )
     
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(
-            text="💬 Написать в поддержку",
+            text=texts.t("CONTACT_SUPPORT_BUTTON"),
             url=settings.get_support_contact_url() or "https://t.me/"
         )],
         [types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")]
@@ -558,11 +540,11 @@ async def process_topup_amount(
         amount_rubles = float(amount_text.replace(',', '.'))
 
         if amount_rubles < 1:
-            await message.answer("Минимальная сумма пополнения: 1 ₽")
+            await message.answer(texts.t("PAYMENT_MIN_AMOUNT").format(amount="1 ₽"))
             return
         
         if amount_rubles > 50000:
-            await message.answer("Максимальная сумма пополнения: 50,000 ₽")
+            await message.answer(texts.t("PAYMENT_MAX_AMOUNT").format(amount="50,000 ₽"))
             return
         
         amount_kopeks = int(amount_rubles * 100)
@@ -574,12 +556,18 @@ async def process_topup_amount(
         if payment_method in ["yookassa", "yookassa_sbp"] and not is_vpn_bonus:
             if amount_kopeks < settings.YOOKASSA_MIN_AMOUNT_KOPEKS:
                 min_rubles = settings.YOOKASSA_MIN_AMOUNT_KOPEKS / 100
-                await message.answer(f"❌ Минимальная сумма для оплаты через YooKassa: {min_rubles:.0f} ₽")
+                await message.answer(
+                    texts.t("PAYMENT_MIN_AMOUNT").format(amount=f"{min_rubles:.0f} ₽")
+                )
                 return
             
             if amount_kopeks > settings.YOOKASSA_MAX_AMOUNT_KOPEKS:
                 max_rubles = settings.YOOKASSA_MAX_AMOUNT_KOPEKS / 100
-                await message.answer(f"❌ Максимальная сумма для оплаты через YooKassa: {max_rubles:,.0f} ₽".replace(',', ' '))
+                await message.answer(
+                    texts.t("PAYMENT_MAX_AMOUNT").format(
+                        amount=f"{max_rubles:,.0f} ₽".replace(",", " ")
+                    )
+                )
                 return
         
         if payment_method == "select_after":
@@ -649,7 +637,7 @@ async def process_topup_amount(
             async with AsyncSessionLocal() as db:
                 await process_cloudpayments_amount(message, db_user, db, state)
         else:
-            await message.answer("Неизвестный способ оплаты")
+            await message.answer(texts.t("PAYMENT_METHOD_UNKNOWN"))
 
     except ValueError:
         await message.answer(
@@ -663,6 +651,9 @@ async def handle_sbp_payment(
     callback: types.CallbackQuery,
     db: AsyncSession
 ):
+    texts = get_texts(
+        resolve_telegram_language(getattr(callback.from_user, "language_code", None))
+    )
     try:
         local_payment_id = int(callback.data.split('_')[-1])
         
@@ -670,32 +661,29 @@ async def handle_sbp_payment(
         payment = await get_yookassa_payment_by_local_id(db, local_payment_id)
         
         if not payment:
-            await callback.answer("❌ Платеж не найден", show_alert=True)
+            await callback.answer(texts.t("PAYMENT_NOT_FOUND"), show_alert=True)
             return
+
+        texts = get_texts(getattr(getattr(payment, "user", None), "language", None))
         
         import json
         metadata = json.loads(payment.metadata_json) if payment.metadata_json else {}
         confirmation_token = metadata.get("confirmation_token")
         
         if not confirmation_token:
-            await callback.answer("❌ Токен подтверждения не найден", show_alert=True)
+            await callback.answer(texts.t("PAYMENT_TOKEN_NOT_FOUND"), show_alert=True)
             return
         
         await callback.message.answer(
-            f"Для оплаты через СБП откройте приложение вашего банка и подтвердите платеж.\\n\\n"
-            f"Если у вас не открылось банковское приложение автоматически, вы можете:\\n"
-            f"1. Скопировать этот токен: <code>{confirmation_token}</code>\\n"
-            f"2. Открыть приложение вашего банка\\n"
-            f"3. Найти функцию оплаты по токену\\n"
-            f"4. Вставить токен и подтвердить платеж",
-            parse_mode="HTML"
+            texts.t("PAYMENT_SBP_TOKEN_INSTRUCTIONS").format(token=confirmation_token),
+            parse_mode="HTML",
         )
         
-        await callback.answer("Информация об оплате отправлена", show_alert=True)
+        await callback.answer(texts.t("PAYMENT_INFO_SENT"), show_alert=True)
         
     except Exception as e:
         logger.error(f"Ошибка обработки embedded платежа СБП: {e}")
-        await callback.answer("❌ Ошибка обработки платежа", show_alert=True)
+        await callback.answer(texts.t("PAYMENT_PROCESSING_ERROR"), show_alert=True)
 
 
 @error_handler
@@ -707,6 +695,7 @@ async def handle_quick_amount_selection(
     """
     Обработчик выбора суммы через кнопки быстрого выбора
     """
+    texts = get_texts(db_user.language)
     # Извлекаем сумму из callback_data
     try:
         amount_kopeks = int(callback.data.split('_')[-1])
@@ -800,14 +789,14 @@ async def handle_quick_amount_selection(
                 callback.message, db_user, amount_kopeks, state
             )
         else:
-            await callback.answer("❌ Неизвестный способ оплаты", show_alert=True)
+            await callback.answer(texts.t("PAYMENT_METHOD_UNKNOWN"), show_alert=True)
             return
 
     except ValueError:
-        await callback.answer("❌ Ошибка обработки суммы", show_alert=True)
+        await callback.answer(texts.t("PAYMENT_AMOUNT_PROCESSING_ERROR"), show_alert=True)
     except Exception as e:
         logger.error(f"Ошибка обработки быстрого выбора суммы: {e}")
-        await callback.answer("❌ Ошибка обработки запроса", show_alert=True)
+        await callback.answer(texts.t("PAYMENT_REQUEST_ERROR"), show_alert=True)
 
 
 @error_handler
@@ -816,15 +805,16 @@ async def handle_topup_amount_callback(
     db_user: User,
     state: FSMContext,
 ):
+    texts = get_texts(db_user.language)
     try:
         _, method, amount_str = callback.data.split("|", 2)
         amount_kopeks = int(amount_str)
     except ValueError:
-        await callback.answer("❌ Некорректный запрос", show_alert=True)
+        await callback.answer(texts.t("PAYMENT_INVALID_REQUEST"), show_alert=True)
         return
 
     if amount_kopeks <= 0:
-        await callback.answer("❌ Некорректная сумма", show_alert=True)
+        await callback.answer(texts.t("PAYMENT_INVALID_AMOUNT"), show_alert=True)
         return
 
     try:
@@ -914,14 +904,14 @@ async def handle_topup_amount_callback(
             await start_tribute_payment(callback, db_user)
             return
         else:
-            await callback.answer("❌ Неизвестный способ оплаты", show_alert=True)
+            await callback.answer(texts.t("PAYMENT_METHOD_UNKNOWN"), show_alert=True)
             return
 
         await callback.answer()
 
     except Exception as error:
         logger.error(f"Ошибка быстрого пополнения: {error}")
-        await callback.answer("❌ Ошибка обработки запроса", show_alert=True)
+        await callback.answer(texts.t("PAYMENT_REQUEST_ERROR"), show_alert=True)
 
 
 def register_balance_handlers(dp: Dispatcher):

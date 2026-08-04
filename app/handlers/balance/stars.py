@@ -28,7 +28,7 @@ async def start_stars_payment(
     texts = get_texts(db_user.language)
 
     if not settings.TELEGRAM_STARS_ENABLED:
-        await callback.answer("❌ Пополнение через Stars временно недоступно", show_alert=True)
+        await callback.answer(texts.t("PAYMENT_UNAVAILABLE_STARS"), show_alert=True)
         return
 
     # Формируем текст сообщения в зависимости от настройки
@@ -96,7 +96,7 @@ async def process_stars_payment_amount(
     texts = get_texts(db_user.language)
 
     if not settings.TELEGRAM_STARS_ENABLED:
-        await message.answer("⚠️ Оплата Stars временно недоступна")
+        await message.answer(texts.t("PAYMENT_UNAVAILABLE_STARS"))
         return
 
     try:
@@ -134,7 +134,10 @@ async def process_stars_payment_amount(
         )
 
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text=f"⭐ Оплатить ({stars_amount} Stars)", url=invoice_link)],
+            [types.InlineKeyboardButton(
+                text=texts.t("PAYMENT_STARS_PAY").format(amount=stars_amount),
+                url=invoice_link,
+            )],
             [types.InlineKeyboardButton(text=texts.BACK, callback_data="balance_topup")]
         ])
 
@@ -189,4 +192,4 @@ async def process_stars_payment_amount(
 
     except Exception as e:
         logger.error(f"Ошибка создания Stars invoice: {e}")
-        await message.answer("⚠️ Ошибка создания платежа")
+        await message.answer(texts.t("PAYMENT_CREATE_ERROR"))

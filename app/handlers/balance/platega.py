@@ -205,14 +205,15 @@ async def handle_platega_method_selection(
     db_user: User,
     state: FSMContext,
 ):
+    texts = get_texts(db_user.language)
     try:
         method_code = int(callback.data.rsplit("_", 1)[-1])
     except ValueError:
-        await callback.answer("❌ Некорректный способ оплаты", show_alert=True)
+        await callback.answer(texts.t("PAYMENT_METHOD_INVALID"), show_alert=True)
         return
 
     if method_code not in _get_active_methods():
-        await callback.answer("⚠️ Этот способ сейчас недоступен", show_alert=True)
+        await callback.answer(texts.t("PAYMENT_METHOD_UNAVAILABLE"), show_alert=True)
         return
 
     await _prompt_amount(callback.message, db_user, state, method_code)
