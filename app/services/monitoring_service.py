@@ -1278,24 +1278,16 @@ class MonitoringService:
     
     async def _send_trial_ending_notification(self, user: User, subscription: Subscription) -> bool:
         try:
-            texts = get_texts(user.language)
-            message = texts.t(
-                "NOTIFICATION_TRIAL_ENDING",
+            message = (
                 "⏳ <b>Тест заканчивается через 2 часа</b>\n\n"
-                "Понравилось? Останься с VPN — выбери тариф и продолжай без перерыва.",
+                "Понравилось? Останься с VPN — выбери тариф и продолжай без перерыва."
             )
             
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [build_miniapp_or_callback_button(
-                    text=texts.t("NOTIFICATION_CHOOSE_PLAN_BUTTON", "💎 Выбрать тариф"),
-                    callback_data="menu_buy",
-                )],
-                [InlineKeyboardButton(
-                    text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"),
-                    callback_data="menu_support",
-                )],
+                [build_miniapp_or_callback_button(text="💎 Выбрать тариф", callback_data="menu_buy")],
+                [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu_support")],
             ])
 
             await self._send_message_with_logo(
@@ -1325,32 +1317,23 @@ class MonitoringService:
 
     async def _send_trial_inactive_notification(self, user: User, subscription: Subscription, hours: int) -> bool:
         try:
-            texts = get_texts(user.language)
             if hours >= 24:
-                message = texts.t(
-                    "NOTIFICATION_TRIAL_INACTIVE_24H",
+                message = (
                     "⏳ <b>Твой тест уходит впустую</b>\n\n"
                     "Сутки прошли, а VPN так и не подключён. Давай исправим —\n"
-                    "это пара минут.",
+                    "это пара минут."
                 )
             else:
-                message = texts.t(
-                    "NOTIFICATION_TRIAL_INACTIVE_1H",
+                message = (
                     "👋 <b>Застрял на подключении?</b>\n\n"
-                    "Доступ уже активен — покажем, как подключиться за минуту.",
+                    "Доступ уже активен — покажем, как подключиться за минуту."
                 )
 
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text=texts.t("CONNECT_BUTTON", "📲 Подключиться"),
-                    callback_data="subscription_connect",
-                )],
-                [InlineKeyboardButton(
-                    text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"),
-                    callback_data="menu_support",
-                )],
+                [InlineKeyboardButton(text="📲 Подключиться", callback_data="subscription_connect")],
+                [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu_support")],
             ])
 
             await self._send_message_with_logo(

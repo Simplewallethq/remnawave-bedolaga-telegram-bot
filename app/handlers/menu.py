@@ -10,7 +10,6 @@ from datetime import datetime
 import os
 
 from app.config import settings
-from app.localization.language import INTERFACE_LANGUAGES
 from app.database.crud.user import get_user_by_telegram_id, update_user
 from app.database.crud.promo_group import (
     get_auto_assign_promo_groups,
@@ -985,7 +984,11 @@ async def process_language_change(
     selected_raw = (callback.data or "").split(":", 1)[-1]
     normalized_selected = selected_raw.strip().lower()
 
-    available_map = {language: language for language in INTERFACE_LANGUAGES}
+    available_map = {
+        lang.strip().lower(): lang.strip()
+        for lang in settings.get_available_languages()
+        if isinstance(lang, str) and lang.strip()
+    }
 
     if normalized_selected not in available_map:
         await callback.answer("❌ Unsupported language", show_alert=True)
@@ -1479,12 +1482,8 @@ async def handle_onboarding_manual_link(
         return
 
     subscription = db_user.subscription
-    texts = get_texts(db_user.language)
     if not subscription:
-        await callback.answer(
-            texts.t("SUBSCRIPTION_REQUIRED", "❌ У вас нет активной подписки"),
-            show_alert=True,
-        )
+        await callback.answer("❌ У вас нет активной подписки", show_alert=True)
         return
 
     device_type = "iphone"
@@ -1499,12 +1498,10 @@ async def handle_onboarding_manual_link(
         get_raw_subscription_link(subscription) if is_ios else None
     ) or get_display_subscription_link(subscription)
     if not link:
-        await callback.answer(
-            texts.t("SUBSCRIPTION_LINK_UNAVAILABLE", "❌ Ссылка подписки недоступна"),
-            show_alert=True,
-        )
+        await callback.answer("❌ Ссылка подписки недоступна", show_alert=True)
         return
 
+    texts = get_texts(db_user.language)
     if is_ios:
         manual_prompt = texts.t(
             "ONBOARDING_MANUAL_LINK_TEXT_IOS",

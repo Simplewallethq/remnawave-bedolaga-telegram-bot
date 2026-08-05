@@ -22,10 +22,13 @@ from app.services.expired_subscription_feedback_service import (
     OPTION_NOT_NEEDED,
 )
 from app.states import ExpiredSubscriptionFeedbackStates
-from app.localization.texts import get_texts
 
 
 logger = logging.getLogger(__name__)
+
+
+THANK_YOU_TEXT = "Спасибо 🙏"
+BUSY_STATE_TEXT = "Сначала завершите или отмените текущее действие, затем ответьте на опрос."
 
 
 class WaitingExpiredSubscriptionFeedbackFilter(BaseFilter):
@@ -78,29 +81,28 @@ async def handle_expired_subscription_feedback_callback(
     db_user: User,
     db: AsyncSession,
 ):
-    texts = get_texts(db_user.language)
     try:
         _, feedback_id_raw, option = callback.data.split(":", 2)
         feedback_id = int(feedback_id_raw)
     except (AttributeError, ValueError):
-        await callback.answer(texts.t("FEEDBACK_INVALID_DATA"), show_alert=True)
+        await callback.answer("Некорректные данные", show_alert=True)
         return
 
     if option not in EXPIRED_SUBSCRIPTION_FEEDBACK_OPTIONS:
-        await callback.answer(texts.t("FEEDBACK_INVALID_OPTION"), show_alert=True)
+        await callback.answer("Некорректный вариант", show_alert=True)
         return
 
     feedback = await get_feedback_by_id(db, feedback_id)
     if not feedback or feedback.user_id != db_user.id:
-        await callback.answer(texts.t("FEEDBACK_NOT_FOUND"), show_alert=True)
+        await callback.answer("Опрос не найден", show_alert=True)
         return
 
     if feedback.type != EXPIRED_SUBSCRIPTION_FEEDBACK_TYPE:
-        await callback.answer(texts.t("FEEDBACK_NOT_FOUND"), show_alert=True)
+        await callback.answer("Опрос не найден", show_alert=True)
         return
 
     if feedback.status == FEEDBACK_STATUS_COMPLETED:
-        await callback.answer(texts.t("FEEDBACK_THANK_YOU"))
+        await callback.answer(THANK_YOU_TEXT)
         return
 
     context = _feedback_context(feedback)
@@ -119,7 +121,7 @@ async def handle_expired_subscription_feedback_callback(
         return
 
     if feedback.selected_option:
-        await callback.answer(texts.t("FEEDBACK_THANK_YOU"))
+        await callback.answer(THANK_YOU_TEXT)
         return
 
     if option == OPTION_NOT_NEEDED:
@@ -132,7 +134,7 @@ async def handle_expired_subscription_feedback_callback(
         )
         await db.commit()
         await _remove_feedback_keyboard(callback)
-        await _send_plain_callback_message(callback, texts.t("FEEDBACK_THANK_YOU"))
+        await _send_plain_callback_message(callback, THANK_YOU_TEXT)
         await callback.answer()
         return
 
@@ -156,9 +158,8 @@ async def handle_expired_subscription_feedback_callback(
 
 async def handle_expired_subscription_feedback_busy_callback(
     callback: types.CallbackQuery,
-    db_user: User,
 ):
-    await callback.answer(get_texts(db_user.language).t("FEEDBACK_BUSY"), show_alert=True)
+    await callback.answer(BUSY_STATE_TEXT, show_alert=True)
 
 
 async def handle_expired_subscription_feedback_answer(
@@ -188,7 +189,7 @@ async def handle_expired_subscription_feedback_answer(
         await state.clear()
         await message.bot.send_message(
             chat_id=message.chat.id,
-            text=get_texts(db_user.language).t("FEEDBACK_COMPLETED_OR_NOT_FOUND"),
+            text="Опрос уже завершён или не найден.",
         )
         return
 
@@ -201,7 +202,7 @@ async def handle_expired_subscription_feedback_answer(
     await state.clear()
     await message.bot.send_message(
         chat_id=message.chat.id,
-        text=get_texts(db_user.language).t("FEEDBACK_THANK_YOU"),
+        text=THANK_YOU_TEXT,
     )
 
 

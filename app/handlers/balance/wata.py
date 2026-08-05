@@ -11,7 +11,6 @@ from app.config import settings
 from app.database.models import User
 from app.keyboards.inline import get_back_keyboard
 from app.localization.texts import get_texts
-from app.localization.language import resolve_telegram_language
 from app.services.payment_service import PaymentService, get_user_by_id as fetch_user_by_id
 from app.states import BalanceStates
 from app.utils.decorators import error_handler
@@ -29,7 +28,7 @@ async def start_wata_payment(
     texts = get_texts(db_user.language)
 
     if not settings.is_wata_enabled():
-        await callback.answer(texts.t("PAYMENT_UNAVAILABLE_WATA"), show_alert=True)
+        await callback.answer("❌ Оплата через WATA временно недоступна", show_alert=True)
         return
 
     message_text = texts.t(
@@ -79,7 +78,7 @@ async def process_wata_payment_amount(
     texts = get_texts(db_user.language)
 
     if not settings.is_wata_enabled():
-        await message.answer(texts.t("PAYMENT_UNAVAILABLE_WATA"))
+        await message.answer("❌ Оплата через WATA временно недоступна")
         return
 
     state_data = await state.get_data()
@@ -238,24 +237,14 @@ async def check_wata_payment_status(
     try:
         local_payment_id = int(callback.data.split("_")[-1])
     except (ValueError, IndexError):
-        await callback.answer(
-            get_texts(resolve_telegram_language(callback.from_user.language_code)).t(
-                "PAYMENT_INVALID_ID"
-            ),
-            show_alert=True,
-        )
+        await callback.answer("❌ Некорректный идентификатор платежа", show_alert=True)
         return
 
     payment_service = PaymentService(callback.bot)
     status_info = await payment_service.get_wata_payment_status(db, local_payment_id)
 
     if not status_info:
-        await callback.answer(
-            get_texts(resolve_telegram_language(callback.from_user.language_code)).t(
-                "PAYMENT_NOT_FOUND"
-            ),
-            show_alert=True,
-        )
+        await callback.answer("❌ Платеж не найден", show_alert=True)
         return
 
     payment = status_info["payment"]

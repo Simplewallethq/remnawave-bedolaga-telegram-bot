@@ -11,8 +11,6 @@ from app.database.database import get_db
 from app.database.crud.user import get_user_by_telegram_id, create_user
 from app.services.remnawave_service import RemnaWaveService
 from app.states import RegistrationStates
-from app.localization.language import resolve_telegram_language
-from app.localization.texts import get_texts
 from app.utils.check_reg_process import is_registration_process
 from app.utils.validators import sanitize_telegram_name
 
@@ -61,7 +59,6 @@ class AuthMiddleware(BaseMiddleware):
                 db_user = await get_user_by_telegram_id(db, user.id)
                 
                 if not db_user:
-                    texts = get_texts(resolve_telegram_language(getattr(user, "language_code", None)))
                     state: FSMContext = data.get('state')
                     current_state = None
                     
@@ -91,27 +88,23 @@ class AuthMiddleware(BaseMiddleware):
                     else:
                         if isinstance(event, Message):
                             await event.answer(
-                                texts.t("AUTH_START_REQUIRED", "▶️ Для начала работы необходимо выполнить команду /start")
+                                "▶️ Для начала работы необходимо выполнить команду /start"
                             )
                         elif isinstance(event, CallbackQuery):
                             await event.answer(
-                                texts.t("AUTH_START_REQUIRED_ALERT", "▶️ Необходимо начать с команды /start"),
+                                "▶️ Необходимо начать с команды /start",
                                 show_alert=True
                             )
                         logger.info(f"🚫 Заблокирован незарегистрированный пользователь {user.id}")
                         return
                 else:
-                    texts = get_texts(db_user.language)
                     from app.database.models import UserStatus
                     
                     if db_user.status == UserStatus.BLOCKED.value:
                         if isinstance(event, Message):
-                            await event.answer(texts.t("AUTH_ACCOUNT_BLOCKED", "🚫 Ваш аккаунт заблокирован администратором."))
+                            await event.answer("🚫 Ваш аккаунт заблокирован администратором.")
                         elif isinstance(event, CallbackQuery):
-                            await event.answer(
-                                texts.t("AUTH_ACCOUNT_BLOCKED", "🚫 Ваш аккаунт заблокирован администратором."),
-                                show_alert=True,
-                            )
+                            await event.answer("🚫 Ваш аккаунт заблокирован администратором.", show_alert=True)
                         logger.info(f"🚫 Заблокированный пользователь {user.id} попытался использовать бота")
                         return
                     
@@ -123,6 +116,7 @@ class AuthMiddleware(BaseMiddleware):
                             current_state = await state.get_state()
                         
                         registration_states = [
+                            RegistrationStates.waiting_for_language.state,
                             RegistrationStates.waiting_for_rules_accept.state,
                             RegistrationStates.waiting_for_privacy_policy_accept.state,
                             RegistrationStates.waiting_for_referral_code.state
@@ -136,6 +130,7 @@ class AuthMiddleware(BaseMiddleware):
                                 and event.data
                                 and (
                                     event.data in ['rules_accept', 'rules_decline', 'privacy_policy_accept', 'privacy_policy_decline', 'referral_skip']
+                                    or event.data.startswith('language_select:')
                                 )
                             )
                         )
@@ -149,18 +144,12 @@ class AuthMiddleware(BaseMiddleware):
                         else:
                             if isinstance(event, Message):
                                 await event.answer(
-                                    texts.t(
-                                        "AUTH_ACCOUNT_DELETED",
-                                        "❌ Ваш аккаунт был удален.\n"
-                                        "🔄 Для повторной регистрации выполните команду /start",
-                                    )
+                                    "❌ Ваш аккаунт был удален.\n"
+                                    "🔄 Для повторной регистрации выполните команду /start"
                                 )
                             elif isinstance(event, CallbackQuery):
                                 await event.answer(
-                                    texts.t(
-                                        "AUTH_ACCOUNT_DELETED_ALERT",
-                                        "❌ Ваш аккаунт был удален. Для повторной регистрации выполните /start",
-                                    ),
+                                    "❌ Ваш аккаунт был удален. Для повторной регистрации выполните /start",
                                     show_alert=True
                                 )
                             logger.info(f"❌ Удаленный пользователь {user.id} попытался использовать бота без /start")

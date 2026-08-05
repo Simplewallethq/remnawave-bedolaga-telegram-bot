@@ -969,10 +969,7 @@ async def confirm_add_devices(
         )
 
         if not success:
-            await callback.answer(
-                texts.t("BALANCE_DEBIT_ERROR", "⚠️ Ошибка списания средств"),
-                show_alert=True,
-            )
+            await callback.answer("⚠️ Ошибка списания средств", show_alert=True)
             return
 
         await add_subscription_devices(db, subscription, devices_count)

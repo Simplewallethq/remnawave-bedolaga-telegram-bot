@@ -11,7 +11,6 @@ from app.config import settings
 from app.database.models import User
 from app.keyboards.inline import get_back_keyboard
 from app.localization.texts import get_texts
-from app.localization.language import resolve_telegram_language
 from app.services.payment_service import PaymentService
 from app.states import BalanceStates
 from app.utils.decorators import error_handler
@@ -29,7 +28,7 @@ async def start_heleket_payment(
     texts = get_texts(db_user.language)
 
     if not settings.is_heleket_enabled():
-        await callback.answer(texts.t("PAYMENT_UNAVAILABLE_HELEKET"), show_alert=True)
+        await callback.answer("❌ Оплата через Heleket недоступна", show_alert=True)
         return
 
     markup = settings.get_heleket_markup_percent()
@@ -89,7 +88,7 @@ async def process_heleket_payment_amount(
     texts = get_texts(db_user.language)
 
     if not settings.is_heleket_enabled():
-        await message.answer(texts.t("PAYMENT_UNAVAILABLE_HELEKET"))
+        await message.answer("❌ Оплата через Heleket недоступна")
         return
 
     amount_rubles = amount_kopeks / 100
@@ -97,11 +96,11 @@ async def process_heleket_payment_amount(
     bypass_minimum = should_bypass_minimum(state_data, amount_kopeks)
 
     if amount_rubles < 100 and not bypass_minimum:
-        await message.answer(texts.t("PAYMENT_MIN_AMOUNT").format(amount="100 ₽"))
+        await message.answer("Минимальная сумма пополнения: 100 ₽")
         return
 
     if amount_rubles > 100000:
-        await message.answer(texts.t("PAYMENT_MAX_AMOUNT").format(amount="100,000 ₽"))
+        await message.answer("Максимальная сумма пополнения: 100,000 ₽")
         return
 
     payment_service = PaymentService(message.bot)
@@ -116,13 +115,15 @@ async def process_heleket_payment_amount(
     )
 
     if not result:
-        await message.answer(texts.t("PAYMENT_HELEKET_CREATE_ERROR"))
+        await message.answer(
+            "❌ Не удалось создать счёт в Heleket. Попробуйте позже или обратитесь в поддержку."
+        )
         await state.clear()
         return
 
     payment_url = result.get("payment_url")
     if not payment_url:
-        await message.answer(texts.t("PAYMENT_HELEKET_LINK_ERROR"))
+        await message.answer("❌ Не удалось получить ссылку для оплаты Heleket")
         await state.clear()
         return
 
@@ -132,18 +133,13 @@ async def process_heleket_payment_amount(
     discount_percent = result.get("discount_percent")
 
     details = [
-        texts.t("PAYMENT_HELEKET_TITLE"),
+        "🪙 <b>Оплата через Heleket</b>",
         "",
-        texts.t("PAYMENT_HELEKET_CREDIT_AMOUNT").format(amount=f"{amount_rubles:.0f}"),
+        f"💰 Сумма к зачислению: {amount_rubles:.0f} ₽",
     ]
 
     if payer_amount and payer_currency:
-        details.append(
-            texts.t("PAYMENT_HELEKET_PAY_AMOUNT").format(
-                amount=payer_amount,
-                currency=payer_currency,
-            )
-        )
+        details.append(f"🪙 К оплате: {payer_amount} {payer_currency}")
 
     markup_percent: Optional[float] = None
     if discount_percent is not None:
@@ -168,10 +164,7 @@ async def process_heleket_payment_amount(
             if payer_amount_float > 0:
                 rub_per_currency = amount_rubles / payer_amount_float
                 details.append(
-                    texts.t("PAYMENT_HELEKET_RATE").format(
-                        currency=payer_currency,
-                        rate=f"{rub_per_currency:.2f}",
-                    )
+                    f"💱 Курс: 1 {payer_currency} ≈ {rub_per_currency:.2f} ₽"
                 )
         except (TypeError, ValueError, ZeroDivisionError):
             pass
@@ -179,11 +172,11 @@ async def process_heleket_payment_amount(
     details.extend(
         [
             "",
-            texts.t("PAYMENT_INSTRUCTIONS_TITLE"),
-            texts.t("PAYMENT_INSTRUCTION_PAY"),
-            texts.t("PAYMENT_HELEKET_INSTRUCTION_OPEN"),
-            texts.t("PAYMENT_HELEKET_INSTRUCTION_PAY"),
-            texts.t("PAYMENT_INSTRUCTION_BALANCE_CREDIT"),
+            "📱 Инструкция:",
+            "1. Нажмите кнопку 'Оплатить'",
+            "2. Перейдите на страницу Heleket",
+            "3. Оплатите указанную сумму",
+            "4. Баланс пополнится автоматически",
         ]
     )
 
@@ -256,24 +249,14 @@ async def check_heleket_payment_status(
     try:
         local_payment_id = int(callback.data.split("_")[-1])
     except (ValueError, IndexError):
-        await callback.answer(
-            get_texts(resolve_telegram_language(callback.from_user.language_code)).t(
-                "PAYMENT_INVALID_ID"
-            ),
-            show_alert=True,
-        )
+        await callback.answer("Некорректный идентификатор платежа", show_alert=True)
         return
 
     from app.database.crud.heleket import get_heleket_payment_by_id
 
     payment = await get_heleket_payment_by_id(db, local_payment_id)
     if not payment:
-        await callback.answer(
-            get_texts(resolve_telegram_language(callback.from_user.language_code)).t(
-                "PAYMENT_NOT_FOUND"
-            ),
-            show_alert=True,
-        )
+        await callback.answer("Платёж не найден", show_alert=True)
         return
 
     language = getattr(payment.user, "language", None) or settings.DEFAULT_LANGUAGE

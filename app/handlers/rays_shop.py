@@ -58,7 +58,7 @@ def _rays_tier_line(texts) -> str:
         (settings.RAYS_TIER_3_MIN_DAYS, settings.RAYS_TIER_3_AMOUNT),
     ])
     return " • ".join(
-        f"{labels.get(min_days, texts.t('RAYS_TIER_LABEL_DAYS').format(days=min_days))} — {amount} ☀️"
+        f"{labels.get(min_days, f'{min_days} дн.')} — {amount} ☀️"
         for min_days, amount in tiers
     )
 

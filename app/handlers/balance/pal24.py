@@ -270,7 +270,7 @@ async def start_pal24_payment(
     texts = get_texts(db_user.language)
 
     if not settings.is_pal24_enabled():
-        await callback.answer(texts.t("PAYMENT_UNAVAILABLE_PAYPALYCH"), show_alert=True)
+        await callback.answer("❌ Оплата через PayPalych временно недоступна", show_alert=True)
         return
 
     # Формируем текст сообщения в зависимости от доступных способов оплаты
@@ -327,7 +327,7 @@ async def process_pal24_payment_amount(
     texts = get_texts(db_user.language)
 
     if not settings.is_pal24_enabled():
-        await message.answer(texts.t("PAYMENT_UNAVAILABLE_PAYPALYCH"))
+        await message.answer("❌ Оплата через PayPalych временно недоступна")
         return
 
     state_data = await state.get_data()
@@ -335,17 +335,13 @@ async def process_pal24_payment_amount(
 
     if amount_kopeks < settings.PAL24_MIN_AMOUNT_KOPEKS and not bypass_minimum:
         min_rubles = settings.PAL24_MIN_AMOUNT_KOPEKS / 100
-        await message.answer(
-            texts.t("PAYMENT_MIN_PAYPALYCH").format(amount=f"{min_rubles:.0f}")
-        )
+        await message.answer(f"❌ Минимальная сумма для оплаты через PayPalych: {min_rubles:.0f} ₽")
         return
 
     if amount_kopeks > settings.PAL24_MAX_AMOUNT_KOPEKS:
         max_rubles = settings.PAL24_MAX_AMOUNT_KOPEKS / 100
         await message.answer(
-            texts.t("PAYMENT_MAX_PAYPALYCH").format(
-                amount=f"{max_rubles:,.0f}".replace(",", " ")
-            )
+            f"❌ Максимальная сумма для оплаты через PayPalych: {max_rubles:,.0f} ₽".replace(',', ' ')
         )
         return
 

@@ -8,7 +8,6 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from app.config import settings
 from app.database.crud.user import add_user_balance, get_user_by_id
 from app.database.crud.referral import create_referral_earning
-from app.localization.texts import get_texts
 from app.utils.user_utils import get_effective_referral_commission_percent
 
 logger = logging.getLogger(__name__)
@@ -37,10 +36,9 @@ async def send_referral_notification(
         logger.error(f"❌ Ошибка отправки уведомления пользователю {user_id}: {e}")
 
 
-def get_referral_link_keyboard(language: str | None) -> InlineKeyboardMarkup:
-    texts = get_texts(language)
+def get_referral_link_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text=texts.t("REFERRAL_LINK_BUTTON"), callback_data="referral")
+        InlineKeyboardButton(text="🔗 Моя ссылка", callback_data="referral")
     ]])
 
 
@@ -94,24 +92,27 @@ async def process_referral_registration(
             )
 
         if bot:
-            referrer_name = escape(referrer.full_name or "")
-            new_user_name = escape(new_user.full_name or "")
-            referral_notification = get_texts(new_user.language).t(
-                "REFERRAL_WELCOME_NOTIFICATION"
-            ).format(referrer_name=referrer_name)
+            referrer_name = escape(referrer.full_name or "друга")
+            new_user_name = escape(new_user.full_name or "Пользователь")
+            referral_notification = (
+                f"🎉 <b>С прибытием!</b>\n"
+                f"Ты пришёл по приглашению {referrer_name}. "
+                f"Осваивайся — 3 дня VPN уже твои."
+            )
             await send_referral_notification(bot, new_user.telegram_id, referral_notification)
 
-            inviter_notification = get_texts(referrer.language).t(
-                "REFERRAL_INVITER_NOTIFICATION"
-            ).format(
-                new_user_name=new_user_name,
-                percent=commission_percent,
+            inviter_notification = (
+                f"👥 <b>+1 в команду</b>\n"
+                f"{new_user_name} пришёл по твоей ссылке — теперь тебе капает "
+                f"{commission_percent}% с каждого его платежа. Деньги можно вывести "
+                f"на карту (от 3000₽) или потратить на подписку.\n"
+                f"Позови ещё — ссылка та же."
             )
             await send_referral_notification(
                 bot,
                 referrer.telegram_id,
                 inviter_notification,
-                reply_markup=get_referral_link_keyboard(referrer.language),
+                reply_markup=get_referral_link_keyboard(),
             )
 
         logger.info(f"✅ Зарегистрирован реферал {new_user_id} для {referrer_id}.")
