@@ -1,10 +1,12 @@
 """Handlers for Platega balance interactions."""
 
 import logging
+import os
 from typing import List
 
 from aiogram import types
 from aiogram.fsm.context import FSMContext
+from aiogram.types import FSInputFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -616,14 +618,24 @@ async def process_platega_universal_payment_amount(
                 delete_error,
             )
 
-    invoice_message = await message.answer(
-        instructions_template.format(
-            title=payment_title,
-            amount=amount_label,
-        ),
-        reply_markup=keyboard,
-        parse_mode="HTML",
+    instructions = instructions_template.format(
+        title=payment_title,
+        amount=amount_label,
     )
+    pay_image_path = os.path.join("images", "pay.jpg")
+    if os.path.exists(pay_image_path):
+        invoice_message = await message.answer_photo(
+            FSInputFile(pay_image_path),
+            caption=instructions,
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
+    else:
+        invoice_message = await message.answer(
+            instructions,
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
 
     try:
         from app.services import payment_service as payment_module

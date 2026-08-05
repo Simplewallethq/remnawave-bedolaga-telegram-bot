@@ -1,4 +1,5 @@
 import logging
+import os
 from aiogram import types
 from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile
@@ -164,7 +165,15 @@ async def process_stars_payment_amount(
             f"Нажмите кнопку ниже для оплаты:"
         )
 
-        if settings.ENABLE_LOGO_MODE:
+        pay_image_path = os.path.join("images", "pay.jpg")
+        if os.path.exists(pay_image_path):
+            invoice_message = await message.answer_photo(
+                photo=FSInputFile(pay_image_path),
+                caption=invoice_caption,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        elif settings.ENABLE_LOGO_MODE:
             from app.utils.bot_registry import get_logo_for_bot
             logo_path = get_logo_for_bot(message.bot.id if message.bot else None)
             invoice_message = await message.answer_photo(
