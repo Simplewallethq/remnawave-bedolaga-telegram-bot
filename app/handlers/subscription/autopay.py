@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Tuple, Optional
 from urllib.parse import quote
@@ -78,9 +79,13 @@ from app.utils.promo_offer import (
     build_promo_offer_hint,
     get_user_active_promo_discount_percent,
 )
+from app.utils.photo_message import edit_or_answer_photo
 
 from .countries import _get_available_countries, _should_show_countries_management
 from .pricing import _build_subscription_period_prompt
+
+PAY_IMAGE_PATH = os.path.join("images", "pay.jpg")
+PLANS_IMAGE_PATH = os.path.join("images", "plans.jpg")
 
 async def handle_autopay_menu(
         callback: types.CallbackQuery,
@@ -113,10 +118,11 @@ async def handle_autopay_menu(
         ),
     ).format(status=status, days=days)
 
-    await callback.message.edit_text(
+    await edit_or_answer_photo(
+        callback,
         text,
-        reply_markup=get_autopay_keyboard(db_user.language),
-        parse_mode="HTML",
+        get_autopay_keyboard(db_user.language),
+        photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
     )
     await callback.answer()
 
@@ -185,10 +191,11 @@ async def handle_subscription_config_back(
     texts = get_texts(db_user.language)
 
     if current_state == SubscriptionStates.selecting_traffic.state:
-        await callback.message.edit_text(
+        await edit_or_answer_photo(
+            callback,
             await _build_subscription_period_prompt(db_user, texts, db),
-            reply_markup=get_subscription_period_keyboard(db_user.language, db_user),
-            parse_mode="HTML",
+            get_subscription_period_keyboard(db_user.language, db_user),
+            photo_path=PLANS_IMAGE_PATH if os.path.exists(PLANS_IMAGE_PATH) else None,
         )
         await state.set_state(SubscriptionStates.selecting_period)
 
@@ -200,10 +207,11 @@ async def handle_subscription_config_back(
             )
             await state.set_state(SubscriptionStates.selecting_traffic)
         else:
-            await callback.message.edit_text(
+            await edit_or_answer_photo(
+                callback,
                 await _build_subscription_period_prompt(db_user, texts, db),
-                reply_markup=get_subscription_period_keyboard(db_user.language, db_user),
-                parse_mode="HTML",
+                get_subscription_period_keyboard(db_user.language, db_user),
+                photo_path=PLANS_IMAGE_PATH if os.path.exists(PLANS_IMAGE_PATH) else None,
             )
             await state.set_state(SubscriptionStates.selecting_period)
 
@@ -275,10 +283,10 @@ async def _show_previous_configuration_step(
         await state.set_state(SubscriptionStates.selecting_traffic)
         return
 
-    await callback.message.edit_text(
+    await edit_or_answer_photo(
+        callback,
         await _build_subscription_period_prompt(db_user, texts, db),
-        reply_markup=get_subscription_period_keyboard(db_user.language, db_user),
-        parse_mode="HTML",
+        get_subscription_period_keyboard(db_user.language, db_user),
+        photo_path=PLANS_IMAGE_PATH if os.path.exists(PLANS_IMAGE_PATH) else None,
     )
     await state.set_state(SubscriptionStates.selecting_period)
-

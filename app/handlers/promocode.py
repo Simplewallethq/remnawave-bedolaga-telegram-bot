@@ -1,4 +1,5 @@
 import logging
+import os
 from aiogram import Dispatcher, types, F, Bot
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,7 @@ from app.services.blacklist_service import blacklist_service
 from app.services.promocode_service import PromoCodeService
 from app.services.admin_notification_service import AdminNotificationService
 from app.utils.decorators import error_handler
+from app.utils.photo_message import edit_or_answer_photo
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +25,12 @@ async def show_promocode_menu(
 ):
     texts = get_texts(db_user.language)
     
-    await callback.message.edit_text(
+    image_path = os.path.join("images", "promo.jpg")
+    await edit_or_answer_photo(
+        callback,
         texts.PROMOCODE_ENTER,
-        reply_markup=get_back_keyboard(db_user.language)
+        get_back_keyboard(db_user.language),
+        photo_path=image_path if os.path.exists(image_path) else None,
     )
     
     await state.set_state(PromoCodeStates.waiting_for_code)

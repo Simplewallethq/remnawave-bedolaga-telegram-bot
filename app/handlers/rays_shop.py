@@ -7,6 +7,7 @@
 
 import html
 import logging
+import os
 
 from aiogram import Dispatcher, F, types
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -109,7 +110,14 @@ async def show_rays_shop(callback: types.CallbackQuery, db_user: User, db: Async
     ])
 
     await edit_or_answer_photo(
-        callback, "\n".join(lines), types.InlineKeyboardMarkup(inline_keyboard=rows),
+        callback,
+        "\n".join(lines),
+        types.InlineKeyboardMarkup(inline_keyboard=rows),
+        photo_path=(
+            os.path.join("images", "ref.jpg")
+            if os.path.exists(os.path.join("images", "ref.jpg"))
+            else None
+        ),
     )
     await callback.answer()
 

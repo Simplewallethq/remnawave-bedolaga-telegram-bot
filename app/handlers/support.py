@@ -1,4 +1,5 @@
 import logging
+import os
 from aiogram import Dispatcher, types, F
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +27,11 @@ async def show_support_info(
         caption=support_info,
         keyboard=get_support_keyboard(db_user.language),
         parse_mode="HTML",
+        photo_path=(
+            os.path.join("images", "support.jpg")
+            if os.path.exists(os.path.join("images", "support.jpg"))
+            else None
+        ),
     )
     await callback.answer()
 

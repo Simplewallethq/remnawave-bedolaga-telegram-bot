@@ -1,5 +1,6 @@
 import html
 import logging
+import os
 from aiogram import Dispatcher, types, F
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
@@ -28,6 +29,7 @@ from app.utils.success_notifications import (
 )
 from app.utils.pagination import paginate_list
 from app.utils.decorators import error_handler
+from app.utils.photo_message import edit_or_answer_photo
 
 logger = logging.getLogger(__name__)
 
@@ -291,36 +293,13 @@ async def show_payment_methods(
         [types.InlineKeyboardButton(text=texts.BACK, callback_data="subscription")]
     ])
 
-    try:
-        if callback.message and callback.message.photo:
-            await callback.message.delete()
-            await callback.message.answer(
-                prompt_text,
-                reply_markup=back_keyboard,
-                parse_mode="HTML",
-            )
-        elif callback.message and callback.message.text:
-            await callback.message.edit_text(
-                prompt_text,
-                reply_markup=back_keyboard,
-                parse_mode="HTML",
-            )
-        else:
-            await callback.message.answer(
-                prompt_text,
-                reply_markup=back_keyboard,
-                parse_mode="HTML",
-            )
-    except TelegramBadRequest:
-        try:
-            await callback.message.delete()
-        except TelegramBadRequest:
-            pass
-        await callback.message.answer(
-            prompt_text,
-            reply_markup=back_keyboard,
-            parse_mode="HTML",
-        )
+    image_path = os.path.join("images", "pay.jpg")
+    await edit_or_answer_photo(
+        callback,
+        prompt_text,
+        back_keyboard,
+        photo_path=image_path if os.path.exists(image_path) else None,
+    )
 
     await state.set_state(BalanceStates.waiting_for_amount)
     await state.update_data(payment_method="select_after")

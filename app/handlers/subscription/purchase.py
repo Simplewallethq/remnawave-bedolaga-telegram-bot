@@ -750,7 +750,7 @@ async def activate_trial(
 
             connect_keyboard = get_activation_keyboard(subscription_link)
 
-            image_path = os.path.join("images", "activation_screen.png")
+            image_path = os.path.join("images", "subscription.jpg")
             if not os.path.exists(image_path):
                  image_path = None
 
@@ -833,10 +833,12 @@ async def start_subscription_purchase(
     keyboard = get_subscription_period_keyboard(db_user.language, db_user)
     prompt_text = await _build_subscription_period_prompt(db_user, texts, db)
 
-    await _edit_message_text_or_caption(
-        callback.message,
+    image_path = os.path.join("images", "plans.jpg")
+    await edit_or_answer_photo(
+        callback,
         prompt_text,
         keyboard,
+        photo_path=image_path if os.path.exists(image_path) else None,
     )
 
     subscription = getattr(db_user, 'subscription', None)
@@ -868,45 +870,6 @@ async def start_subscription_purchase(
     await state.set_state(SubscriptionStates.selecting_period)
     await callback.answer()
 
-
-async def _edit_message_text_or_caption(
-    message: types.Message,
-    text: str,
-    reply_markup: InlineKeyboardMarkup,
-    parse_mode: Optional[str] = "HTML",
-) -> None:
-    """Edits message text when possible, falls back to caption or re-sends message."""
-
-    try:
-        await message.edit_text(
-            text,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode,
-        )
-    except TelegramBadRequest as error:
-        error_message = str(error).lower()
-
-        if "message is not modified" in error_message:
-            return
-
-        if "there is no text in the message to edit" in error_message:
-            if message.caption is not None:
-                await message.edit_caption(
-                    caption=text,
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode,
-                )
-                return
-
-            await message.delete()
-            await message.answer(
-                text,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode,
-            )
-            return
-
-        raise
 
 async def save_cart_and_redirect_to_topup(
         callback: types.CallbackQuery,
@@ -2729,7 +2692,7 @@ async def handle_subscription_menu(
             )
             text = f"{header_line}\n\n{text}"
 
-    image_path = os.path.join("images", "subscription_page.png")
+    image_path = os.path.join("images", "subscription.jpg")
     if not os.path.exists(image_path):
          image_path = None
 
@@ -2941,7 +2904,7 @@ async def handle_sub_add_days(
         return
 
     text = "Выберите срок действия подписки"
-    image_path = os.path.join("images", "topup_menu.png")
+    image_path = os.path.join("images", "plans.jpg")
     if not os.path.exists(image_path):
          image_path = None
 
@@ -2965,7 +2928,7 @@ async def handle_sub_add_devices(
         "📱 <b>Устройства</b>\n\nВыберите действие:",
     )
 
-    image_path = os.path.join("images", "device_selection.png")
+    image_path = os.path.join("images", "devices.jpg")
     if not os.path.exists(image_path):
         image_path = None
 
@@ -3018,7 +2981,7 @@ async def handle_sub_change_devices_count(
         ),
     ).format(current_devices=current_devices)
 
-    image_path = os.path.join("images", "device_selection.png")
+    image_path = os.path.join("images", "devices.jpg")
     if not os.path.exists(image_path):
         image_path = None
 
@@ -3071,7 +3034,7 @@ async def handle_topup_days(
         f"Выберите способ оплаты:"
     )
 
-    image_path = os.path.join("images", "payment_methods.png")
+    image_path = os.path.join("images", "pay.jpg")
     if not os.path.exists(image_path):
          image_path = None
 
@@ -3171,7 +3134,7 @@ async def handle_device_selection_confirm(
         f"Выберите способ оплаты:"
     )
 
-    image_path = os.path.join("images", "payment_methods.png")
+    image_path = os.path.join("images", "pay.jpg")
     if not os.path.exists(image_path):
          image_path = None
 
@@ -3564,7 +3527,7 @@ async def handle_payment_selection(
                  ),
                  keyboard=keyboard,
                  parse_mode="HTML",
-                 photo_path=os.path.join("images", "payment_methods.png")
+                 photo_path=os.path.join("images", "pay.jpg")
              )
 
         except Exception as e:
@@ -3612,7 +3575,7 @@ async def handle_payment_selection(
                  ),
                  keyboard=keyboard,
                  parse_mode="HTML",
-                 photo_path=os.path.join("images", "payment_methods.png")
+                 photo_path=os.path.join("images", "pay.jpg")
              )
 
         except Exception as e:
@@ -3697,7 +3660,7 @@ async def handle_payment_selection(
                 ),
                 keyboard=keyboard,
                 parse_mode="HTML",
-                photo_path=os.path.join("images", "payment_methods.png")
+                photo_path=os.path.join("images", "pay.jpg")
             )
         except Exception as e:
             logger.error(f"Error creating YooKassa payment: {e}")

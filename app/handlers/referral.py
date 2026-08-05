@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 import qrcode
@@ -49,6 +50,11 @@ async def show_referral_info(
         callback,
         referral_text,
         get_referral_keyboard(db_user.language),
+        photo_path=(
+            os.path.join("images", "ref.jpg")
+            if os.path.exists(os.path.join("images", "ref.jpg"))
+            else None
+        ),
     )
     await callback.answer()
 
