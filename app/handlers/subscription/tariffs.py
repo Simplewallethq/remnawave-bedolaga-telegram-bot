@@ -3,6 +3,7 @@
 """
 
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
@@ -33,6 +34,7 @@ from app.keyboards.inline import (
     get_tariffs_keyboard,
 )
 from app.localization.texts import get_texts
+from app.utils.photo_message import edit_or_answer_photo
 from app.services.plan_pricing_service import (
     SUPPORTED_PERIOD_DAYS,
     calculate_upgrade_delta,
@@ -58,6 +60,8 @@ from app.utils.success_notifications import (
 )
 
 logger = logging.getLogger(__name__)
+
+PAY_IMAGE_PATH = os.path.join("images", "pay.jpg")
 
 
 _PERIOD_LABEL_KEYS = {
@@ -363,10 +367,13 @@ async def show_tariffs_page(
         current_plan_label=current_plan_label,
     )
 
-    try:
-        await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(message_text, reply_markup=keyboard, parse_mode="HTML")
+    image_path = os.path.join("images", "plans.jpg")
+    await edit_or_answer_photo(
+        callback,
+        message_text,
+        keyboard,
+        photo_path=image_path if os.path.exists(image_path) else None,
+    )
     await callback.answer()
 
 
@@ -474,10 +481,13 @@ async def show_tariff_periods(
         language=db_user.language,
     )
 
-    try:
-        await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(message_text, reply_markup=keyboard, parse_mode="HTML")
+    image_path = os.path.join("images", "plans.jpg")
+    await edit_or_answer_photo(
+        callback,
+        message_text,
+        keyboard,
+        photo_path=image_path if os.path.exists(image_path) else None,
+    )
     await callback.answer()
 
 
@@ -849,7 +859,8 @@ async def confirm_tier_upgrade(
             price_override_kopeks=hot_price,
             offer_type=hot_offer_type,
         )
-        await callback.message.edit_text(
+        await edit_or_answer_photo(
+            callback,
             texts.t(
                 "ADDON_INSUFFICIENT_FUNDS_MESSAGE",
                 "⚠️ <b>Недостаточно средств</b>\n\nСтоимость услуги: {required}\nНа балансе: {balance}\nНе хватает: {missing}\n\nВыберите способ пополнения. Сумма подставится автоматически.",
@@ -858,12 +869,12 @@ async def confirm_tier_upgrade(
                 balance=_format_rub_short(db_user.balance_kopeks),
                 missing=_format_rub_short(missing),
             ),
-            reply_markup=get_insufficient_balance_keyboard(
+            get_insufficient_balance_keyboard(
                 language=db_user.language,
                 amount_kopeks=missing,
                 has_saved_cart=True,
             ),
-            parse_mode="HTML",
+            photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
         )
         await callback.answer()
         return
@@ -1009,7 +1020,8 @@ async def start_tariff_purchase(
             )
             return
         missing = price_kopeks - db_user.balance_kopeks
-        await callback.message.edit_text(
+        await edit_or_answer_photo(
+            callback,
             texts.t(
                 "ADDON_INSUFFICIENT_FUNDS_MESSAGE",
                 "⚠️ <b>Недостаточно средств</b>\n\nСтоимость услуги: {required}\nНа балансе: {balance}\nНе хватает: {missing}\n\nВыберите способ пополнения. Сумма подставится автоматически.",
@@ -1018,12 +1030,12 @@ async def start_tariff_purchase(
                 balance=_format_rub_short(db_user.balance_kopeks),
                 missing=_format_rub_short(missing),
             ),
-            reply_markup=get_insufficient_balance_keyboard(
+            get_insufficient_balance_keyboard(
                 language=db_user.language,
                 amount_kopeks=missing,
                 has_saved_cart=True,
             ),
-            parse_mode="HTML",
+            photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
         )
         await callback.answer()
         return
@@ -1136,10 +1148,12 @@ async def _render_tariff_partial_breakdown(
     )
 
     message_text = "\n".join(lines)
-    try:
-        await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(message_text, reply_markup=keyboard, parse_mode="HTML")
+    await edit_or_answer_photo(
+        callback,
+        message_text,
+        keyboard,
+        photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
+    )
     await callback.answer()
 
 
@@ -1231,10 +1245,12 @@ async def show_tariff_partial_payment_methods(
             "в этом случае счёт выставляется на минимум, а излишек останется на балансе.",
         )
 
-    try:
-        await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(message_text, reply_markup=keyboard, parse_mode="HTML")
+    await edit_or_answer_photo(
+        callback,
+        message_text,
+        keyboard,
+        photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
+    )
     await callback.answer()
 
 
@@ -1433,10 +1449,12 @@ async def claim_cold_solo_offer(
     else:
         message += "Средств на балансе достаточно для активации."
 
-    try:
-        await callback.message.edit_text(message, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(message, reply_markup=keyboard, parse_mode="HTML")
+    await edit_or_answer_photo(
+        callback,
+        message,
+        keyboard,
+        photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
+    )
     await callback.answer()
 
 
@@ -1586,10 +1604,12 @@ async def claim_legacy_pro_offer(
     else:
         message += "Средств на балансе достаточно для активации."
 
-    try:
-        await callback.message.edit_text(message, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(message, reply_markup=keyboard, parse_mode="HTML")
+    await edit_or_answer_photo(
+        callback,
+        message,
+        keyboard,
+        photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
+    )
     await callback.answer()
 
 
@@ -1829,7 +1849,8 @@ async def _execute_renewal(
             price_override_kopeks=hot_price,
             offer_type=hot_offer_type,
         )
-        await callback.message.edit_text(
+        await edit_or_answer_photo(
+            callback,
             texts.t(
                 "ADDON_INSUFFICIENT_FUNDS_MESSAGE",
                 "⚠️ <b>Недостаточно средств</b>\n\nСтоимость услуги: {required}\nНа балансе: {balance}\nНе хватает: {missing}\n\nВыберите способ пополнения. Сумма подставится автоматически.",
@@ -1838,12 +1859,12 @@ async def _execute_renewal(
                 balance=_format_rub_short(db_user.balance_kopeks),
                 missing=_format_rub_short(missing),
             ),
-            reply_markup=get_insufficient_balance_keyboard(
+            get_insufficient_balance_keyboard(
                 language=db_user.language,
                 amount_kopeks=missing,
                 has_saved_cart=True,
             ),
-            parse_mode="HTML",
+            photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
         )
         await callback.answer()
         return

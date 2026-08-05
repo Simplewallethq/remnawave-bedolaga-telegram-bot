@@ -351,7 +351,7 @@ async def _auto_activate_partner_and_show_device_selection(
         "Для подключения основного или дополнительного устройства выбери платформу:",
     )
 
-    image_path = os.path.join("images", "device_selection_screen.png")
+    image_path = os.path.join("images", "devices.jpg")
     if not os.path.exists(image_path):
         image_path = None
 
@@ -409,7 +409,7 @@ async def _auto_activate_trial_and_show_device_selection(
         "Для подключения основного или дополнительного устройства выбери платформу:",
     )
 
-    image_path = os.path.join("images", "device_selection_screen.png")
+    image_path = os.path.join("images", "devices.jpg")
     if not os.path.exists(image_path):
         image_path = None
 
@@ -657,10 +657,19 @@ async def _prompt_language_selection(message: types.Message, state: FSMContext) 
     logger.info(f"🌐 LANGUAGE: Запрос выбора языка для пользователя {message.from_user.id}")
 
     await state.set_state(RegistrationStates.waiting_for_language)
-    await message.answer(
-        _get_language_prompt_text(),
-        reply_markup=get_language_selection_keyboard(),
-    )
+    image_path = os.path.join("images", "profile.jpg")
+    keyboard = get_language_selection_keyboard()
+    if os.path.exists(image_path):
+        await message.answer_photo(
+            types.FSInputFile(image_path),
+            caption=_get_language_prompt_text(),
+            reply_markup=keyboard,
+        )
+    else:
+        await message.answer(
+            _get_language_prompt_text(),
+            reply_markup=keyboard,
+        )
 
 
 async def _continue_registration_after_language(

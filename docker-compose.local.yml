@@ -65,6 +65,7 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
       - ./vpn_logo.png:/app/vpn_logo.png:ro
+      - ./images:/app/images:ro
       - ./bot_images:/app/bot_images:ro
       - ./mirror_bots.yaml:/app/mirror_bots.yaml:ro
     ports:

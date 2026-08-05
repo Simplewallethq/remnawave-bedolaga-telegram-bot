@@ -321,6 +321,11 @@ async def show_info_menu(
             show_promo_groups=promo_groups_available,
         ),
         parse_mode="HTML",
+        photo_path=(
+            os.path.join("images", "info.jpg")
+            if os.path.exists(os.path.join("images", "info.jpg"))
+            else None
+        ),
     )
     await callback.answer()
 
@@ -948,6 +953,11 @@ async def show_language_menu(
             language=db_user.language,
         ),
         parse_mode="HTML",
+        photo_path=(
+            os.path.join("images", "profile.jpg")
+            if os.path.exists(os.path.join("images", "profile.jpg"))
+            else None
+        ),
     )
     await callback.answer()
 
@@ -1270,7 +1280,7 @@ async def handle_howto(
 
     caption = _build_onboarding_device_selection_view(user)
 
-    image_path = os.path.join("images", "device_selection_screen.png")
+    image_path = os.path.join("images", "devices.jpg")
     if not os.path.exists(image_path):
         image_path = None
 
@@ -1296,7 +1306,7 @@ async def handle_onboarding_connect_free(
 
     caption = _build_onboarding_device_selection_view(user)
 
-    image_path = os.path.join("images", "device_selection_screen.png")
+    image_path = os.path.join("images", "devices.jpg")
     if not os.path.exists(image_path):
         image_path = None
 
@@ -1360,7 +1370,7 @@ async def handle_onboarding_device_selection(
         raw_subscription_link=raw_subscription_link,
     )
 
-    image_path = os.path.join("images", "connection_screen.png")
+    image_path = os.path.join("images", "connection.jpg")
     if not os.path.exists(image_path):
         image_path = None
 
@@ -1561,7 +1571,7 @@ async def handle_profile(callback: types.CallbackQuery, db_user: User, db: Async
         + texts.t("PROFILE_REG_DATE", "Дата регистрации: {reg_date}").format(reg_date=reg_date)
     )
 
-    image_path = os.path.join("images", "profile_screen.png")
+    image_path = os.path.join("images", "profile.jpg")
     if not os.path.exists(image_path):
          image_path = None
 
@@ -1654,6 +1664,11 @@ async def handle_referral(callback: types.CallbackQuery, db_user: User, db: Asyn
             language=db_user.language,
             show_rewards_shop=shop_enabled,
         ),
+        photo_path=(
+            os.path.join("images", "ref.jpg")
+            if os.path.exists(os.path.join("images", "ref.jpg"))
+            else None
+        ),
     )
     await callback.answer()
 
@@ -1732,7 +1747,7 @@ async def handle_support(callback: types.CallbackQuery, db_user: User, db: Async
         )
     )
     
-    image_path = os.path.join("images", "support_screen.png")
+    image_path = os.path.join("images", "support.jpg")
     if not os.path.exists(image_path):
          image_path = None
 
