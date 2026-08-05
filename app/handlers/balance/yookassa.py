@@ -185,7 +185,7 @@ async def process_yookassa_payment_amount(
                 "user_telegram_id": str(db_user.telegram_id),
                 "user_username": db_user.username or "",
                 "purpose": "balance_topup"
-            }, db_user, state_data)
+            }, db_user, state_data, amount_kopeks=amount_kopeks)
         )
         
         if not payment_result:
@@ -335,7 +335,7 @@ async def process_yookassa_sbp_payment_amount(
                 "user_telegram_id": str(db_user.telegram_id),
                 "user_username": db_user.username or "",
                 "purpose": "balance_topup_sbp"
-            }, db_user, state_data)
+            }, db_user, state_data, amount_kopeks=amount_kopeks)
         )
         
         if not payment_result:

@@ -53,7 +53,11 @@ async def _send_pal24_payment_message(
             description=settings.get_balance_payment_description(amount_kopeks),
             language=db_user.language,
             payment_method=payment_method,
-            metadata=build_vpn_deposit_bonus_metadata(db_user, state_data),
+            metadata=build_vpn_deposit_bonus_metadata(
+                db_user,
+                state_data,
+                amount_kopeks=amount_kopeks,
+            ),
         )
 
         if not payment_result:
@@ -225,7 +229,12 @@ async def _send_pal24_payment_message(
                     "chat_id": invoice_message.chat.id,
                     "message_id": invoice_message.message_id,
                 }
-                metadata = merge_vpn_deposit_bonus_metadata(metadata, db_user, state_data)
+                metadata = merge_vpn_deposit_bonus_metadata(
+                    metadata,
+                    db_user,
+                    state_data,
+                    amount_kopeks=amount_kopeks,
+                )
                 await db.execute(
                     update(payment.__class__)
                     .where(payment.__class__.id == payment.id)

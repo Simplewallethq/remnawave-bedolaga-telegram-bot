@@ -85,14 +85,46 @@ class VpnDepositBonusService:
             return dict(metadata)
         return None
 
+    def is_campaign_amount(self, amount_kopeks: Any) -> bool:
+        """Кампания действует только для счёта ровно на INVOICE_AMOUNT_KOPEKS."""
+        try:
+            return int(amount_kopeks) == self.INVOICE_AMOUNT_KOPEKS
+        except (TypeError, ValueError):
+            return False
+
+    def is_metadata_expired(self, metadata: Any, now_utc: Optional[datetime] = None) -> bool:
+        if not isinstance(metadata, dict) or not metadata.get("expires_at"):
+            return False
+        return self._is_payload_expired(metadata, now_utc or datetime.utcnow())
+
     def is_campaign_stars_payload(self, payload: str | None) -> bool:
         return bool(payload and payload.startswith(f"{self.PURPOSE}_"))
 
     def build_stars_payload(self, user_id: int, amount_kopeks: int) -> str:
         return f"{self.PURPOSE}_{user_id}_{amount_kopeks}"
 
+    def amount_from_stars_payload(self, payload: str | None) -> Optional[int]:
+        if not self.is_campaign_stars_payload(payload):
+            return None
+        _, _, amount_part = payload[len(self.PURPOSE) + 1 :].rpartition("_")
+        try:
+            return int(amount_part)
+        except (TypeError, ValueError):
+            return None
+
     def metadata_from_stars_payload(self, user_id: int, payload: str | None) -> Optional[dict[str, Any]]:
         if not self.is_campaign_stars_payload(payload):
+            return None
+        payload_amount = self.amount_from_stars_payload(payload)
+        if not self.is_campaign_amount(payload_amount):
+            logger.error(
+                "Stars payload %s помечен как %s, но выставлен на %s копеек вместо %s — "
+                "кампания не применяется",
+                payload,
+                self.PURPOSE,
+                payload_amount,
+                self.INVOICE_AMOUNT_KOPEKS,
+            )
             return None
         return self.build_payment_metadata(user_id)
 
@@ -327,6 +359,19 @@ class VpnDepositBonusService:
         if not self.is_debug_user_id_allowed(user_id):
             return VpnDepositBonusPaymentDecision(is_campaign_payment=False)
         campaign_key = str(metadata.get("campaign_key") or self.campaign_key(user_id))
+        if not self.is_campaign_amount(payment_amount_kopeks):
+            # Метка кампании попала на счёт с другой суммой (протухшее состояние FSM,
+            # ручная правка metadata и т.п.). Начисляем оплаченное, а не фикс-бонус.
+            logger.error(
+                "Платёж пользователя %s (%s) помечен как %s, но оплачен на %s копеек вместо %s — "
+                "начисляем оплаченную сумму",
+                user_id,
+                campaign_key,
+                self.PURPOSE,
+                payment_amount_kopeks,
+                self.INVOICE_AMOUNT_KOPEKS,
+            )
+            return VpnDepositBonusPaymentDecision(is_campaign_payment=False)
         is_duplicate = await self.was_paid(db, user_id, campaign_key)
         credit_amount = payment_amount_kopeks if is_duplicate else self.BONUS_AMOUNT_KOPEKS
         return VpnDepositBonusPaymentDecision(

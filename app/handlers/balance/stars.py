@@ -15,7 +15,7 @@ from app.utils.decorators import error_handler
 from app.utils.photo_message import edit_or_answer_photo
 from app.external.telegram_stars import TelegramStarsService
 from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
-from .vpn_deposit_bonus import is_vpn_deposit_bonus_state
+from .vpn_deposit_bonus import should_apply_vpn_deposit_bonus
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ async def process_stars_payment_amount(
             stash_snapshot_for_stars,
         )
 
-        if is_vpn_deposit_bonus_state(state_data):
+        if should_apply_vpn_deposit_bonus(state_data, amount_kopeks):
             stars_payload = vpn_deposit_bonus_service.build_stars_payload(
                 db_user.id,
                 amount_kopeks,

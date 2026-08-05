@@ -145,6 +145,51 @@ async def test_payment_decision_credits_bonus_once_then_invoice_amount() -> None
     assert duplicate.referral_amount_kopeks == vpn_deposit_bonus_service.INVOICE_AMOUNT_KOPEKS
 
 
+async def test_payment_decision_rejects_amount_other_than_invoice_amount() -> None:
+    user_id = 42
+    metadata = vpn_deposit_bonus_service.build_payment_metadata(user_id)
+    db = _FakeSession(execute_values=[[]])
+
+    decision = await vpn_deposit_bonus_service.resolve_payment_decision(
+        db,
+        user_id=user_id,
+        payment_amount_kopeks=99_000,
+        metadata=metadata,
+    )
+
+    assert not decision.is_campaign_payment
+    assert decision.credit_amount_kopeks == 0
+
+
+def test_stars_payload_metadata_requires_invoice_amount() -> None:
+    user_id = 42
+    valid_payload = vpn_deposit_bonus_service.build_stars_payload(
+        user_id,
+        vpn_deposit_bonus_service.INVOICE_AMOUNT_KOPEKS,
+    )
+    wrong_payload = vpn_deposit_bonus_service.build_stars_payload(user_id, 99_000)
+
+    assert vpn_deposit_bonus_service.amount_from_stars_payload(valid_payload) == (
+        vpn_deposit_bonus_service.INVOICE_AMOUNT_KOPEKS
+    )
+    assert vpn_deposit_bonus_service.metadata_from_stars_payload(user_id, valid_payload)
+    assert vpn_deposit_bonus_service.metadata_from_stars_payload(user_id, wrong_payload) is None
+
+
+def test_metadata_expiry_check_ignores_metadata_without_deadline() -> None:
+    now = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
+
+    assert not vpn_deposit_bonus_service.is_metadata_expired({}, now)
+    assert not vpn_deposit_bonus_service.is_metadata_expired(
+        {"expires_at": "2026-08-05T20:59:59"},
+        now,
+    )
+    assert vpn_deposit_bonus_service.is_metadata_expired(
+        {"expires_at": "2026-08-03T20:59:59"},
+        now,
+    )
+
+
 async def test_touch_1_queue_pages_past_expired_logs() -> None:
     now = datetime(2026, 7, 29, 12, 0, tzinfo=timezone.utc)
     expired_log = SimpleNamespace(

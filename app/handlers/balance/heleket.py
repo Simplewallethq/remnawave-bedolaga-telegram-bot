@@ -111,7 +111,11 @@ async def process_heleket_payment_amount(
         amount_kopeks=amount_kopeks,
         description=f"Пополнение баланса на {amount_rubles:.0f} ₽",
         language=db_user.language,
-        metadata=build_vpn_deposit_bonus_metadata(db_user, state_data),
+        metadata=build_vpn_deposit_bonus_metadata(
+            db_user,
+            state_data,
+            amount_kopeks=amount_kopeks,
+        ),
     )
 
     if not result:
@@ -222,7 +226,12 @@ async def process_heleket_payment_amount(
                 "chat_id": invoice_message.chat.id,
                 "message_id": invoice_message.message_id,
             }
-            metadata = merge_vpn_deposit_bonus_metadata(metadata, db_user, state_data)
+            metadata = merge_vpn_deposit_bonus_metadata(
+                metadata,
+                db_user,
+                state_data,
+                amount_kopeks=amount_kopeks,
+            )
             await db.execute(
                 update(payment.__class__)
                 .where(payment.__class__.id == payment.id)

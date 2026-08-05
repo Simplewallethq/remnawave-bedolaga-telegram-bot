@@ -55,7 +55,12 @@ async def _create_cloudpayments_payment_and_respond(
         description=description,
         telegram_id=db_user.telegram_id,
         language=db_user.language,
-        metadata=merge_vpn_deposit_bonus_metadata({}, db_user, state_data),
+        metadata=merge_vpn_deposit_bonus_metadata(
+            {},
+            db_user,
+            state_data,
+            amount_kopeks=amount_kopeks,
+        ),
     )
 
     if not result:
@@ -425,7 +430,12 @@ async def handle_cloudpayments_quick_amount(
         description=description,
         telegram_id=db_user.telegram_id,
         language=db_user.language,
-        metadata=merge_vpn_deposit_bonus_metadata({}, db_user, state_data),
+        metadata=merge_vpn_deposit_bonus_metadata(
+            {},
+            db_user,
+            state_data,
+            amount_kopeks=amount_kopeks,
+        ),
     )
 
     if not result:

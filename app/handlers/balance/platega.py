@@ -281,7 +281,11 @@ async def process_platega_payment_amount(
             description=settings.get_balance_payment_description(amount_kopeks),
             language=db_user.language,
             payment_method_code=method_code,
-            metadata=build_vpn_deposit_bonus_metadata(db_user, data),
+            metadata=build_vpn_deposit_bonus_metadata(
+                db_user,
+                data,
+                amount_kopeks=amount_kopeks,
+            ),
         )
     except Exception as error:
         logger.exception("Ошибка создания платежа Platega: %s", error)
@@ -375,6 +379,7 @@ async def process_platega_payment_amount(
                 payment_metadata,
                 db_user,
                 state_data,
+                amount_kopeks=amount_kopeks,
             )
             await payment_module.update_platega_payment(
                 db,
@@ -540,7 +545,11 @@ async def process_platega_universal_payment_amount(
             amount_kopeks=amount_kopeks,
             description=settings.get_balance_payment_description(amount_kopeks),
             language=db_user.language,
-            metadata=build_vpn_deposit_bonus_metadata(db_user, state_data),
+            metadata=build_vpn_deposit_bonus_metadata(
+                db_user,
+                state_data,
+                amount_kopeks=amount_kopeks,
+            ),
         )
     except Exception as error:
         logger.exception("Ошибка создания универсального платежа Platega: %s", error)
@@ -651,6 +660,7 @@ async def process_platega_universal_payment_amount(
                 payment_metadata,
                 db_user,
                 state_data,
+                amount_kopeks=amount_kopeks,
             )
             await payment_module.update_platega_payment(
                 db,

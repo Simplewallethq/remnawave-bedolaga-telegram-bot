@@ -155,7 +155,11 @@ async def process_cryptobot_payment_amount(
             await message.answer("❌ Максимальная сумма для оплаты в USD: 1,000 USD")
             return
         
-        bonus_metadata = build_vpn_deposit_bonus_metadata(db_user, data)
+        bonus_metadata = build_vpn_deposit_bonus_metadata(
+            db_user,
+            data,
+            amount_kopeks=amount_kopeks,
+        )
         payment_payload = (
             vpn_deposit_bonus_service.PURPOSE
             if bonus_metadata

@@ -128,7 +128,11 @@ async def process_mulenpay_payment_amount(
             amount_kopeks=amount_kopeks,
             description=settings.get_balance_payment_description(amount_kopeks),
             language=db_user.language,
-            metadata=build_vpn_deposit_bonus_metadata(db_user, state_data),
+            metadata=build_vpn_deposit_bonus_metadata(
+                db_user,
+                state_data,
+                amount_kopeks=amount_kopeks,
+            ),
         )
 
         if not payment_result or not payment_result.get("payment_url"):
@@ -215,6 +219,7 @@ async def process_mulenpay_payment_amount(
                     payment_metadata,
                     db_user,
                     state_data,
+                    amount_kopeks=amount_kopeks,
                 )
                 await payment_module.update_mulenpay_payment_metadata(
                     db,

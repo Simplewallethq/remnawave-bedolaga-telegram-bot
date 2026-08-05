@@ -550,6 +550,23 @@ async def process_topup_amount(
         
         is_vpn_bonus = data.get("topup_purpose") == vpn_deposit_bonus_service.PURPOSE
 
+        if is_vpn_bonus and not vpn_deposit_bonus_service.is_campaign_amount(amount_kopeks):
+            # Пользователь ввёл произвольную сумму, оставаясь в состоянии кампании:
+            # это обычное пополнение, контекст кампании нужно убрать, чтобы метка
+            # не уехала в счёт на другую сумму.
+            logger.info(
+                "Сброс состояния %s для пользователя %s: введена сумма %s копеек",
+                vpn_deposit_bonus_service.PURPOSE,
+                db_user.id,
+                amount_kopeks,
+            )
+            await state.update_data(
+                topup_purpose=None,
+                vpn_deposit_bonus_metadata=None,
+            )
+            data = await state.get_data()
+            is_vpn_bonus = False
+
         if payment_method in ["yookassa", "yookassa_sbp"] and not is_vpn_bonus:
             if amount_kopeks < settings.YOOKASSA_MIN_AMOUNT_KOPEKS:
                 min_rubles = settings.YOOKASSA_MIN_AMOUNT_KOPEKS / 100

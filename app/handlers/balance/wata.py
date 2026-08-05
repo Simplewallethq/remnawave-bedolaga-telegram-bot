@@ -111,7 +111,11 @@ async def process_wata_payment_amount(
             amount_kopeks=amount_kopeks,
             description=settings.get_balance_payment_description(amount_kopeks),
             language=db_user.language,
-            metadata=build_vpn_deposit_bonus_metadata(db_user, state_data),
+            metadata=build_vpn_deposit_bonus_metadata(
+                db_user,
+                state_data,
+                amount_kopeks=amount_kopeks,
+            ),
         )
     except Exception as error:  # pragma: no cover - handled by decorator logs
         logger.exception("Ошибка создания WATA платежа: %s", error)
@@ -203,7 +207,12 @@ async def process_wata_payment_amount(
                 "chat_id": invoice_message.chat.id,
                 "message_id": invoice_message.message_id,
             }
-            metadata = merge_vpn_deposit_bonus_metadata(metadata, db_user, state_data)
+            metadata = merge_vpn_deposit_bonus_metadata(
+                metadata,
+                db_user,
+                state_data,
+                amount_kopeks=amount_kopeks,
+            )
             await db.execute(
                 update(payment.__class__)
                 .where(payment.__class__.id == payment.id)
