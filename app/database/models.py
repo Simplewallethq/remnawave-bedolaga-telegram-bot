@@ -837,7 +837,7 @@ class Subscription(Base):
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
-    remnawave_short_uuid = Column(String(255), nullable=True)
+    remnawave_short_uuid = Column(String(255), nullable=True, index=True)
 
     plan_id = Column(Integer, ForeignKey("subscription_plans.id", ondelete="SET NULL"), nullable=True, index=True)
     plan_period_days = Column(Integer, nullable=True)

@@ -4039,6 +4039,28 @@ async def create_platega_unpaid_created_index() -> bool:
         return False
 
 
+async def create_subscription_short_uuid_index() -> bool:
+    """Индекс под вход в приложение по коду/ссылке подписки (/sub/<short_uuid>)."""
+    if not await check_table_exists("subscriptions"):
+        return True
+    index_name = "ix_subscriptions_remnawave_short_uuid"
+    if await check_index_exists("subscriptions", index_name):
+        return True
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    f"CREATE INDEX {index_name} "
+                    "ON subscriptions(remnawave_short_uuid)"
+                )
+            )
+        logger.info("✅ Индекс subscriptions.remnawave_short_uuid создан")
+        return True
+    except Exception as e:
+        logger.error("Ошибка создания индекса subscriptions.remnawave_short_uuid: %s", e)
+        return False
+
+
 async def create_android_rate_request_clicks_table() -> bool:
     table_exists = await check_table_exists("android_rate_request_clicks")
     if table_exists:
@@ -7890,6 +7912,9 @@ async def run_universal_migration():
 
         if not await create_platega_unpaid_created_index():
             logger.warning("⚠️ Проблемы с индексом неоплаченных Platega счетов")
+
+        if not await create_subscription_short_uuid_index():
+            logger.warning("⚠️ Проблемы с индексом subscriptions.remnawave_short_uuid")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ ANDROID_RATE_REQUEST_CLICKS ===")
         android_rate_clicks_created = await create_android_rate_request_clicks_table()

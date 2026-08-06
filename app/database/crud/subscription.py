@@ -38,6 +38,36 @@ async def get_subscription_by_user_id(db: AsyncSession, user_id: int) -> Optiona
     return subscription
 
 
+async def get_subscription_by_short_uuid(
+    db: AsyncSession, short_uuid: str
+) -> Optional[Subscription]:
+    """Подписка по short uuid из панели remnawave (хвост ссылки /sub/<code>).
+
+    Колонка не уникальна на уровне БД, поэтому дубли не роняют запрос:
+    берём самую свежую и пишем предупреждение.
+    """
+    if not short_uuid:
+        return None
+
+    result = await db.execute(
+        select(Subscription)
+        .options(selectinload(Subscription.user))
+        .where(Subscription.remnawave_short_uuid == short_uuid)
+        .order_by(Subscription.id.desc())
+        .limit(2)
+    )
+    subscriptions = result.scalars().all()
+    if not subscriptions:
+        return None
+    if len(subscriptions) > 1:
+        logger.warning(
+            "⚠️ Найдено несколько подписок с remnawave_short_uuid=%s, беру %s",
+            short_uuid,
+            subscriptions[0].id,
+        )
+    return subscriptions[0]
+
+
 async def create_trial_subscription(
     db: AsyncSession,
     user_id: int,

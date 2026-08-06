@@ -25,7 +25,9 @@ class DeviceErrorResponse(BaseModel):
 
 class BindByCodeRequest(BaseModel):
     """Request body for POST /api/devices/bind-by-code."""
-    code: str = Field(..., min_length=16, max_length=16)
+    # Код привязки/share-код (16 символов) ЛИБО ссылка на подписку
+    # ('https://letovpn.com/sub/-BgpfZQ062Td9Fpk'), поэтому длина свободная.
+    code: str = Field(..., min_length=1, max_length=512)
     device_id: str = Field(..., min_length=1, max_length=255)
     # Опционально: сырая строка Google Play Install Referrer
     # ('utm_source=telegram&tg_user_id=123456789'). Пустая строка — no-op.

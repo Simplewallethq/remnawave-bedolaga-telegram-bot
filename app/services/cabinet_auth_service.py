@@ -18,6 +18,7 @@ from app.database.crud.user import (
 )
 from app.database.models import Subscription, User, UserPromoGroup
 from app.utils.passwords import verify_password
+from app.utils.subscription_code import extract_subscription_code
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,10 @@ class CabinetAuthService:
         if not code:
             return None
 
-        normalized = code.strip()
+        # Принимаем и голый код, и ссылку на подписку целиком.
+        normalized, _ = extract_subscription_code(code)
+        if not normalized:
+            return None
 
         # 1) Реферальный код
         user = await get_user_by_referral_code(db, normalized)

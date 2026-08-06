@@ -30,8 +30,11 @@ from app.database.crud.share_token import (
     activate_share_code,
 )
 
+from app.database.crud.subscription import get_subscription_by_short_uuid
+
 from app.database.models import Subscription
 from app.utils.install_referrer import apply_app_name, apply_install_referrer
+from app.utils.subscription_code import extract_subscription_code
 
 from ..dependencies import get_db_session, require_api_token
 from ..schemas.devices import BindByCodeRequest, DeviceLinkRequest, DeviceLinkResponse
@@ -147,7 +150,7 @@ async def link_device(
     "/bind-by-code",
     response_model=SubscriptionResponse,
     status_code=status.HTTP_200_OK,
-    summary="Bind device to a subscription using a one-time binding code",
+    summary="Bind device to a subscription using a binding code or subscription link",
     responses={
         404: {"description": "Code not found, expired, or already used"},
         422: {"description": "Device limit exceeded on the target subscription"},
@@ -158,7 +161,14 @@ async def bind_device_by_code(
     _=Security(require_api_token),
     db: AsyncSession = Depends(get_db_session),
 ) -> SubscriptionResponse:
-    """Validate a binding code and bind the supplied device_id to the code's subscription.
+    """Validate a code and bind the supplied device_id to its subscription.
+
+    `code` accepts three things:
+    1. личный одноразовый код привязки (`device_binding_codes`);
+    2. многоразовый share-код страницы «Поделиться доступом» (`share_tokens`);
+    3. код подписки — `subscriptions.remnawave_short_uuid`, он же хвост ссылки
+       вида `https://letovpn.com/sub/-BgpfZQ062Td9Fpk`; ссылку можно прислать
+       целиком, она нормализуется до кода.
 
     Flow:
     1. Atomically consume the code (404 if missing/expired/used).
@@ -171,16 +181,28 @@ async def bind_device_by_code(
     this device to the code's subscription, so a pre-existing link to another
     subscription is silently replaced rather than rejected with 409.
     """
+    code, is_link = extract_subscription_code(payload.code)
+    if not code:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code not found")
+
+    if is_link:
+        # Ссылка не может быть кодом привязки или share-кодом — сразу к подписке.
+        return await _bind_via_subscription_code(db, payload, code)
+
     existing_link = await get_device_link(db, payload.device_id)
 
     subscription, consume_status = await consume_binding_code(
-        db, payload.code, payload.device_id
+        db, code, payload.device_id
     )
 
     if consume_status == CONSUME_NOT_FOUND:
         # Не личный код привязки — пробуем share-код страницы «Поделиться доступом»
         # (тот же формат, многоразовый, со счётчиком активаций).
-        return await _bind_via_share_code(db, payload)
+        response = await _bind_via_share_code(db, payload, code)
+        if response is not None:
+            return response
+        # И не share-код — последняя попытка: код подписки (remnawave short uuid).
+        return await _bind_via_subscription_code(db, payload, code)
     if consume_status == CONSUME_EXPIRED:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code expired")
     if consume_status == CONSUME_USED:
@@ -188,18 +210,7 @@ async def bind_device_by_code(
     if consume_status != CONSUME_OK or subscription is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code not found")
 
-    # Re-fetch the subscription with the device_links relationship hydrated.
-    sub_result = await db.execute(
-        select(Subscription)
-        .options(selectinload(Subscription.user))
-        .where(Subscription.id == subscription.id)
-    )
-    subscription = sub_result.scalar_one_or_none()
-    if subscription is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Subscription not found",
-        )
+    subscription = await _refetch_subscription_with_user(db, subscription.id)
 
     # Атрибуция установки: личный код вводит владелец подписки, поэтому
     # Install Referrer применяем к нему. Share-код (_bind_via_share_code)
@@ -213,10 +224,53 @@ async def bind_device_by_code(
         if changed:
             await db.commit()
 
+    return await _attach_device_and_serialize(
+        db, subscription, payload.device_id, existing_link, source="binding code"
+    )
+
+
+async def _refetch_subscription_with_user(
+    db: AsyncSession, subscription_id: int
+) -> Subscription:
+    """Перечитывает подписку с прогретым user — он нужен и для атрибуции,
+    и для сериализации ответа."""
+    result = await db.execute(
+        select(Subscription)
+        .options(selectinload(Subscription.user))
+        .where(Subscription.id == subscription_id)
+    )
+    subscription = result.scalar_one_or_none()
+    if subscription is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subscription not found",
+        )
+    return subscription
+
+
+async def _serialize_with_devices(
+    db: AsyncSession, subscription: Subscription
+) -> SubscriptionResponse:
+    response = _serialize_subscription(subscription)
+    response.connected_devices = await count_device_links(db, subscription.id)
+    return response
+
+
+async def _attach_device_and_serialize(
+    db: AsyncSession,
+    subscription: Subscription,
+    device_id: str,
+    existing_link,
+    source: str,
+) -> SubscriptionResponse:
+    """Идемпотентно привязывает устройство к подписке и отдаёт её payload.
+
+    Повторная привязка того же устройства — no-op. Привязка устройства,
+    висящего на другой подписке, переносит его. Лимит устройств проверяется
+    на ЦЕЛЕВОЙ подписке.
+    """
     if existing_link is not None and existing_link.subscription_id == subscription.id:
-        response = _serialize_subscription(subscription)
-        response.connected_devices = await count_device_links(db, subscription.id)
-        return response
+        return await _serialize_with_devices(db, subscription)
 
     # Enforce device limit on the TARGET subscription. The incoming device is
     # not on the target yet (handled above), so the raw count is correct for
@@ -231,34 +285,62 @@ async def bind_device_by_code(
 
     if existing_link is not None:
         logger.info(
-            "Rebinding device %s from subscription %s to %s via binding code",
-            payload.device_id, existing_link.subscription_id, subscription.id,
+            "Rebinding device %s from subscription %s to %s via %s",
+            device_id, existing_link.subscription_id, subscription.id, source,
         )
         await rebind_device_link(db, existing_link, subscription.id)
     else:
-        await create_device_link(db, subscription.id, payload.device_id)
+        await create_device_link(db, subscription.id, device_id)
 
-    response = _serialize_subscription(subscription)
-    response.connected_devices = await count_device_links(db, subscription.id)
-    return response
+    return await _serialize_with_devices(db, subscription)
+
+
+async def _bind_via_subscription_code(
+    db: AsyncSession, payload: BindByCodeRequest, code: str
+) -> SubscriptionResponse:
+    """Привязка устройства по коду подписки (remnawave short uuid / ссылке).
+
+    Так пользователь восстанавливает доступ, имея на руках только ссылку на
+    подписку. Статус подписки здесь не проверяем: истёкшую отдаём как есть —
+    teleVpn сам увидит actual_status='expired' и выдаст бесплатный фолбэк.
+    """
+    subscription = await get_subscription_by_short_uuid(db, code)
+    if subscription is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code not found")
+
+    # Install Referrer не применяем: ссылку на подписку легко переслать, и
+    # атрибуция установки ушла бы владельцу подписки по чужой установке.
+    # app_name — про клиент самого устройства, его сохраняем.
+    if subscription.user is not None and apply_app_name(
+        subscription.user, payload.app_name
+    ):
+        await db.commit()
+
+    existing_link = await get_device_link(db, payload.device_id)
+    return await _attach_device_and_serialize(
+        db, subscription, payload.device_id, existing_link, source="subscription code"
+    )
 
 
 async def _bind_via_share_code(
-    db: AsyncSession, payload: BindByCodeRequest
-) -> SubscriptionResponse:
+    db: AsyncSession, payload: BindByCodeRequest, code: str
+) -> SubscriptionResponse | None:
     """Привязка устройства по share-коду страницы «Поделиться доступом».
 
     Отличия от личного кода: код многоразовый (до max_activations), на лимите
     устройств активация НЕ расходуется, повторная привязка того же устройства
     идемпотентна. Ошибки отдаём в тех же формулировках, что личный код, —
     приложение их уже понимает.
+
+    Возвращает None, если такого share-кода нет: вызывающий код попробует
+    последний вариант — код подписки.
     """
     subscription, share_status, extra = await activate_share_code(
-        db, payload.code, payload.device_id
+        db, code, payload.device_id
     )
 
     if share_status in (ACTIVATE_NOT_FOUND, ACTIVATE_DEAD):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code not found")
+        return None
     if share_status == ACTIVATE_SUB_INACTIVE:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code expired")
     if share_status == ACTIVATE_LIMIT:
@@ -269,19 +351,5 @@ async def _bind_via_share_code(
     if share_status != ACTIVATE_OK or subscription is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Code not found")
 
-    # Перечитываем подписку с прогретым user для сериализации.
-    sub_result = await db.execute(
-        select(Subscription)
-        .options(selectinload(Subscription.user))
-        .where(Subscription.id == subscription.id)
-    )
-    subscription = sub_result.scalar_one_or_none()
-    if subscription is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Subscription not found",
-        )
-
-    response = _serialize_subscription(subscription)
-    response.connected_devices = await count_device_links(db, subscription.id)
-    return response
+    subscription = await _refetch_subscription_with_user(db, subscription.id)
+    return await _serialize_with_devices(db, subscription)
