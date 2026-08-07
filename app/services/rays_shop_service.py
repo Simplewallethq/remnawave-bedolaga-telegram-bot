@@ -162,7 +162,7 @@ async def redeem_subscription_prize(
                     device_limit=plan.device_limit,
                     connected_squads=connected_squads,
                     autopay_enabled=False,
-                    autopay_days_before=3,
+                    autopay_days_before=settings.DEFAULT_AUTOPAY_DAYS_BEFORE,
                     plan_id=plan.id,
                     plan_period_days=prize.period_days,
                 )

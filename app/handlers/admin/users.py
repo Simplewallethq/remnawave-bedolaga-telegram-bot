@@ -4417,7 +4417,7 @@ async def _admin_assign_tariff(
                 device_limit=plan.device_limit,
                 connected_squads=squads,
                 autopay_enabled=False,
-                autopay_days_before=3,
+                autopay_days_before=settings.DEFAULT_AUTOPAY_DAYS_BEFORE,
                 plan_id=plan.id,
                 plan_period_days=period_days,
             )

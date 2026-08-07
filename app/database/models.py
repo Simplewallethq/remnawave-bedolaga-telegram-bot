@@ -832,7 +832,7 @@ class Subscription(Base):
     connected_squads = Column(JSON, default=list)
     
     autopay_enabled = Column(Boolean, default=False)
-    autopay_days_before = Column(Integer, default=3)
+    autopay_days_before = Column(Integer, default=1)
 
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
