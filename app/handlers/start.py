@@ -1,4 +1,5 @@
 import logging
+import html
 from datetime import datetime
 from typing import Optional
 import os
@@ -37,7 +38,6 @@ from app.keyboards.inline import (
     get_language_selection_keyboard,
     get_welcome_keyboard,
     get_new_main_menu_keyboard,
-    get_onboarding_device_selection_keyboard,
     get_onboarding_welcome_keyboard,
 )
 from app.database.crud.subscription import (
@@ -75,6 +75,7 @@ from app.utils.fsm import clear_state_preserving_pending_start_payload
 from app.database.crud.subscription import decrement_subscription_server_counts
 from app.services.blacklist_service import blacklist_service
 from app.database.crud.device_link import get_device_link, create_device_link
+from app.utils.subscription_utils import get_raw_subscription_link
 
 
 logger = logging.getLogger(__name__)
@@ -331,54 +332,73 @@ async def _auto_activate_partner_and_show_device_selection(
     is_callback: bool = False,
     language: str | None = None,
 ) -> bool:
-    """Activate partner subscription during registration and show device selection.
-
-    Mirrors _auto_activate_trial_and_show_device_selection. If partner activation
-    falls back (e.g. user already has paid sub, or token replayed), caller is
-    responsible for the fallback UX.
-    """
+    """Activate a partner subscription and show the onboarding welcome screen."""
     ok, _reason = await activate_partner_subscription_for_user(
         bot, db, user, sub_until=sub_until, jti=jti,
     )
     if not ok:
         return False
 
-    lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
-    texts = get_texts(lang)
-    # Ключ на этом экране не показываем — он есть внутри платформенных инструкций.
-    device_selection_text = texts.t(
-        "ONBOARDING_DEVICE_SELECTION_TEXT",
-        "Для подключения основного или дополнительного устройства выбери платформу:",
+    return await _show_onboarding_welcome(
+        user,
+        message_or_callback,
+        is_callback=is_callback,
+        language=language,
     )
 
-    image_path = os.path.join("images", "devices.jpg")
-    if not os.path.exists(image_path):
-        image_path = None
 
-    keyboard = get_onboarding_device_selection_keyboard(lang)
+def _build_onboarding_welcome_text(user, language: str | None = None) -> str | None:
+    lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
+    texts = get_texts(lang)
+    link = get_raw_subscription_link(getattr(user, "subscription", None))
+    if not link:
+        return None
 
+    return (
+        texts.t(
+            "ONBOARDING_WELCOME_TEXT",
+            "Привет, тебе доступна бесплатная подписка на 3 дня! Установи приложение и пользуйся.",
+        )
+        + "\n\n"
+        + texts.t(
+            "ONBOARDING_ACCESS_KEY_LABEL",
+            "Ключ-ссылка доступа (для Leto, Happ, Incy)",
+        )
+        + "\n"
+        + f"<pre><code>{html.escape(link, quote=True)}</code></pre>"
+    )
+
+
+async def _show_onboarding_welcome(
+    user,
+    message_or_callback,
+    *,
+    is_callback: bool,
+    language: str | None = None,
+) -> bool:
+    lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
+    text = _build_onboarding_welcome_text(user, lang)
+    if not text:
+        logger.error("Subscription link is unavailable for onboarding user %s", user.telegram_id)
+        return False
+
+    keyboard = get_onboarding_welcome_keyboard(lang)
+    photo_path = os.path.join("images", "connection.jpg")
     if is_callback:
         await edit_or_answer_photo(
             callback=message_or_callback,
-            caption=device_selection_text,
+            caption=text,
             keyboard=keyboard,
-            photo_path=image_path,
             parse_mode="HTML",
+            photo_path=photo_path,
         )
     else:
-        if image_path:
-            await message_or_callback.answer_photo(
-                photo=types.FSInputFile(image_path),
-                caption=device_selection_text,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
-        else:
-            await message_or_callback.answer(
-                device_selection_text,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
+        await message_or_callback.answer_photo(
+            types.FSInputFile(photo_path),
+            caption=text,
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
 
     return True
 
@@ -391,54 +411,18 @@ async def _auto_activate_trial_and_show_device_selection(
     is_callback: bool = False,
     language: str | None = None,
 ):
-    """
-    Auto-activate trial subscription during registration and show device selection.
-    Used by both complete_registration (message) and complete_registration_from_callback (callback).
-    """
+    """Auto-activate a trial subscription and show the onboarding welcome screen."""
     ok = await activate_trial_for_user(bot, db, user)
     if not ok:
         # Fallback: show main menu if trial activation fails
         return False
 
-    # Show device selection directly (Screen 2)
-    lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
-    texts = get_texts(lang)
-    # Ключ на этом экране не показываем — он есть внутри платформенных инструкций.
-    device_selection_text = texts.t(
-        "ONBOARDING_DEVICE_SELECTION_TEXT",
-        "Для подключения основного или дополнительного устройства выбери платформу:",
+    return await _show_onboarding_welcome(
+        user,
+        message_or_callback,
+        is_callback=is_callback,
+        language=language,
     )
-
-    image_path = os.path.join("images", "devices.jpg")
-    if not os.path.exists(image_path):
-        image_path = None
-
-    keyboard = get_onboarding_device_selection_keyboard(lang)
-
-    if is_callback:
-        await edit_or_answer_photo(
-            callback=message_or_callback,
-            caption=device_selection_text,
-            keyboard=keyboard,
-            photo_path=image_path,
-            parse_mode="HTML",
-        )
-    else:
-        if image_path:
-            await message_or_callback.answer_photo(
-                photo=types.FSInputFile(image_path),
-                caption=device_selection_text,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
-        else:
-            await message_or_callback.answer(
-                device_selection_text,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
-
-    return True
 
 
 async def _activate_trial_or_deny_for_device(
