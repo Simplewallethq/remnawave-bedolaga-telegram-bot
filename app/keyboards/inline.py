@@ -10,10 +10,7 @@ from app.config import settings, PERIOD_PRICES, TRAFFIC_PRICES
 from app.localization.loader import DEFAULT_LANGUAGE
 from app.localization.texts import get_texts
 from app.utils.install_referrer import build_personal_play_link
-from app.utils.miniapp_buttons import (
-    build_miniapp_connect_button,
-    build_miniapp_or_callback_button,
-)
+from app.utils.miniapp_buttons import build_miniapp_or_callback_button
 from app.utils.pricing_utils import (
     format_period_description,
     apply_percentage_discount,
@@ -3193,12 +3190,6 @@ def get_connect_android_keyboard(
                 url=leto_url,
             )
         ])
-    happ_button = build_miniapp_connect_button(
-        texts.t("CONNECT_TRANSFER_HAPP_BUTTON", "🛠 Передать ключ в Happ"),
-        "happ",
-    )
-    if happ_button:
-        buttons.append([happ_button])
     buttons.append([
         InlineKeyboardButton(text=texts.BACK, callback_data="howto")
     ])
@@ -3210,17 +3201,7 @@ def get_connect_apple_keyboard(
 ) -> InlineKeyboardMarkup:
     """iPhone/macOS-specific Connect menu actions."""
     texts = get_texts(language)
-    buttons: List[List[InlineKeyboardButton]] = []
-    transfer_buttons: List[List[InlineKeyboardButton]] = []
-    for action, text_key, fallback in (
-        ("incy", "CONNECT_TRANSFER_INCY_BUTTON", "🛠 Передать ключ в Incy"),
-        ("happ", "CONNECT_TRANSFER_HAPP_BUTTON", "🛠 Передать ключ в Happ"),
-    ):
-        button = build_miniapp_connect_button(texts.t(text_key, fallback), action)
-        if button:
-            transfer_buttons.append([button])
-
-    buttons.extend([
+    buttons: List[List[InlineKeyboardButton]] = [
         [InlineKeyboardButton(
             text=texts.t("CONNECT_DOWNLOAD_INCY_BUTTON", "🍏 Скачать Incy (RU App Store)"),
             url=settings.get_incy_download_link(),
@@ -3229,9 +3210,8 @@ def get_connect_apple_keyboard(
             text=texts.t("CONNECT_DOWNLOAD_HAPP_IOS_BUTTON", "🍎 Скачать Happ (Int. App Store)"),
             url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
         )],
-    ])
-    buttons.extend(transfer_buttons)
-    buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data="howto")])
+        [InlineKeyboardButton(text=texts.BACK, callback_data="howto")],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -3247,12 +3227,6 @@ def get_connect_windows_keyboard(
             url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
         )],
     ])
-    happ_button = build_miniapp_connect_button(
-        texts.t("CONNECT_TRANSFER_HAPP_BUTTON", "🛠 Передать ключ в Happ"),
-        "happ",
-    )
-    if happ_button:
-        buttons.append([happ_button])
     buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data="howto")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

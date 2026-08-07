@@ -80,38 +80,6 @@ def test_connect_apple_and_windows_keyboards_have_only_requested_actions(monkeyp
     )
 
 
-def test_connect_platform_keyboards_open_miniapp_with_requested_app(monkeypatch):
-    monkeypatch.setattr(
-        inline.settings,
-        "MINIAPP_CUSTOM_URL",
-        "https://bot.example.com/miniapp/static/index.html?theme=dark",
-    )
-    monkeypatch.setattr(
-        inline,
-        "build_personal_play_link",
-        lambda _url, _telegram_id: "https://play.google.com/store/apps/details?id=leto",
-    )
-
-    android_rows = _button_rows(inline.get_connect_android_keyboard("ru", telegram_id=42))
-    apple_rows = _button_rows(inline.get_connect_apple_keyboard("ru"))
-    windows_rows = _button_rows(inline.get_connect_windows_keyboard("ru"))
-
-    assert android_rows[0][0].text == "☀️ Скачать Leto VPN"
-    assert android_rows[1][0].text == "🛠 Передать ключ в Happ"
-    assert android_rows[1][0].web_app.url == (
-        "https://bot.example.com/miniapp/static/index.html?theme=dark&connect=happ"
-    )
-    assert apple_rows[0][0].text == "🍏 Скачать Incy (RU App Store)"
-    assert apple_rows[1][0].text == "🍎 Скачать Happ (Int. App Store)"
-    assert apple_rows[2][0].text == "🛠 Передать ключ в Incy"
-    assert apple_rows[2][0].web_app.url.endswith("connect=incy")
-    assert apple_rows[3][0].text == "🛠 Передать ключ в Happ"
-    assert apple_rows[3][0].web_app.url.endswith("connect=happ")
-    assert windows_rows[0][0].text == "💻 Скачать Happ"
-    assert windows_rows[1][0].text == "🛠 Передать ключ в Happ"
-    assert windows_rows[1][0].web_app.url.endswith("connect=happ")
-
-
 def test_connection_key_is_a_copyable_code_block():
     assert menu._format_connection_key(SUBSCRIPTION_LINK) == (
         f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>"
@@ -147,28 +115,6 @@ async def test_connect_platform_handler_shows_raw_subscription_link(monkeypatch)
     assert rendered_keyboard.inline_keyboard[0][0].text == "☀️ Скачать Leto VPN"
     assert render.await_args.kwargs["photo_path"] == "images/connection.jpg"
     callback.answer.assert_awaited_once()
-
-
-async def test_connect_apple_handler_restores_incy_auto_setup_hint(monkeypatch):
-    callback = SimpleNamespace(
-        from_user=SimpleNamespace(id=42),
-        answer=AsyncMock(),
-    )
-    user = SimpleNamespace(
-        language="ru",
-        telegram_id=42,
-        subscription=SimpleNamespace(subscription_url=SUBSCRIPTION_LINK),
-    )
-    render = AsyncMock()
-    monkeypatch.setattr(menu, "get_user_by_telegram_id", AsyncMock(return_value=user))
-    monkeypatch.setattr(menu, "edit_or_answer_photo", render)
-
-    await menu.handle_connect_platform_apple(callback, AsyncMock())
-
-    text = render.await_args.args[1]
-    assert "Если выбрал Incy" in text
-    assert "Передать ключ в Incy" in text
-    assert text.index(f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>") < text.index("Если выбрал Incy")
 
 
 async def test_connect_menu_main_screen_shows_universal_raw_key(monkeypatch):
