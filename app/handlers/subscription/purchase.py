@@ -1,4 +1,5 @@
 import base64
+import html
 import json
 import logging
 import os
@@ -157,6 +158,7 @@ from app.utils.price_display import PriceInfo, format_price_text, calculate_user
 from app.utils.subscription_utils import (
     convert_subscription_link_to_happ_scheme,
     get_display_subscription_link,
+    get_raw_subscription_link,
     resolve_simple_subscription_device_limit,
 )
 from app.utils.timezone import format_local_datetime
@@ -2703,7 +2705,6 @@ async def handle_subscription_menu(
             language=db_user.language,
             balance_kopeks=db_user.balance_kopeks,
             autopay_enabled=bool(subscription.autopay_enabled),
-            has_plan=subscription.plan_id is not None,
         ),
         parse_mode="HTML",
         photo_path=image_path
@@ -2782,25 +2783,51 @@ async def handle_bind_device(
     await callback.answer()
 
 
+def _build_share_access_text(texts, link: str) -> str:
+    link_block = f"<pre><code>{html.escape(link, quote=True)}</code></pre>"
+    return texts.t(
+        "SHARE_ACCESS_MESSAGE",
+        (
+            "Чтобы поделиться доступом с друзьями передай им ссылку доступа ниже "
+            "и ссылку на приложение в зависимости от их платформы.\n\n"
+            "{link_block}\n\n"
+            "<b>🤖 Android</b>\n"
+            "https://play.google.com/store/apps/details?id=com.leto.split\n\n"
+            "<b>🍎 iPhone/Mac</b>\n"
+            "https://apps.apple.com/ru/app/incy/id6756943388\n\n"
+            "<b>💻 Windows</b>\n"
+            "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"
+        ),
+    ).format(link=link, link_block=link_block)
+
+
+def _build_share_access_friend_message(texts, link: str) -> str:
+    return texts.t(
+        "SHARE_ACCESS_FRIEND_MESSAGE",
+        (
+            "Привет! Делюсь с тобой доступом к Leto VPN. Скачай приложение и "
+            "авторизуйся через ссылку доступа\n\n"
+            "{link}\n\n"
+            "🤖 Android\n"
+            "https://play.google.com/store/apps/details?id=com.leto.split\n\n"
+            "🍎 iPhone/Mac\n"
+            "https://apps.apple.com/ru/app/incy/id6756943388\n\n"
+            "💻 Windows\n"
+            "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"
+        ),
+    ).format(link=link)
+
+
 async def handle_share_access(
     callback: types.CallbackQuery,
     db_user: User,
-    db: AsyncSession
+    db: AsyncSession,
+    *,
+    back_callback: str = "subscription",
 ):
-    """«🔗 Поделиться доступом»: выдать владельцу ссылку на share-страницу.
-
-    Перевыпуск ленивый: get_or_create_share_token молча заменяет исчерпанный
-    или отозванный токен новым — без уведомлений и счётчиков.
-    """
-    from app.database.crud.share_token import get_or_create_share_token
-
+    """Show the owner a direct subscription link to share with friends."""
     texts = get_texts(db_user.language)
     subscription = db_user.subscription
-
-    error_text = texts.t(
-        "SHARE_ACCESS_ERROR",
-        "Не удалось создать ссылку. Попробуйте позже.",
-    )
 
     if not subscription:
         await callback.answer(
@@ -2809,52 +2836,29 @@ async def handle_share_access(
         )
         return
 
-    site_base_url = settings.get_share_site_base_url()
-    if not site_base_url:
-        logger.error("SHARE_SITE_BASE_URL is not configured; share_access unavailable")
-        await callback.answer(error_text, show_alert=True)
-        return
-
-    try:
-        record = await get_or_create_share_token(
-            db, subscription.id, max_activations=settings.SHARE_MAX_ACTIVATIONS
+    link = get_raw_subscription_link(subscription)
+    if not link:
+        await callback.answer(
+            texts.t("SUBSCRIPTION_LINK_UNAVAILABLE", "❌ Ссылка подписки недоступна"),
+            show_alert=True,
         )
-    except Exception as e:
-        logger.error("Failed to issue share token: %s", e)
-        await callback.answer(error_text, show_alert=True)
         return
 
-    link = f"{site_base_url}/s/{record.token}"
-
-    text = texts.t(
-        "SHARE_ACCESS_MESSAGE",
-        (
-            "Держи ссылку для доступа друзьям к твоей подписке Leto VPN 👉\n"
-            "{link}\n"
-            "Пусть откроют ссылку на своём устройстве — дальше всё само, займёт минуту 🙂"
-        ),
-    ).format(link=link)
+    text = _build_share_access_text(texts, link)
 
     # Клиенты Telegram всегда ставят url перед text, поэтому всё сообщение
     # (с ссылкой посередине) передаём одним параметром url.
-    friend_message = texts.t(
-        "SHARE_ACCESS_FRIEND_MESSAGE",
-        (
-            "Привет! Делюсь с тобой своим Leto VPN ☀️\n\n"
-            "{link}\n\n"
-            "Открой ссылку на своём устройстве — дальше всё само, займёт минуту."
-        ),
-    ).format(link=link)
+    friend_message = _build_share_access_friend_message(texts, link)
     share_url = f"https://t.me/share/url?url={quote(friend_message, safe='')}"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text=texts.t("SHARE_ACCESS_SEND_BUTTON", "📤 Отправить"),
+            text=texts.t("SHARE_ACCESS_SEND_BUTTON", "📤 Поделиться доступом"),
             url=share_url,
         )],
         [InlineKeyboardButton(
             text=texts.t("BACK_BUTTON", "⬅️Назад"),
-            callback_data="subscription",
+            callback_data=back_callback,
         )],
     ])
 
@@ -2866,6 +2870,19 @@ async def handle_share_access(
         except TelegramBadRequest:
             await callback.message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
+
+
+async def handle_connect_share_access(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    await handle_share_access(
+        callback,
+        db_user,
+        db,
+        back_callback="howto",
+    )
 
 
 async def handle_sub_add_days(
@@ -2885,7 +2902,12 @@ async def handle_sub_add_days(
 
         # Trial / no subscription / post-rollout users start from the tiered catalog.
         from app.handlers.subscription.tariffs import show_tariffs_page
-        await show_tariffs_page(callback, db_user, db)
+        await show_tariffs_page(
+            callback,
+            db_user,
+            db,
+            back_callback="subscription",
+        )
         return
 
     periods = settings.get_available_renewal_periods()
@@ -3807,6 +3829,11 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         handle_share_access,
         F.data == "share_access"
+    )
+
+    dp.callback_query.register(
+        handle_connect_share_access,
+        F.data == "connect_share_access",
     )
 
     dp.callback_query.register(

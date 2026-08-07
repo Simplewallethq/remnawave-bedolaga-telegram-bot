@@ -10,7 +10,10 @@ from app.config import settings, PERIOD_PRICES, TRAFFIC_PRICES
 from app.localization.loader import DEFAULT_LANGUAGE
 from app.localization.texts import get_texts
 from app.utils.install_referrer import build_personal_play_link
-from app.utils.miniapp_buttons import build_miniapp_or_callback_button
+from app.utils.miniapp_buttons import (
+    build_miniapp_connect_button,
+    build_miniapp_or_callback_button,
+)
 from app.utils.pricing_utils import (
     format_period_description,
     apply_percentage_discount,
@@ -833,10 +836,13 @@ def get_happ_download_link_keyboard(language: str, link: str) -> InlineKeyboardM
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_back_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
+def get_back_keyboard(
+    language: str = DEFAULT_LANGUAGE,
+    callback_data: str = "back_to_menu",
+) -> InlineKeyboardMarkup:
     texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=texts.BACK, callback_data="back_to_menu")]
+        [InlineKeyboardButton(text=texts.BACK, callback_data=callback_data)]
     ])
 
 
@@ -1129,6 +1135,7 @@ def get_tariffs_keyboard(
     language: str = DEFAULT_LANGUAGE,
     current_plan_id: Optional[int] = None,
     current_plan_label: Optional[str] = None,
+    back_callback: str = "menu_subscription",
 ) -> InlineKeyboardMarkup:
     """One row per tariff card; `plans_with_lowest_monthly` is [(plan, lowest_monthly_kopeks), ...]."""
     texts = get_texts(language)
@@ -1152,7 +1159,7 @@ def get_tariffs_keyboard(
     rows.append([
         InlineKeyboardButton(
             text=texts.t("TARIFFS_BACK", "⬅️ Назад"),
-            callback_data="menu_subscription",
+            callback_data=back_callback,
         )
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -1229,7 +1236,7 @@ def get_renew_periods_keyboard(
     period_prices: dict,
     language: str = DEFAULT_LANGUAGE,
 ) -> InlineKeyboardMarkup:
-    """Renew at the current tier; one row per available period plus a "change tariff" entry."""
+    """Renew at the current tier; one row per available period."""
     texts = get_texts(language)
     rows: List[List[InlineKeyboardButton]] = []
 
@@ -1247,14 +1254,8 @@ def get_renew_periods_keyboard(
 
     rows.append([
         InlineKeyboardButton(
-            text=texts.t("RENEW_CHANGE_TARIFF", "🔀 Сменить тариф"),
-            callback_data="subscription_tariffs",
-        )
-    ])
-    rows.append([
-        InlineKeyboardButton(
             text=texts.t("TARIFFS_BACK", "⬅️ Назад"),
-            callback_data="menu_subscription",
+            callback_data="subscription",
         )
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -2683,7 +2684,7 @@ def get_devices_management_keyboard(
     keyboard.append([
         InlineKeyboardButton(
             text=texts.BACK,
-            callback_data="subscription_settings"
+            callback_data="subscription"
         )
     ])
     
@@ -3141,16 +3142,119 @@ def get_activation_keyboard(happ_link_shown: bool = False, language: str = DEFAU
 
 
 def get_onboarding_welcome_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
-    """
-    Onboarding Screen 1: Welcome screen with free trial CTA.
-    """
+    """Onboarding screen with direct links to the Connect platform submenus."""
     texts = get_texts(language)
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🤖 Android", callback_data="connect_platform_android")],
+        [InlineKeyboardButton(text="🍎 iPhone/MacOS", callback_data="connect_platform_apple")],
+        [InlineKeyboardButton(text="💻 Windows", callback_data="connect_platform_windows")],
         [InlineKeyboardButton(
-            text=texts.t("ONBOARDING_CONNECT_FREE_BUTTON", "🚀 Подключиться бесплатно"),
-            callback_data="onboarding_connect_free",
+            text=texts.t("ONBOARDING_MAIN_MENU_BUTTON", "🏠 Основное меню"),
+            callback_data="main_menu",
         )],
     ])
+
+
+def get_connection_platform_keyboard(
+    language: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    """Platform selection for the Connect menu."""
+    texts = get_texts(language)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🤖 Android", callback_data="connect_platform_android")],
+        [InlineKeyboardButton(text="🍎 iPhone/MacOS", callback_data="connect_platform_apple")],
+        [InlineKeyboardButton(text="💻 Windows", callback_data="connect_platform_windows")],
+        [InlineKeyboardButton(
+            text=texts.t("SUB_SHARE_ACCESS_BUTTON", "🔗 Поделиться доступом"),
+            callback_data="connect_share_access",
+        )],
+        [InlineKeyboardButton(
+            text=texts.t("CONNECT_MAIN_MENU_BUTTON", "🏠 Основное меню"),
+            callback_data="main_menu",
+        )],
+    ])
+
+
+def get_connect_android_keyboard(
+    language: str = DEFAULT_LANGUAGE,
+    telegram_id: Optional[int] = None,
+) -> InlineKeyboardMarkup:
+    """Android-specific Connect menu actions."""
+    texts = get_texts(language)
+    buttons: List[List[InlineKeyboardButton]] = []
+    leto_url = build_personal_play_link(
+        settings.LETO_APP_DOWNLOAD_LINK_ANDROID,
+        telegram_id,
+    )
+    if leto_url:
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("CONNECT_DOWNLOAD_LETO_BUTTON", "☀️ Скачать Leto VPN"),
+                url=leto_url,
+            )
+        ])
+    happ_button = build_miniapp_connect_button(
+        texts.t("CONNECT_TRANSFER_HAPP_BUTTON", "🛠 Передать ключ в Happ"),
+        "happ",
+    )
+    if happ_button:
+        buttons.append([happ_button])
+    buttons.append([
+        InlineKeyboardButton(text=texts.BACK, callback_data="howto")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_connect_apple_keyboard(
+    language: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    """iPhone/macOS-specific Connect menu actions."""
+    texts = get_texts(language)
+    buttons: List[List[InlineKeyboardButton]] = []
+    transfer_buttons: List[List[InlineKeyboardButton]] = []
+    for action, text_key, fallback in (
+        ("incy", "CONNECT_TRANSFER_INCY_BUTTON", "🛠 Передать ключ в Incy"),
+        ("happ", "CONNECT_TRANSFER_HAPP_BUTTON", "🛠 Передать ключ в Happ"),
+    ):
+        button = build_miniapp_connect_button(texts.t(text_key, fallback), action)
+        if button:
+            transfer_buttons.append([button])
+
+    buttons.extend([
+        [InlineKeyboardButton(
+            text=texts.t("CONNECT_DOWNLOAD_INCY_BUTTON", "🍏 Скачать Incy (RU App Store)"),
+            url=settings.get_incy_download_link(),
+        )],
+        [InlineKeyboardButton(
+            text=texts.t("CONNECT_DOWNLOAD_HAPP_IOS_BUTTON", "🍎 Скачать Happ (Int. App Store)"),
+            url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+        )],
+    ])
+    buttons.extend(transfer_buttons)
+    buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data="howto")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_connect_windows_keyboard(
+    language: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    """Windows-specific Connect menu actions."""
+    texts = get_texts(language)
+    buttons: List[List[InlineKeyboardButton]] = []
+    buttons.extend([
+        [InlineKeyboardButton(
+            text=texts.t("CONNECT_DOWNLOAD_HAPP_WINDOWS_BUTTON", "💻 Скачать Happ"),
+            url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
+        )],
+    ])
+    happ_button = build_miniapp_connect_button(
+        texts.t("CONNECT_TRANSFER_HAPP_BUTTON", "🛠 Передать ключ в Happ"),
+        "happ",
+    )
+    if happ_button:
+        buttons.append([happ_button])
+    buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data="howto")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def get_onboarding_device_selection_keyboard(
@@ -3159,7 +3263,7 @@ def get_onboarding_device_selection_keyboard(
     """
     Onboarding Screen 2: Device selection (4 buttons).
 
-    Шаринг доступа переехал в «Управление подпиской» (share_access) —
+    Шаринг доступа находится в меню «Подключиться» (connect_share_access) —
     здесь только выбор платформы.
     """
     texts = get_texts(language)
@@ -3311,7 +3415,6 @@ def get_subscription_menu_keyboard(
     language: str = DEFAULT_LANGUAGE,
     balance_kopeks: int = 0,
     autopay_enabled: bool = False,
-    has_plan: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     Экран 5: Меню подписки
@@ -3342,16 +3445,13 @@ def get_subscription_menu_keyboard(
         callback_data="sub_add_days",
     )
 
-    if has_plan:
-        action_row = [extend_button]
-    else:
-        action_row = [
-            extend_button,
-            InlineKeyboardButton(
-                text=texts.t("SUB_ADD_DEVICES_SHORT_BUTTON", "📱 Устройства"),
-                callback_data="sub_add_devices",
-            ),
-        ]
+    action_row = [
+        extend_button,
+        InlineKeyboardButton(
+            text=texts.t("PROFILE_DEVICES_BUTTON", "📱 Устройства"),
+            callback_data="subscription_manage_devices",
+        ),
+    ]
 
     buttons = [
         [InlineKeyboardButton(text=balance_button_text, callback_data="balance_topup")],
@@ -3359,11 +3459,10 @@ def get_subscription_menu_keyboard(
         action_row,
     ]
 
-    # «Привязать устройство» закрыто флоу «Подключиться»; на его месте — шаринг.
     buttons.append([
         InlineKeyboardButton(
-            text=texts.t("SUB_SHARE_ACCESS_BUTTON", "🔗 Поделиться доступом"),
-            callback_data="share_access",
+            text=texts.t("RENEW_CHANGE_TARIFF", "🔀 Сменить тариф"),
+            callback_data="subscription_change_tariff",
         )
     ])
 
@@ -3554,13 +3653,6 @@ def get_profile_keyboard(
     """
     texts = get_texts(language)
     rows = []
-    if has_subscription:
-        rows.append([
-            InlineKeyboardButton(
-                text=texts.t("PROFILE_DEVICES_BUTTON", "📱 Устройства"),
-                callback_data="subscription_manage_devices",
-            )
-        ])
     rows.extend([
         [InlineKeyboardButton(text=texts.t("MENU_PROMOCODE", "🎫 Ввести промокод"), callback_data="profile_promo")],
         [InlineKeyboardButton(text=texts.t("MENU_LANGUAGE", "🌐 Язык/Language"), callback_data="profile_language")],
