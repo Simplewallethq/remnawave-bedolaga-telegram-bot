@@ -1393,6 +1393,12 @@ async def handle_connect_platform_apple(
         )
         + "\n"
         + _format_connection_key(link)
+        + "\n\n"
+        + texts.t(
+            "CONNECT_APPLE_AUTO_INCY_TEXT",
+            "Если выбрал Incy, то после скачивания можешь просто нажать «Передать ключ в Incy» "
+            "и всё настроится автоматически.",
+        )
     )
     await edit_or_answer_photo(
         callback,
