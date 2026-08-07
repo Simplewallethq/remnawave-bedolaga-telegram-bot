@@ -11,6 +11,7 @@ from aiogram import Bot, Dispatcher, F, types
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database.crud.server_squad import get_active_server_squads
 from app.database.crud.transaction import create_transaction
 from app.database.crud.user import subtract_user_balance
@@ -625,8 +626,8 @@ async def finalize_tariff_purchase(
                 traffic_limit_gb=plan.traffic_limit_gb,
                 device_limit=plan.device_limit,
                 connected_squads=connected_squads,
-                autopay_enabled=False,
-                autopay_days_before=3,
+                autopay_enabled=settings.is_autopay_enabled_by_default(),
+                autopay_days_before=settings.DEFAULT_AUTOPAY_DAYS_BEFORE,
                 plan_id=plan.id,
                 plan_period_days=period_days,
             )

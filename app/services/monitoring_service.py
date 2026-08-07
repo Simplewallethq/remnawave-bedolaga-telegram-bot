@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Set
+from typing import Dict, List, Any, Optional, Set, Tuple
 
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.enums import ChatMemberStatus
@@ -1011,6 +1011,59 @@ class MonitoringService:
                     rollback_error,
                 )
 
+    async def _resolve_tariff_autopay_charge(
+        self,
+        db: AsyncSession,
+        subscription: Subscription,
+        user: User,
+    ) -> Optional[Tuple[Any, int, int]]:
+        """(plan, period_days, price_kopeks) для тарифной подписки, либо None.
+
+        Цена тарифа абсолютная и зависит от связки (план, период, ценовая когорта
+        пользователя), поэтому legacy-расчёт calculate_renewal_price
+        (PERIOD_PRICES + серверы/устройства/трафик) для таких подписок неприменим.
+        Продлеваем ровно на тот период, который пользователь купил.
+        """
+        from app.services.plan_pricing_service import (
+            get_plan_by_id,
+            get_plan_price,
+            resolve_pricing_cohort,
+        )
+
+        period_days = subscription.plan_period_days or 0
+        if period_days <= 0:
+            logger.warning(
+                "💳 Автоплатеж пропущен: у тарифной подписки %s не задан plan_period_days",
+                subscription.id,
+            )
+            return None
+
+        plan = subscription.plan or await get_plan_by_id(db, subscription.plan_id)
+        if plan is None:
+            logger.warning(
+                "💳 Автоплатеж пропущен: тариф %s подписки %s не найден",
+                subscription.plan_id,
+                subscription.id,
+            )
+            return None
+
+        price_kopeks = await get_plan_price(
+            db,
+            plan.id,
+            period_days,
+            cohort=resolve_pricing_cohort(user),
+        )
+        if price_kopeks is None:
+            logger.warning(
+                "💳 Автоплатеж пропущен: для тарифа %s нет цены на период %s дн. (подписка %s)",
+                plan.code,
+                period_days,
+                subscription.id,
+            )
+            return None
+
+        return plan, period_days, int(price_kopeks)
+
     async def _process_autopayments(self, db: AsyncSession):
         try:
             current_time = datetime.utcnow()
@@ -1041,89 +1094,143 @@ class MonitoringService:
             
             processed_count = 0
             failed_count = 0
-            
+            skipped_count = 0
+
             for subscription in autopay_subscriptions:
                 user = subscription.user
                 if not user:
                     continue
-                
-                # Правильный расчет стоимости продления с учетом всех параметров подписки
-                renewal_cost = await self.subscription_service.calculate_renewal_price(
-                    subscription, 30, db, user=user
-                )
-                promo_discount_percent = self._get_user_promo_offer_discount_percent(user)
-                charge_amount = renewal_cost
-                promo_discount_value = 0
-
-                if renewal_cost > 0 and promo_discount_percent > 0:
-                    charge_amount, promo_discount_value = apply_percentage_discount(
-                        renewal_cost,
-                        promo_discount_percent,
-                    )
 
                 autopay_key = f"autopay_{user.telegram_id}_{subscription.id}"
                 if autopay_key in self._notified_users:
                     continue
 
-                if user.balance_kopeks >= charge_amount:
-                    success = await subtract_user_balance(
-                        db, user, charge_amount,
-                        "Автопродление подписки"
+                is_tariff = not subscription.is_legacy
+                plan = None
+                promo_discount_percent = 0
+                promo_discount_value = 0
+
+                if is_tariff:
+                    # Тарифная подписка: цена и период берутся из тарифа, как в
+                    # ручном продлении. Процентная промо-скидка к тарифам не
+                    # применяется — там работают только офферы с фикс. ценой,
+                    # а их активация требует действия пользователя.
+                    tariff_charge = await self._resolve_tariff_autopay_charge(db, subscription, user)
+                    if tariff_charge is None:
+                        skipped_count += 1
+                        continue
+                    plan, period_days, charge_amount = tariff_charge
+                else:
+                    # Legacy à-la-carte подписка: пересчет по текущим ценам
+                    # (период + серверы + устройства + трафик).
+                    period_days = 30
+                    renewal_cost = await self.subscription_service.calculate_renewal_price(
+                        subscription, period_days, db, user=user
                     )
+                    promo_discount_percent = self._get_user_promo_offer_discount_percent(user)
+                    charge_amount = renewal_cost
 
-                    if success:
-                        old_end_date = subscription.end_date
-                        await extend_subscription(db, subscription, 30)
-                        await record_subscription_renewal_event(
-                            db,
-                            user_id=user.id,
-                            subscription_id=subscription.id,
-                            amount_kopeks=charge_amount,
-                            period_days=30,
-                            previous_end_date=old_end_date,
-                            new_end_date=subscription.end_date,
-                            balance_after=user.balance_kopeks,
-                            source="autopay",
-                        )
-                        await self.subscription_service.update_remnawave_user(
-                            db,
-                            subscription,
-                            reset_traffic=settings.RESET_TRAFFIC_ON_PAYMENT,
-                            reset_reason="автопродление подписки",
-                        )
-
-                        if promo_discount_value > 0:
-                            await self._consume_user_promo_offer_discount(db, user)
-
-                        if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
-                            await self._send_autopay_success_notification(user, charge_amount, 30)
-
-                        processed_count += 1
-                        self._notified_users.add(autopay_key)
-                        logger.info(
-                            "💳 Автопродление подписки пользователя %s успешно (списано %s, скидка %s%%)",
-                            user.telegram_id,
-                            charge_amount,
+                    if renewal_cost > 0 and promo_discount_percent > 0:
+                        charge_amount, promo_discount_value = apply_percentage_discount(
+                            renewal_cost,
                             promo_discount_percent,
                         )
-                    else:
-                        failed_count += 1
-                        if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
-                            await self._send_autopay_failed_notification(user, user.balance_kopeks, charge_amount)
-                        await self._notify_cabinet_autopay_failed(db, user, subscription, charge_amount)
-                        logger.warning(f"💳 Ошибка списания средств для автопродления пользователя {user.telegram_id}")
-                else:
+
+                if user.balance_kopeks < charge_amount:
                     failed_count += 1
                     if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
                         await self._send_autopay_failed_notification(user, user.balance_kopeks, charge_amount)
                     await self._notify_cabinet_autopay_failed(db, user, subscription, charge_amount)
                     logger.warning(f"💳 Недостаточно средств для автопродления у пользователя {user.telegram_id}")
-            
-            if processed_count > 0 or failed_count > 0:
+                    continue
+
+                old_end_date = subscription.end_date
+                transaction_id = None
+
+                try:
+                    if is_tariff:
+                        # Списание + продление + транзакция + пересинк Remnawave
+                        # одним куском — тот же путь, что и у ручного продления.
+                        from app.handlers.subscription.tariffs import finalize_tariff_renewal
+
+                        renewal = await finalize_tariff_renewal(
+                            db, user, subscription, plan, period_days, charge_amount
+                        )
+                        success = renewal is not None
+                        if success:
+                            subscription, transaction, old_end_date = renewal
+                            transaction_id = transaction.id
+                    else:
+                        success = await subtract_user_balance(
+                            db, user, charge_amount,
+                            "Автопродление подписки"
+                        )
+                        if success:
+                            await extend_subscription(db, subscription, period_days)
+                except Exception as charge_error:
+                    success = False
+                    logger.error(
+                        "💳 Ошибка автопродления подписки %s пользователя %s: %s",
+                        subscription.id,
+                        user.telegram_id,
+                        charge_error,
+                        exc_info=True,
+                    )
+
+                if not success:
+                    failed_count += 1
+                    if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
+                        await self._send_autopay_failed_notification(user, user.balance_kopeks, charge_amount)
+                    await self._notify_cabinet_autopay_failed(db, user, subscription, charge_amount)
+                    logger.warning(f"💳 Ошибка списания средств для автопродления пользователя {user.telegram_id}")
+                    continue
+
+                await record_subscription_renewal_event(
+                    db,
+                    user_id=user.id,
+                    subscription_id=subscription.id,
+                    transaction_id=transaction_id,
+                    amount_kopeks=charge_amount,
+                    period_days=period_days,
+                    previous_end_date=old_end_date,
+                    new_end_date=subscription.end_date,
+                    balance_after=user.balance_kopeks,
+                    source="autopay",
+                )
+
+                if not is_tariff:
+                    await self.subscription_service.update_remnawave_user(
+                        db,
+                        subscription,
+                        reset_traffic=settings.RESET_TRAFFIC_ON_PAYMENT,
+                        reset_reason="автопродление подписки",
+                    )
+
+                if promo_discount_value > 0:
+                    await self._consume_user_promo_offer_discount(db, user)
+
+                if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
+                    await self._send_autopay_success_notification(user, charge_amount, period_days)
+
+                processed_count += 1
+                self._notified_users.add(autopay_key)
+                logger.info(
+                    "💳 Автопродление подписки пользователя %s успешно: %s дн., списано %s (скидка %s%%)",
+                    user.telegram_id,
+                    period_days,
+                    charge_amount,
+                    promo_discount_percent,
+                )
+
+            if processed_count > 0 or failed_count > 0 or skipped_count > 0:
                 await self._log_monitoring_event(
                     db, "autopayments_processed",
-                    f"Автоплатежи: успешно {processed_count}, неудачно {failed_count}",
-                    {"processed": processed_count, "failed": failed_count}
+                    f"Автоплатежи: успешно {processed_count}, неудачно {failed_count}, пропущено {skipped_count}",
+                    {
+                        "processed": processed_count,
+                        "failed": failed_count,
+                        "skipped": skipped_count,
+                    }
                 )
                 
         except Exception as e:
