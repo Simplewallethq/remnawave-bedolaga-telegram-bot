@@ -282,8 +282,6 @@ async def show_tariffs_page(
     callback: types.CallbackQuery,
     db_user: User,
     db: AsyncSession,
-    *,
-    back_callback: str = "menu_subscription",
 ):
     """Lists all active plans with description cards and price-from buttons."""
     texts = get_texts(db_user.language)
@@ -367,7 +365,6 @@ async def show_tariffs_page(
         language=db_user.language,
         current_plan_id=current_plan_id,
         current_plan_label=current_plan_label,
-        back_callback=back_callback,
     )
 
     image_path = os.path.join("images", "plans.jpg")
@@ -378,20 +375,6 @@ async def show_tariffs_page(
         photo_path=image_path if os.path.exists(image_path) else None,
     )
     await callback.answer()
-
-
-async def show_change_tariff_page(
-    callback: types.CallbackQuery,
-    db_user: User,
-    db: AsyncSession,
-):
-    """Open the tariff catalog from subscription management."""
-    await show_tariffs_page(
-        callback,
-        db_user,
-        db,
-        back_callback="subscription",
-    )
 
 
 async def show_tariff_periods(
@@ -1955,10 +1938,6 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         show_tariffs_page,
         F.data == "subscription_tariffs",
-    )
-    dp.callback_query.register(
-        show_change_tariff_page,
-        F.data == "subscription_change_tariff",
     )
     dp.callback_query.register(
         show_tariff_periods,

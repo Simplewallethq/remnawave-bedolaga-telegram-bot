@@ -1,7 +1,6 @@
 import base64
 import json
 import logging
-import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Tuple, Optional
 from urllib.parse import quote
@@ -48,7 +47,6 @@ from app.keyboards.inline import (
     get_insufficient_balance_keyboard_with_cart
 )
 from app.localization.texts import get_texts
-from app.utils.photo_message import edit_or_answer_photo
 from app.services.admin_notification_service import AdminNotificationService
 from app.services.remnawave_service import RemnaWaveService
 from app.services.subscription_checkout_service import (
@@ -527,11 +525,9 @@ async def handle_device_management(
                 devices_list = devices_info.get('devices', [])
 
                 if total_devices == 0:
-                    await edit_or_answer_photo(
-                        callback,
+                    await callback.message.edit_text(
                         texts.t("DEVICE_NONE_CONNECTED", "ℹ️ У вас нет подключенных устройств"),
-                        get_back_keyboard(db_user.language, callback_data="subscription"),
-                        photo_path=os.path.join("images", "devices.jpg"),
+                        reply_markup=get_back_keyboard(db_user.language)
                     )
                     await callback.answer()
                     return
@@ -605,16 +601,14 @@ async def show_devices_page(
         ),
     )
 
-    await edit_or_answer_photo(
-        callback,
+    await callback.message.edit_text(
         devices_text,
-        get_devices_management_keyboard(
+        reply_markup=get_devices_management_keyboard(
             pagination.items,
             pagination,
             db_user.language
         ),
-        parse_mode="HTML",
-        photo_path=os.path.join("images", "devices.jpg"),
+        parse_mode="HTML"
     )
 
 async def handle_devices_page(
@@ -732,10 +726,7 @@ async def handle_single_device_reset(
                                         "DEVICE_RESET_ALL_DONE",
                                         "ℹ️ Все устройства сброшены",
                                     ),
-                                    reply_markup=get_back_keyboard(
-                                        db_user.language,
-                                        callback_data="subscription",
-                                    )
+                                    reply_markup=get_back_keyboard(db_user.language)
                                 )
 
                         logger.info(f"✅ Пользователь {db_user.telegram_id} сбросил устройство {device_info}")
@@ -842,10 +833,7 @@ async def handle_all_devices_reset_from_management(
                                 "💡 Используйте ссылку из раздела 'Моя подписка' для повторного подключения"
                             ),
                         ).format(count=success_count),
-                        reply_markup=get_back_keyboard(
-                            db_user.language,
-                            callback_data="subscription",
-                        ),
+                        reply_markup=get_back_keyboard(db_user.language),
                         parse_mode="HTML"
                     )
                     logger.info(f"✅ Пользователь {db_user.telegram_id} успешно сбросил {success_count} устройств")
@@ -860,10 +848,7 @@ async def handle_all_devices_reset_from_management(
                                 "Попробуйте еще раз или обратитесь в поддержку."
                             ),
                         ).format(success=success_count, failed=failed_count),
-                        reply_markup=get_back_keyboard(
-                            db_user.language,
-                            callback_data="subscription",
-                        ),
+                        reply_markup=get_back_keyboard(db_user.language),
                         parse_mode="HTML"
                     )
                     logger.warning(
@@ -878,10 +863,7 @@ async def handle_all_devices_reset_from_management(
                             "Всего устройств: {total}"
                         ),
                     ).format(total=len(devices_list)),
-                    reply_markup=get_back_keyboard(
-                        db_user.language,
-                        callback_data="subscription",
-                    ),
+                    reply_markup=get_back_keyboard(db_user.language),
                     parse_mode="HTML"
                 )
                 logger.error(f"❌ Не удалось сбросить ни одного устройства у пользователя {db_user.telegram_id}")
@@ -890,10 +872,7 @@ async def handle_all_devices_reset_from_management(
         logger.error(f"Ошибка сброса всех устройств: {e}")
         await callback.message.edit_text(
             texts.ERROR,
-            reply_markup=get_back_keyboard(
-                db_user.language,
-                callback_data="subscription",
-            )
+            reply_markup=get_back_keyboard(db_user.language)
         )
 
     await callback.answer()

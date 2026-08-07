@@ -1,12 +1,10 @@
 from aiogram import types
 from aiogram.types import InlineKeyboardButton
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.config import settings
 
 
 DEFAULT_UNAVAILABLE_CALLBACK = "menu_profile_unavailable"
-_CONNECT_ACTIONS = {"happ", "incy"}
 
 
 def build_miniapp_or_callback_button(
@@ -35,26 +33,3 @@ def build_miniapp_or_callback_button(
         return InlineKeyboardButton(text=text, callback_data=safe_callback)
 
     return InlineKeyboardButton(text=text, callback_data=callback_data)
-
-
-def build_miniapp_connect_button(
-    text: str,
-    action: str,
-) -> InlineKeyboardButton | None:
-    """Build a Mini App button that resolves the user's key after Telegram auth."""
-    if action not in _CONNECT_ACTIONS:
-        raise ValueError(f"Unsupported Mini App connect action: {action}")
-
-    base_url = (settings.MINIAPP_CUSTOM_URL or "").strip()
-    if not base_url:
-        return None
-
-    parsed = urlsplit(base_url)
-    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    params["connect"] = action
-    url = urlunsplit(parsed._replace(query=urlencode(params)))
-
-    return InlineKeyboardButton(
-        text=text,
-        web_app=types.WebAppInfo(url=url),
-    )
