@@ -21,6 +21,8 @@ docker-compose.override.yml
 !app/**
 !tests/
 !tests/**
+!scripts/
+!scripts/enable_autopay_for_all.py
 !images/
 !images/**
 
