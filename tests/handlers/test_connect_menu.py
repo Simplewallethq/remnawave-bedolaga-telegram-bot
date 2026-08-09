@@ -43,7 +43,7 @@ def test_connect_menu_has_english_text_and_buttons():
     ]
 
 
-def test_connect_android_keyboard_only_has_leto_and_back(monkeypatch):
+def test_connect_android_keyboard_omits_transfer_without_url(monkeypatch):
     monkeypatch.setattr(inline.settings, "MINIAPP_CUSTOM_URL", "")
     monkeypatch.setattr(
         inline,
@@ -60,7 +60,7 @@ def test_connect_android_keyboard_only_has_leto_and_back(monkeypatch):
     ]
 
 
-def test_connect_apple_and_windows_keyboards_have_only_requested_actions(monkeypatch):
+def test_connect_apple_and_windows_keyboards_omit_transfers_without_urls(monkeypatch):
     monkeypatch.setattr(inline.settings, "MINIAPP_CUSTOM_URL", "")
     apple_rows = _button_rows(inline.get_connect_apple_keyboard("ru"))
     windows_rows = _button_rows(inline.get_connect_windows_keyboard("ru"))
@@ -78,6 +78,48 @@ def test_connect_apple_and_windows_keyboards_have_only_requested_actions(monkeyp
     assert windows_rows[0][0].url == (
         "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"
     )
+
+
+def test_connect_platform_keyboards_include_transfer_buttons(monkeypatch):
+    monkeypatch.setattr(
+        inline,
+        "build_personal_play_link",
+        lambda _url, _telegram_id: "https://play.google.com/store/apps/details?id=leto",
+    )
+    happ_url = "https://redirect.example/happ"
+    incy_url = "https://redirect.example/incy"
+
+    android_rows = _button_rows(
+        inline.get_connect_android_keyboard("ru", telegram_id=42, happ_transfer_url=happ_url)
+    )
+    apple_rows = _button_rows(
+        inline.get_connect_apple_keyboard(
+            "ru",
+            incy_transfer_url=incy_url,
+            happ_transfer_url=happ_url,
+        )
+    )
+    windows_rows = _button_rows(
+        inline.get_connect_windows_keyboard("ru", happ_transfer_url=happ_url)
+    )
+
+    assert [(row[0].text, row[0].url) for row in android_rows] == [
+        ("☀️ Скачать Leto VPN", "https://play.google.com/store/apps/details?id=leto"),
+        ("🛠 Передать ключ в Happ", happ_url),
+        ("⬅️ Назад", None),
+    ]
+    assert [(row[0].text, row[0].url) for row in apple_rows] == [
+        ("🍏 Скачать Incy (RU App Store)", inline.settings.get_incy_download_link()),
+        ("🛠 Передать ключ в Incy", incy_url),
+        ("🍎 Скачать Happ (Int. App Store)", "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"),
+        ("🛠 Передать ключ в Happ", happ_url),
+        ("⬅️ Назад", None),
+    ]
+    assert [(row[0].text, row[0].url) for row in windows_rows] == [
+        ("💻 Скачать Happ", "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"),
+        ("🛠 Передать ключ в Happ", happ_url),
+        ("⬅️ Назад", None),
+    ]
 
 
 def test_connection_key_is_a_copyable_code_block():
@@ -160,6 +202,8 @@ async def test_connect_platform_submenus_use_connection_image(monkeypatch):
         "build_personal_play_link",
         lambda _url, _telegram_id: "https://play.google.com/store/apps/details?id=leto",
     )
+    monkeypatch.setattr(menu, "get_happ_cryptolink_redirect_link", lambda _link: "https://redirect.example/happ")
+    monkeypatch.setattr(menu, "get_incy_button_url", lambda _link: "https://redirect.example/incy")
 
     for handler in (
         menu.handle_connect_platform_android,
@@ -171,3 +215,7 @@ async def test_connect_platform_submenus_use_connection_image(monkeypatch):
     assert render.await_count == 3
     for call in render.await_args_list:
         assert call.kwargs["photo_path"] == "images/connection.jpg"
+
+    assert render.await_args_list[0].args[2].inline_keyboard[1][0].url == "https://redirect.example/happ"
+    assert render.await_args_list[1].args[2].inline_keyboard[1][0].url == "https://redirect.example/incy"
+    assert render.await_args_list[2].args[2].inline_keyboard[1][0].url == "https://redirect.example/happ"

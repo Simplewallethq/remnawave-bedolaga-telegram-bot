@@ -3175,6 +3175,7 @@ def get_connection_platform_keyboard(
 def get_connect_android_keyboard(
     language: str = DEFAULT_LANGUAGE,
     telegram_id: Optional[int] = None,
+    happ_transfer_url: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """Android-specific Connect menu actions."""
     texts = get_texts(language)
@@ -3190,6 +3191,13 @@ def get_connect_android_keyboard(
                 url=leto_url,
             )
         ])
+    if happ_transfer_url:
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("CONNECT_TRANSFER_HAPP_BUTTON", "🛠 Передать ключ в Happ"),
+                url=happ_transfer_url,
+            )
+        ])
     buttons.append([
         InlineKeyboardButton(text=texts.BACK, callback_data="howto")
     ])
@@ -3198,6 +3206,8 @@ def get_connect_android_keyboard(
 
 def get_connect_apple_keyboard(
     language: str = DEFAULT_LANGUAGE,
+    incy_transfer_url: Optional[str] = None,
+    happ_transfer_url: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """iPhone/macOS-specific Connect menu actions."""
     texts = get_texts(language)
@@ -3206,17 +3216,34 @@ def get_connect_apple_keyboard(
             text=texts.t("CONNECT_DOWNLOAD_INCY_BUTTON", "🍏 Скачать Incy (RU App Store)"),
             url=settings.get_incy_download_link(),
         )],
-        [InlineKeyboardButton(
+    ]
+    if incy_transfer_url:
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("CONNECT_TRANSFER_INCY_BUTTON", "🛠 Передать ключ в Incy"),
+                url=incy_transfer_url,
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(
             text=texts.t("CONNECT_DOWNLOAD_HAPP_IOS_BUTTON", "🍎 Скачать Happ (Int. App Store)"),
             url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
-        )],
-        [InlineKeyboardButton(text=texts.BACK, callback_data="howto")],
-    ]
+        )
+    ])
+    if happ_transfer_url:
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("CONNECT_TRANSFER_HAPP_BUTTON", "🛠 Передать ключ в Happ"),
+                url=happ_transfer_url,
+            )
+        ])
+    buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data="howto")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def get_connect_windows_keyboard(
     language: str = DEFAULT_LANGUAGE,
+    happ_transfer_url: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """Windows-specific Connect menu actions."""
     texts = get_texts(language)
@@ -3227,6 +3254,13 @@ def get_connect_windows_keyboard(
             url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
         )],
     ])
+    if happ_transfer_url:
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("CONNECT_TRANSFER_HAPP_BUTTON", "🛠 Передать ключ в Happ"),
+                url=happ_transfer_url,
+            )
+        ])
     buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data="howto")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

@@ -37,6 +37,7 @@ from app.keyboards.inline import (
 )
 from app.utils.subscription_utils import (
     get_display_subscription_link,
+    get_happ_cryptolink_redirect_link,
     get_incy_button_url,
     get_raw_subscription_link,
     is_ios_device_type,
@@ -1282,6 +1283,12 @@ def _format_connection_key(link: str) -> str:
     return f"<pre><code>{escaped_link}</code></pre>"
 
 
+def _get_happ_transfer_url(user: User) -> str | None:
+    return get_happ_cryptolink_redirect_link(
+        get_display_subscription_link(getattr(user, "subscription", None))
+    )
+
+
 async def _get_connect_menu_user(
     callback: types.CallbackQuery,
     db: AsyncSession,
@@ -1367,7 +1374,11 @@ async def handle_connect_platform_android(
     await edit_or_answer_photo(
         callback,
         text,
-        get_connect_android_keyboard(user.language, user.telegram_id),
+        get_connect_android_keyboard(
+            user.language,
+            user.telegram_id,
+            happ_transfer_url=_get_happ_transfer_url(user),
+        ),
         parse_mode="HTML",
         photo_path=os.path.join("images", "connection.jpg"),
         disable_web_page_preview=True,
@@ -1389,7 +1400,8 @@ async def handle_connect_platform_apple(
         texts.t(
             "CONNECT_APPLE_TEXT",
             "Для iOS/MacOS Leto работает через Incy (RU стор) и Happ (международный стор).\n\n"
-            "Скачай одно из приложений по кнопке ниже и вставь в него ключ-ссылку",
+            "Если выбрал Incy, то после скачивания можешь просто нажать \"Передать ключ в Incy\" "
+            "и все настроится автоматически.",
         )
         + "\n"
         + _format_connection_key(link)
@@ -1397,7 +1409,11 @@ async def handle_connect_platform_apple(
     await edit_or_answer_photo(
         callback,
         text,
-        get_connect_apple_keyboard(user.language),
+        get_connect_apple_keyboard(
+            user.language,
+            incy_transfer_url=get_incy_button_url(link),
+            happ_transfer_url=_get_happ_transfer_url(user),
+        ),
         parse_mode="HTML",
         photo_path=os.path.join("images", "connection.jpg"),
         disable_web_page_preview=True,
@@ -1426,7 +1442,10 @@ async def handle_connect_platform_windows(
     await edit_or_answer_photo(
         callback,
         text,
-        get_connect_windows_keyboard(user.language),
+        get_connect_windows_keyboard(
+            user.language,
+            happ_transfer_url=_get_happ_transfer_url(user),
+        ),
         parse_mode="HTML",
         photo_path=os.path.join("images", "connection.jpg"),
         disable_web_page_preview=True,
