@@ -1,4 +1,5 @@
-"""Ручная отправка cabinet-уведомления конкретному пользователю из тг-админки.
+"""Ручная отправка cabinet-уведомления из тг-админки — одному пользователю
+или всем сразу (broadcast).
 
 Уведомление попадает в ленту личного кабинета и приложений teleVpn
 (тип "broadcast" — фронты уже умеют его рендерить). Телеграм-сообщение
@@ -13,6 +14,7 @@ from aiogram import Dispatcher, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -21,10 +23,11 @@ from app.database.crud.user import (
     get_user_by_telegram_id,
     get_user_by_username,
 )
-from app.database.models import User
+from app.database.models import User, UserStatus
 from app.services.cabinet_notification_service import (
     CabinetNotificationType,
     notify,
+    notify_bulk,
 )
 from app.utils.decorators import admin_required, error_handler
 
@@ -33,8 +36,12 @@ logger = logging.getLogger(__name__)
 MAX_TITLE_LENGTH = 255
 MAX_BODY_LENGTH = 4000
 
+MODE_SINGLE = "single"
+MODE_ALL = "all"
+
 
 class CabinetNotifyStates(StatesGroup):
+    waiting_for_mode = State()
     waiting_for_target = State()
     waiting_for_title = State()
     waiting_for_body = State()
@@ -44,6 +51,20 @@ class CabinetNotifyStates(StatesGroup):
 def _cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Отмена", callback_data="cabinet_notify_cancel")]
+    ])
+
+
+def _mode_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="👤 Одному пользователю",
+            callback_data="cabinet_notify_mode_single",
+        )],
+        [InlineKeyboardButton(
+            text="📢 Всем пользователям",
+            callback_data="cabinet_notify_mode_all",
+        )],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cabinet_notify_cancel")],
     ])
 
 
@@ -70,6 +91,21 @@ def _describe_user(user: User) -> str:
     if getattr(user, "email", None):
         parts.append(f"Email: {user.email}")
     return "\n".join(parts)
+
+
+async def _get_all_user_ids(db: AsyncSession) -> list[int]:
+    """ID всех активных пользователей — получатели broadcast-уведомления."""
+    result = await db.execute(
+        select(User.id).where(User.status == UserStatus.ACTIVE.value)
+    )
+    return [row[0] for row in result.all()]
+
+
+async def _count_all_users(db: AsyncSession) -> int:
+    result = await db.execute(
+        select(func.count(User.id)).where(User.status == UserStatus.ACTIVE.value)
+    )
+    return int(result.scalar() or 0)
 
 
 async def _resolve_user(db: AsyncSession, query: str) -> User | None:
@@ -100,16 +136,66 @@ async def start_cabinet_notify(
         return
 
     await state.clear()
+    total = await _count_all_users(db)
     await callback.message.edit_text(
         "📬 <b>Уведомление в кабинет</b>\n\n"
         "Уведомление появится в ленте личного кабинета и приложений "
         "(телеграм-сообщение не отправляется).\n\n"
+        f"Выберите получателей (всего активных пользователей: <b>{total}</b>).",
+        reply_markup=_mode_keyboard(),
+        parse_mode="HTML",
+    )
+    await state.set_state(CabinetNotifyStates.waiting_for_mode)
+    await callback.answer()
+
+
+@admin_required
+@error_handler
+async def select_mode_single(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db_user: User,
+    db: AsyncSession,
+):
+    await state.update_data(mode=MODE_SINGLE)
+    await callback.message.edit_text(
+        "📬 <b>Уведомление в кабинет</b>\n\n"
         "Введите получателя: <b>Telegram ID</b>, <b>@username</b> или <b>email</b>.\n\n"
         "Отправьте /cancel для отмены.",
         reply_markup=_cancel_keyboard(),
         parse_mode="HTML",
     )
     await state.set_state(CabinetNotifyStates.waiting_for_target)
+    await callback.answer()
+
+
+@admin_required
+@error_handler
+async def select_mode_all(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db_user: User,
+    db: AsyncSession,
+):
+    total = await _count_all_users(db)
+    if not total:
+        await callback.answer("❌ Нет активных пользователей.", show_alert=True)
+        return
+
+    await state.update_data(
+        mode=MODE_ALL,
+        target_user_id=None,
+        target_label=f"📢 Все пользователи ({total})",
+    )
+    await callback.message.edit_text(
+        f"📢 <b>Рассылка в кабинет всем пользователям</b>\n\n"
+        f"Получателей: <b>{total}</b>\n\n"
+        f"Введите <b>заголовок</b> уведомления "
+        f"или /skip для стандартного («Объявление»).",
+        reply_markup=_cancel_keyboard(),
+        parse_mode="HTML",
+    )
+    await state.set_state(CabinetNotifyStates.waiting_for_title)
     await callback.answer()
 
 
@@ -228,11 +314,16 @@ async def confirm_cabinet_notify(
     db: AsyncSession,
 ):
     data = await state.get_data()
+    mode = data.get("mode", MODE_SINGLE)
     target_user_id = data.get("target_user_id")
     body = data.get("body")
-    if not target_user_id or not body:
+    if not body or (mode == MODE_SINGLE and not target_user_id):
         await state.clear()
         await callback.answer("❌ Данные утеряны, начните заново.", show_alert=True)
+        return
+
+    if mode == MODE_ALL:
+        await _send_broadcast(callback, state, db_user, db, data)
         return
 
     notification = await notify(
@@ -272,6 +363,64 @@ async def confirm_cabinet_notify(
     await callback.answer()
 
 
+async def _send_broadcast(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db_user: User,
+    db: AsyncSession,
+    data: dict,
+) -> None:
+    """Broadcast: одна запись в ленту каждому активному пользователю."""
+    user_ids = await _get_all_user_ids(db)
+    await state.clear()
+
+    if not user_ids:
+        await callback.message.edit_text(
+            "❌ Нет активных пользователей для рассылки.",
+            reply_markup=_back_keyboard(),
+        )
+        await callback.answer()
+        return
+
+    await callback.answer()
+    await callback.message.edit_text(
+        f"⏳ Отправляю уведомление {len(user_ids)} пользователям...",
+    )
+
+    created = await notify_bulk(
+        user_ids,
+        type=CabinetNotificationType.BROADCAST,
+        title=data.get("title"),
+        body=data["body"],
+        payload={"manual": True, "broadcast": True, "adminId": db_user.id},
+    )
+
+    if not created:
+        logger.error(
+            "Broadcast-уведомление кабинета от админа %s не создано (получателей: %s)",
+            db_user.id,
+            len(user_ids),
+        )
+        await callback.message.edit_text(
+            "❌ Не удалось создать уведомления (подробности в логах).",
+            reply_markup=_back_keyboard(),
+        )
+        return
+
+    logger.info(
+        "Админ %s отправил broadcast-уведомление кабинета: %s/%s получателей",
+        db_user.id,
+        created,
+        len(user_ids),
+    )
+    await callback.message.edit_text(
+        f"✅ <b>Рассылка выполнена</b>\n\n"
+        f"📬 Уведомлений создано: <b>{created}</b> из {len(user_ids)}",
+        reply_markup=_back_keyboard(),
+        parse_mode="HTML",
+    )
+
+
 @admin_required
 @error_handler
 async def cancel_cabinet_notify(
@@ -298,6 +447,8 @@ async def _cancel_to_menu_message(message: types.Message, state: FSMContext) -> 
 
 def register_handlers(dp: Dispatcher):
     dp.callback_query.register(start_cabinet_notify, F.data == "admin_cabinet_notify")
+    dp.callback_query.register(select_mode_single, F.data == "cabinet_notify_mode_single")
+    dp.callback_query.register(select_mode_all, F.data == "cabinet_notify_mode_all")
     dp.callback_query.register(confirm_cabinet_notify, F.data == "cabinet_notify_confirm")
     dp.callback_query.register(cancel_cabinet_notify, F.data == "cabinet_notify_cancel")
     dp.message.register(process_target, CabinetNotifyStates.waiting_for_target)
