@@ -30,6 +30,10 @@ from app.keyboards.inline import (
     get_onboarding_device_selection_keyboard,
     get_onboarding_connection_keyboard,
     get_onboarding_connected_keyboard,
+    get_connection_platform_keyboard,
+    get_connect_android_keyboard,
+    get_connect_apple_keyboard,
+    get_connect_windows_keyboard,
 )
 from app.utils.subscription_utils import (
     get_display_subscription_link,
@@ -1267,29 +1271,165 @@ def _build_onboarding_device_selection_view(user) -> str:
     )
 
 
+def _get_connection_key(user: User) -> str | None:
+    """Return the raw Remnawave key that works in Leto, Happ, and Incy."""
+    return get_raw_subscription_link(getattr(user, "subscription", None))
+
+
+def _format_connection_key(link: str) -> str:
+    escaped_link = html.escape(link, quote=True)
+    # Telegram renders preformatted blocks with a built-in copy control.
+    return f"<pre><code>{escaped_link}</code></pre>"
+
+
+async def _get_connect_menu_user(
+    callback: types.CallbackQuery,
+    db: AsyncSession,
+) -> User | None:
+    user = await get_user_by_telegram_id(db, callback.from_user.id)
+    if user is None:
+        return None
+
+    if not _get_connection_key(user):
+        texts = get_texts(user.language)
+        await callback.answer(
+            texts.t("SUBSCRIPTION_LINK_UNAVAILABLE", "❌ Ссылка подписки недоступна"),
+            show_alert=True,
+        )
+        return None
+
+    return user
+
+
+def _build_connect_platform_selection_text(user: User) -> str:
+    texts = get_texts(user.language)
+    link = _get_connection_key(user)
+    return (
+        texts.t(
+            "CONNECT_PLATFORM_SELECTION_TEXT",
+            "Для подключения основного или дополнительного устройства выбери платформу:",
+        )
+        + "\n\n"
+        + texts.t(
+            "CONNECT_ACCESS_KEY_LABEL",
+            "Ключ-ссылка доступа (для Leto, Happ, Incy)",
+        )
+        + "\n"
+        + _format_connection_key(link)
+    )
+
+
 async def handle_howto(
     callback: types.CallbackQuery,
     state: FSMContext,
     db: AsyncSession,
     from_toggle: bool = False
 ):
-    """Redirects to device selection screen (Screen 2)."""
-    user = await get_user_by_telegram_id(db, callback.from_user.id)
-    if not user:
+    """Show the Connect menu with a universal subscription key."""
+    user = await _get_connect_menu_user(callback, db)
+    if user is None:
         return
-
-    caption = _build_onboarding_device_selection_view(user)
-
-    image_path = os.path.join("images", "devices.jpg")
-    if not os.path.exists(image_path):
-        image_path = None
 
     await edit_or_answer_photo(
         callback,
-        caption,
-        get_onboarding_device_selection_keyboard(user.language),
+        _build_connect_platform_selection_text(user),
+        get_connection_platform_keyboard(user.language),
         parse_mode="HTML",
-        photo_path=image_path,
+        photo_path=os.path.join("images", "connection.jpg"),
+        disable_web_page_preview=True,
+    )
+    await callback.answer()
+
+
+async def handle_connect_platform_android(
+    callback: types.CallbackQuery,
+    db: AsyncSession,
+):
+    user = await _get_connect_menu_user(callback, db)
+    if user is None:
+        return
+
+    texts = get_texts(user.language)
+    link = _get_connection_key(user)
+    text = (
+        texts.t(
+            "CONNECT_ANDROID_TEXT",
+            "Установи приложение Leto VPN по кнопке ниже и авторизуйся через ключ-ссылку.",
+        )
+        + "\n\n"
+        + texts.t(
+            "CONNECT_ANDROID_KEY_LABEL",
+            "Ключ-ссылка (подойдет также и для Happ, Incy):",
+        )
+        + "\n"
+        + _format_connection_key(link)
+    )
+    await edit_or_answer_photo(
+        callback,
+        text,
+        get_connect_android_keyboard(user.language, user.telegram_id),
+        parse_mode="HTML",
+        photo_path=os.path.join("images", "connection.jpg"),
+        disable_web_page_preview=True,
+    )
+    await callback.answer()
+
+
+async def handle_connect_platform_apple(
+    callback: types.CallbackQuery,
+    db: AsyncSession,
+):
+    user = await _get_connect_menu_user(callback, db)
+    if user is None:
+        return
+
+    texts = get_texts(user.language)
+    link = _get_connection_key(user)
+    text = (
+        texts.t(
+            "CONNECT_APPLE_TEXT",
+            "Для iOS/MacOS Leto работает через Incy (RU стор) и Happ (международный стор).\n\n"
+            "Скачай одно из приложений по кнопке ниже и вставь в него ключ-ссылку",
+        )
+        + "\n"
+        + _format_connection_key(link)
+    )
+    await edit_or_answer_photo(
+        callback,
+        text,
+        get_connect_apple_keyboard(user.language),
+        parse_mode="HTML",
+        photo_path=os.path.join("images", "connection.jpg"),
+        disable_web_page_preview=True,
+    )
+    await callback.answer()
+
+
+async def handle_connect_platform_windows(
+    callback: types.CallbackQuery,
+    db: AsyncSession,
+):
+    user = await _get_connect_menu_user(callback, db)
+    if user is None:
+        return
+
+    texts = get_texts(user.language)
+    link = _get_connection_key(user)
+    text = (
+        texts.t(
+            "CONNECT_WINDOWS_TEXT",
+            "Для Windows Leto работает через Happ. Скачай приложение и вставь туда ссылку-ключ ниже:",
+        )
+        + "\n\n"
+        + _format_connection_key(link)
+    )
+    await edit_or_answer_photo(
+        callback,
+        text,
+        get_connect_windows_keyboard(user.language),
+        parse_mode="HTML",
+        photo_path=os.path.join("images", "connection.jpg"),
+        disable_web_page_preview=True,
     )
     await callback.answer()
 
@@ -1760,6 +1900,21 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         handle_howto,
         F.data == "howto"
+    )
+
+    dp.callback_query.register(
+        handle_connect_platform_android,
+        F.data == "connect_platform_android",
+    )
+
+    dp.callback_query.register(
+        handle_connect_platform_apple,
+        F.data == "connect_platform_apple",
+    )
+
+    dp.callback_query.register(
+        handle_connect_platform_windows,
+        F.data == "connect_platform_windows",
     )
 
     dp.callback_query.register(
