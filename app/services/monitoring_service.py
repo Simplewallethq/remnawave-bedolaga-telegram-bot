@@ -80,7 +80,6 @@ logger = logging.getLogger(__name__)
 
 
 class MonitoringService:
-    SEND_AUTOPAY_USER_NOTIFICATIONS = False
     SEND_LEGACY_EXPIRED_TELEGRAM_NOTIFICATIONS = False
     SEND_LEGACY_EXPIRED_FOLLOWUPS = False
     REMNAWAVE_SYNC_INTERVAL_MINUTES = 15
@@ -95,6 +94,10 @@ class MonitoringService:
         self.trial_expiry_daily_metrics_service = trial_expiry_daily_metrics_service
         self.bot = bot
         self._notified_users: Set[str] = set()
+        # subscription_id -> end_date, на который уже уходило сообщение о
+        # неудачном автоплатеже. Живет дольше _notified_users (тот чистится
+        # раз в час), чтобы не слать по сообщению каждый цикл мониторинга.
+        self._autopay_failed_notified: Dict[int, datetime] = {}
         self._last_cleanup = datetime.utcnow()
         self._last_cabinet_notifications_cleanup = datetime.min
         self._sla_task = None
@@ -281,6 +284,13 @@ class MonitoringService:
         if (current_time - self._last_cleanup).total_seconds() >= 3600:
             old_count = len(self._notified_users)
             self._notified_users.clear()
+            # Отметки о неудачном автоплатеже держим до конца периода подписки,
+            # иначе дедуп сбрасывался бы каждый час вместе с общим кешем.
+            self._autopay_failed_notified = {
+                subscription_id: end_date
+                for subscription_id, end_date in self._autopay_failed_notified.items()
+                if end_date > current_time
+            }
             self._last_cleanup = current_time
             logger.info(f"🧹 Очищен кеш уведомлений ({old_count} записей)")
 
@@ -1138,9 +1148,7 @@ class MonitoringService:
 
                 if user.balance_kopeks < charge_amount:
                     failed_count += 1
-                    if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
-                        await self._send_autopay_failed_notification(user, user.balance_kopeks, charge_amount)
-                    await self._notify_cabinet_autopay_failed(db, user, subscription, charge_amount)
+                    await self._notify_autopay_failed(db, user, subscription, charge_amount)
                     logger.warning(f"💳 Недостаточно средств для автопродления у пользователя {user.telegram_id}")
                     continue
 
@@ -1179,9 +1187,7 @@ class MonitoringService:
 
                 if not success:
                     failed_count += 1
-                    if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
-                        await self._send_autopay_failed_notification(user, user.balance_kopeks, charge_amount)
-                    await self._notify_cabinet_autopay_failed(db, user, subscription, charge_amount)
+                    await self._notify_autopay_failed(db, user, subscription, charge_amount)
                     logger.warning(f"💳 Ошибка списания средств для автопродления пользователя {user.telegram_id}")
                     continue
 
@@ -1209,7 +1215,9 @@ class MonitoringService:
                 if promo_discount_value > 0:
                     await self._consume_user_promo_offer_discount(db, user)
 
-                if self.bot and self.SEND_AUTOPAY_USER_NOTIFICATIONS:
+                self._autopay_failed_notified.pop(subscription.id, None)
+
+                if self.bot and settings.AUTOPAY_NOTIFY_SUCCESS:
                     await self._send_autopay_success_notification(user, charge_amount, period_days)
 
                 processed_count += 1
@@ -1256,6 +1264,40 @@ class MonitoringService:
                 user_id,
                 exc,
             )
+
+    async def _notify_autopay_failed(
+        self,
+        db: AsyncSession,
+        user: User,
+        subscription: Subscription,
+        charge_amount: int,
+    ) -> None:
+        """Сообщение в бот + запись в ленту кабинета о неудачном автоплатеже."""
+        if (
+            self.bot
+            and settings.AUTOPAY_NOTIFY_FAILED
+            and self._mark_autopay_failure_notified(subscription)
+        ):
+            await self._send_autopay_failed_notification(
+                user, user.balance_kopeks, charge_amount
+            )
+
+        await self._notify_cabinet_autopay_failed(db, user, subscription, charge_amount)
+
+    def _mark_autopay_failure_notified(self, subscription: Subscription) -> bool:
+        """True, если по этому периоду подписки сообщение еще не отправлялось.
+
+        Неудачная ветка автоплатежа выполняется каждый цикл мониторинга, пока
+        подписка находится в окне списания (до 3 суток), поэтому без дедупа
+        пользователь получил бы десятки одинаковых сообщений. Ключом служит
+        end_date: после продления он меняется, и следующий период снова
+        уведомляется.
+        """
+        if self._autopay_failed_notified.get(subscription.id) == subscription.end_date:
+            return False
+
+        self._autopay_failed_notified[subscription.id] = subscription.end_date
+        return True
 
     async def _notify_cabinet_autopay_failed(
         self,

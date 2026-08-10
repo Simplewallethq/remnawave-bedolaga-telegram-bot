@@ -253,7 +253,13 @@ class Settings(BaseSettings):
 
     DEFAULT_AUTOPAY_ENABLED: bool = True
     DEFAULT_AUTOPAY_DAYS_BEFORE: int = 1
-    MIN_BALANCE_FOR_AUTOPAY_KOPEKS: int = 10000  
+    MIN_BALANCE_FOR_AUTOPAY_KOPEKS: int = 10000
+
+    # Сообщения пользователю в бот по итогу автоплатежа.
+    # Неудача уведомляется не чаще раза на биллинговый период подписки.
+    AUTOPAY_NOTIFY_FAILED: bool = True
+    AUTOPAY_NOTIFY_SUCCESS: bool = False
+
     SUBSCRIPTION_RENEWAL_BALANCE_THRESHOLD_KOPEKS: int = 20000  
     
     MONITORING_INTERVAL: int = 60

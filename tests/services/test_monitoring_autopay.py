@@ -177,3 +177,65 @@ async def test_autopay_reports_insufficient_balance(monkeypatch):
     finalize.assert_not_awaited()
     service._notify_cabinet_autopay_failed.assert_awaited_once()
     assert service._notify_cabinet_autopay_failed.await_args.args[3] == 100_000
+
+
+async def test_autopay_failure_notifies_bot_once_per_period(monkeypatch):
+    import app.handlers.subscription.tariffs as tariffs_module
+    import app.services.plan_pricing_service as pricing_module
+
+    user = _make_user(balance_kopeks=1_000)
+    plan = SimpleNamespace(id=7, code="plus", display_name="Plus")
+    subscription = _make_subscription(user, plan_id=7, plan_period_days=30, plan=plan)
+
+    service = _make_service(monkeypatch)
+    service.bot = MagicMock()
+    monkeypatch.setattr(monitoring_module.settings, "AUTOPAY_NOTIFY_FAILED", True)
+
+    send_failed = AsyncMock()
+    monkeypatch.setattr(service, "_send_autopay_failed_notification", send_failed)
+    monkeypatch.setattr(pricing_module, "get_plan_price", AsyncMock(return_value=100_000))
+    monkeypatch.setattr(tariffs_module, "finalize_tariff_renewal", AsyncMock())
+
+    db = _make_db([subscription])
+    await service._process_autopayments(db)
+    await service._process_autopayments(db)
+
+    # Цикл мониторинга повторяется каждый час, пока подписка в окне списания,
+    # но сообщение о нехватке средств уходит один раз на период подписки.
+    send_failed.assert_awaited_once()
+    assert send_failed.await_args.args == (user, 1_000, 100_000)
+
+
+async def test_autopay_failure_notification_disabled_by_setting(monkeypatch):
+    import app.handlers.subscription.tariffs as tariffs_module
+    import app.services.plan_pricing_service as pricing_module
+
+    user = _make_user(balance_kopeks=1_000)
+    plan = SimpleNamespace(id=7, code="plus", display_name="Plus")
+    subscription = _make_subscription(user, plan_id=7, plan_period_days=30, plan=plan)
+
+    service = _make_service(monkeypatch)
+    service.bot = MagicMock()
+    monkeypatch.setattr(monitoring_module.settings, "AUTOPAY_NOTIFY_FAILED", False)
+
+    send_failed = AsyncMock()
+    monkeypatch.setattr(service, "_send_autopay_failed_notification", send_failed)
+    monkeypatch.setattr(pricing_module, "get_plan_price", AsyncMock(return_value=100_000))
+    monkeypatch.setattr(tariffs_module, "finalize_tariff_renewal", AsyncMock())
+
+    await service._process_autopayments(_make_db([subscription]))
+
+    send_failed.assert_not_awaited()
+    service._notify_cabinet_autopay_failed.assert_awaited_once()
+
+
+def test_autopay_failure_mark_resets_on_new_period():
+    service = MonitoringService(bot=None)
+    subscription = SimpleNamespace(id=10, end_date=datetime(2026, 1, 1))
+
+    assert service._mark_autopay_failure_notified(subscription) is True
+    assert service._mark_autopay_failure_notified(subscription) is False
+
+    # Продление сдвигает end_date — следующий период уведомляется заново.
+    subscription.end_date = datetime(2026, 2, 1)
+    assert service._mark_autopay_failure_notified(subscription) is True
