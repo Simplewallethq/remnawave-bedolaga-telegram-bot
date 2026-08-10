@@ -19,6 +19,7 @@ from .routes import (
     config,
     devices,
     health,
+    iap,
     main_menu_buttons,
     media,
     menu_layout,
@@ -173,6 +174,10 @@ OPENAPI_TAGS = [
         "name": "plans",
         "description": "Subscription plan catalog (App/Solo/Plus/Pro) for the purchase frontend.",
     },
+    {
+        "name": "iap",
+        "description": "Apple In-App Purchase (StoreKit 2) transaction verification, called by teleVpn.",
+    },
 ]
 
 
@@ -269,6 +274,7 @@ def create_web_api_app() -> FastAPI:
     app.include_router(share.router, prefix="/cabinet/share", tags=["share"])
     app.include_router(app_updates.router, prefix="/cabinet/app", tags=["app-updates"])
     app.include_router(app_users.router, prefix="/api/users", tags=["app-users"])
+    app.include_router(iap.router, prefix="/api/iap/apple", tags=["iap"])
     app.include_router(plans.router, prefix="/api/plans", tags=["plans"])
     app.include_router(auth_otp.router, prefix="/api/auth", tags=["auth-otp"])
     app.include_router(cabinet.router, prefix="/cabinet", tags=["cabinet"])

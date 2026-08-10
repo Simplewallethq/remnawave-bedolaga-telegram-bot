@@ -107,6 +107,7 @@ class PaymentMethod(Enum):
     PLATEGA = "platega"
     CLOUDPAYMENTS = "cloudpayments"
     MANUAL = "manual"
+    APPLE_IAP = "apple_iap"
 
 
 class MainMenuButtonActionType(Enum):
@@ -151,21 +152,40 @@ class YooKassaPayment(Base):
     @property
     def is_pending(self) -> bool:
         return self.status == "pending"
-    
+
     @property
     def is_succeeded(self) -> bool:
         return self.status == "succeeded" and self.is_paid
-    
+
     @property
     def is_failed(self) -> bool:
         return self.status in ["canceled", "failed"]
-    
+
     @property
     def can_be_captured(self) -> bool:
         return self.status == "waiting_for_capture"
-    
+
     def __repr__(self):
         return f"<YooKassaPayment(id={self.id}, yookassa_id={self.yookassa_payment_id}, amount={self.amount_rubles}₽, status={self.status})>"
+
+
+class AppleIapTransaction(Base):
+    __tablename__ = "apple_iap_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    transaction_id = Column(String(255), unique=True, nullable=False, index=True)
+    original_transaction_id = Column(String(255), nullable=False, index=True)
+    product_id = Column(String(255), nullable=False)
+    environment = Column(String(20), nullable=False)
+    expires_date = Column(DateTime, nullable=False)
+    purchase_date = Column(DateTime, nullable=False)
+    transaction_record_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+    user = relationship("User", backref="apple_iap_transactions")
+    transaction = relationship("Transaction", backref="apple_iap_transaction")
+
 
 class CryptoBotPayment(Base):
     __tablename__ = "cryptobot_payments"
