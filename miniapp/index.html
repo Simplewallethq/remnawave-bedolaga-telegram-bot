@@ -8167,6 +8167,7 @@
                     return;
                 }
                 await refreshSubscriptionData();
+                openRequestedConnection();
             } catch (error) {
                 console.error('Initialization error:', error);
                 showError(error);
@@ -9580,6 +9581,75 @@
             });
 
             return aggregated;
+        }
+
+        function takeRequestedConnectionAction() {
+            try {
+                const url = new URL(window.location.href);
+                const action = (url.searchParams.get('connect') || '').toLowerCase();
+                url.searchParams.delete('connect');
+                window.history.replaceState({}, document.title, url.toString());
+                return action === 'happ' || action === 'incy' ? action : null;
+            } catch (error) {
+                console.warn('Unable to parse requested connection action:', error);
+                return null;
+            }
+        }
+
+        function findConfiguredApp(appId) {
+            const normalizedId = String(appId || '').toLowerCase();
+            for (const apps of Object.values(appsConfig || {})) {
+                if (!Array.isArray(apps)) {
+                    continue;
+                }
+                const app = apps.find(candidate => String(candidate?.id || '').toLowerCase() === normalizedId);
+                if (app) {
+                    return app;
+                }
+            }
+            return null;
+        }
+
+        function getRequestedConnectionLink(action) {
+            const subscriptionUrl = getCurrentSubscriptionUrl();
+            if (!subscriptionUrl) {
+                return null;
+            }
+
+            if (action === 'incy') {
+                const incyApp = findConfiguredApp('incy') || { urlScheme: 'incy://add/' };
+                return buildAppSchemeLink(incyApp, subscriptionUrl);
+            }
+
+            if (action === 'happ') {
+                const happData = userData?.happ && typeof userData.happ === 'object'
+                    ? userData.happ
+                    : null;
+                const panelHappLink = normalizeUrl(
+                    happData?.link || happData?.appLink || happData?.url || userData?.happ_link || userData?.happLink
+                );
+                return getHappCryptoLink() || panelHappLink || buildAppSchemeLink(
+                    findConfiguredApp('happ') || { urlScheme: 'happ://add/' },
+                    subscriptionUrl,
+                );
+            }
+
+            return null;
+        }
+
+        function openRequestedConnection() {
+            const action = takeRequestedConnectionAction();
+            if (!action || !hasActiveSubscription()) {
+                return;
+            }
+
+            const link = getRequestedConnectionLink(action);
+            if (!link) {
+                console.warn('Connection link is unavailable for requested action:', action);
+                return;
+            }
+
+            openExternalLink(link, { openInMiniApp: true });
         }
 
         function resolveConnectButtonLabel() {
