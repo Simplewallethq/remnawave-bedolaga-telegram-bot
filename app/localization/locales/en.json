@@ -1733,6 +1733,7 @@
   "ONBOARDING_MAIN_MENU_BUTTON": "🏠 Main menu",
   "CONNECT_PLATFORM_SELECTION_TEXT": "To connect your primary or additional device, choose a platform:",
   "CONNECT_ACCESS_KEY_LABEL": "Access key link (for Leto, Happ, Incy)",
+  "CONNECT_LETO_CODE_LABEL": "Leto sign-in key (16 characters)",
   "CONNECT_MAIN_MENU_BUTTON": "🏠 Main menu",
   "CONNECT_ANDROID_TEXT": "Install Leto VPN using the button below and sign in with the key link.",
   "CONNECT_ANDROID_KEY_LABEL": "Key link (also works for Happ and Incy):",

@@ -35,6 +35,7 @@ from app.keyboards.inline import (
     get_connect_apple_keyboard,
     get_connect_windows_keyboard,
 )
+from app.utils.subscription_code import extract_subscription_code
 from app.utils.subscription_utils import (
     get_display_subscription_link,
     get_happ_cryptolink_redirect_link,
@@ -1283,6 +1284,43 @@ def _format_connection_key(link: str) -> str:
     return f"<pre><code>{escaped_link}</code></pre>"
 
 
+def _get_leto_access_code(user: User) -> str | None:
+    """16-значный код подписки — им авторизуются в Leto вместо ключа-ссылки.
+
+    Берём short uuid из подписки, а если его там нет (старые записи) —
+    достаём последний сегмент ссылки `/sub/<code>`.
+    """
+    subscription = getattr(user, "subscription", None)
+    if not subscription:
+        return None
+
+    code = (getattr(subscription, "remnawave_short_uuid", None) or "").strip()
+    if code:
+        return code
+
+    link = get_raw_subscription_link(subscription)
+    if not link:
+        return None
+
+    code, _ = extract_subscription_code(link)
+    return code or None
+
+
+def _format_leto_code_block(user: User) -> str:
+    """Блок с 16-значным кодом для Leto; пустая строка, если кода нет."""
+    code = _get_leto_access_code(user)
+    if not code:
+        return ""
+
+    texts = get_texts(user.language)
+    return (
+        "\n\n"
+        + texts.t("CONNECT_LETO_CODE_LABEL", "Ключ для входа в Leto (16 символов)")
+        + "\n"
+        + _format_connection_key(code)
+    )
+
+
 def _get_happ_transfer_url(user: User) -> str | None:
     return get_happ_cryptolink_redirect_link(
         get_display_subscription_link(getattr(user, "subscription", None))
@@ -1357,6 +1395,7 @@ def _build_connect_platform_selection_text(user: User) -> str:
         )
         + "\n"
         + _format_connection_key(link)
+        + _format_leto_code_block(user)
     )
 
 
@@ -1404,6 +1443,7 @@ async def handle_connect_platform_android(
         )
         + "\n"
         + _format_connection_key(link)
+        + _format_leto_code_block(user)
     )
     await edit_or_answer_photo(
         callback,

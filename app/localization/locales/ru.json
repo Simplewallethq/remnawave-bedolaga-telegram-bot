@@ -1760,6 +1760,7 @@
   "ONBOARDING_MAIN_MENU_BUTTON": "🏠 Основное меню",
   "CONNECT_PLATFORM_SELECTION_TEXT": "Для подключения основного или дополнительного устройства выбери платформу:",
   "CONNECT_ACCESS_KEY_LABEL": "Ключ-ссылка доступа (для Leto, Happ, Incy)",
+  "CONNECT_LETO_CODE_LABEL": "Ключ для входа в Leto (16 символов)",
   "CONNECT_MAIN_MENU_BUTTON": "🏠 Основное меню",
   "CONNECT_ANDROID_TEXT": "Установи приложение Leto VPN по кнопке ниже и авторизуйся через ключ-ссылку.",
   "CONNECT_ANDROID_KEY_LABEL": "Ключ-ссылка (подойдет также и для Happ, Incy):",
