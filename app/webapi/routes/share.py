@@ -118,9 +118,10 @@ async def resolve_share_token(
         return ShareResolveResponse(status="slots_full", referral=referral)
 
     raw_link = get_display_subscription_link(subscription)
+    plain_link = get_raw_subscription_link(subscription)
     happ_link = convert_subscription_link_to_happ_scheme(raw_link)
     # Incy добавляет подписку по обычной ссылке из Remnawave, а не по криптоссылке.
-    incy_link = build_incy_deep_link(get_raw_subscription_link(subscription) or raw_link)
+    incy_link = build_incy_deep_link(plain_link or raw_link)
 
     return ShareResolveResponse(
         status="active",
@@ -128,6 +129,7 @@ async def resolve_share_token(
         happLink=happ_link,
         incyLink=incy_link,
         rawLink=raw_link,
+        subLink=plain_link,
         platforms=settings.get_share_platform_map(),
         referral=referral,
     )

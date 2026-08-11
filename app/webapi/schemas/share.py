@@ -34,5 +34,9 @@ class ShareResolveResponse(BaseModel):
     # incy://add/{обычная ссылка подписки} — для платформ с method=incy_link
     incyLink: Optional[str] = None
     rawLink: Optional[str] = None
+    # Обычная ссылка подписки из Remnawave (https://.../sub/{uuid}) — всегда
+    # именно она, без подмены на happ-криптоссылку: её можно вставить в любой
+    # клиент вручную.
+    subLink: Optional[str] = None
     platforms: Optional[Dict[str, SharePlatform]] = None
     referral: Optional[ShareReferral] = None
