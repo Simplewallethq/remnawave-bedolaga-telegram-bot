@@ -22,6 +22,7 @@ from app.services.expired_subscription_offer_service import (
     expired_subscription_offer_service,
 )
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
+from app.services.legacy_notify_once_service import legacy_notify_once_service
 from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 
 
@@ -110,6 +111,10 @@ class InteractiveNotificationService:
         *(
             InteractiveNotificationSlot(key, run_at.timetz().replace(tzinfo=None), run_at)
             for key, run_at in legacy_pro_offer_service.get_one_off_schedule()
+        ),
+        InteractiveNotificationSlot(
+            legacy_notify_once_service.SLOT_KEY,
+            run_at=legacy_notify_once_service.RUN_AT,
         ),
     )
     BATCH_LIMIT = 500
@@ -264,6 +269,8 @@ class InteractiveNotificationService:
     async def _is_one_off_slot_processed(self, slot: InteractiveNotificationSlot) -> bool:
         if not slot.is_one_off:
             return False
+        if legacy_notify_once_service.is_slot(slot.key):
+            return await legacy_notify_once_service.is_terminal()
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 select(func.count(InteractiveNotificationLog.id)).where(
@@ -284,6 +291,10 @@ class InteractiveNotificationService:
         return f"{slot.key}={slot.time.strftime('%H:%M')}" if slot.time else slot.key
 
     async def _process_slot(self, slot: InteractiveNotificationSlot) -> None:
+        if legacy_notify_once_service.is_slot(slot.key):
+            await legacy_notify_once_service.run(self.bot)
+            return
+
         payload = {
             "timezone": "Europe/Moscow",
             "slot_time": slot.time.strftime("%H:%M") if slot.time else None,
