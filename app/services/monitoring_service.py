@@ -1811,8 +1811,10 @@ class MonitoringService:
                 return
 
             async with self._remnawave_sync_lock:
-                sync_stats = await RemnaWaveService().sync_vpn_connection_flags_from_panel(db)
+                # Отметку ставим независимо от исхода: скан панели стоит ~240
+                # запросов, и при поломке его нельзя гонять каждым циклом.
                 self._last_remnawave_sync_at = now
+                sync_stats = await RemnaWaveService().sync_vpn_connection_flags_from_panel(db)
 
                 await self._log_monitoring_event(
                     db,

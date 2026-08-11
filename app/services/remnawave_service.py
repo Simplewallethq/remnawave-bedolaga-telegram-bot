@@ -13,8 +13,8 @@ from app.external.remnawave_api import (
     RemnaWaveAPI, RemnaWaveUser, RemnaWaveInternalSquad,
     RemnaWaveNode, UserStatus, TrafficLimitStrategy, RemnaWaveAPIError
 )
-from sqlalchemy import and_, cast, delete, func, select, update, String
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, cast, delete, func, or_, select, update, String
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.crud.user import (
@@ -292,8 +292,15 @@ class RemnaWaveService:
         *,
         page_size: int = 1000,
         update_chunk_size: int = 2000,
+        flush_interval_seconds: float = 30.0,
     ) -> Dict[str, Any]:
-        """Batch-sync only users.has_connected_to_vpn from RemnaWave panel data."""
+        """Batch-sync only users.has_connected_to_vpn from RemnaWave panel data.
+
+        Скан панели занимает минуты, поэтому сессию БД нельзя держать занятой
+        всё это время: транзакция от выборки кандидатов закрывается сразу, а
+        запись идёт частями (по объёму или по времени) с переподключением,
+        если коннект всё-таки успел умереть, пока мы ходили в панель.
+        """
         started_at = datetime.utcnow()
         stats: Dict[str, Any] = {
             "local_candidates": 0,
@@ -317,6 +324,10 @@ class RemnaWaveService:
             select(User.id, User.remnawave_uuid).where(
                 User.has_connected_to_vpn == False,
                 User.remnawave_uuid.isnot(None),
+                # Удалённые аккаунты сканировать бессмысленно: они не вернутся
+                # ни в статистику, ни в бонус за первое подключение. status
+                # nullable, поэтому сравнение делаем NULL-безопасным.
+                or_(User.status.is_(None), User.status != "deleted"),
             )
         )
         candidates_by_uuid = {
@@ -326,14 +337,16 @@ class RemnaWaveService:
         }
         stats["local_candidates"] = len(candidates_by_uuid)
 
+        # Выборка кандидатов открыла транзакцию. Дальше несколько минут идёт
+        # обход панели без единого запроса к БД — если оставить транзакцию
+        # висеть, сервер прибьёт коннект по idle_in_transaction_session_timeout.
+        await db.commit()
+
         if not candidates_by_uuid:
             stats["duration_seconds"] = round((datetime.utcnow() - started_at).total_seconds(), 3)
             return stats
 
-        async def flush_updates(user_ids: List[int]) -> None:
-            if not user_ids:
-                return
-
+        async def write_flags(user_ids: List[int]) -> int:
             update_result = await db.execute(
                 update(User)
                 .where(
@@ -345,7 +358,31 @@ class RemnaWaveService:
             await db.commit()
 
             rowcount = getattr(update_result, "rowcount", None)
-            stats["updated"] += rowcount if isinstance(rowcount, int) and rowcount >= 0 else len(user_ids)
+            if isinstance(rowcount, int) and rowcount >= 0:
+                return rowcount
+            return len(user_ids)
+
+        async def flush_updates(user_ids: List[int]) -> None:
+            if not user_ids:
+                return
+
+            try:
+                updated = await write_flags(user_ids)
+            except DBAPIError as db_error:
+                # Коннект мог умереть, пока мы ходили в панель. rollback()
+                # возвращает битое соединение в пул, следующий execute берёт
+                # живое (pool_pre_ping), поэтому одной попытки достаточно.
+                logger.warning(
+                    "Batch sync: повторяем запись флагов после ошибки соединения с БД: %s",
+                    db_error,
+                )
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+                updated = await write_flags(user_ids)
+
+            stats["updated"] += updated
 
             try:
                 users_result = await db.execute(select(User).where(User.id.in_(user_ids)))
@@ -364,6 +401,7 @@ class RemnaWaveService:
 
         pending_updates: List[int] = []
         start = 0
+        last_flush_at = datetime.utcnow()
 
         try:
             async with self.get_api_client() as api:
@@ -393,6 +431,18 @@ class RemnaWaveService:
                         if len(pending_updates) >= update_chunk_size:
                             await flush_updates(pending_updates)
                             pending_updates.clear()
+                            last_flush_at = datetime.utcnow()
+
+                    # Прирост за скан обычно меньше update_chunk_size, поэтому
+                    # без флаша по времени вся работа писалась бы одним запросом
+                    # в самом конце — и терялась целиком при любой осечке.
+                    if (
+                        pending_updates
+                        and (datetime.utcnow() - last_flush_at).total_seconds() >= flush_interval_seconds
+                    ):
+                        await flush_updates(pending_updates)
+                        pending_updates.clear()
+                        last_flush_at = datetime.utcnow()
 
                     if len(users_batch) < page_size:
                         break

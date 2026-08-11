@@ -219,3 +219,86 @@ async def test_connect_platform_submenus_use_connection_image(monkeypatch):
     assert render.await_args_list[0].args[2].inline_keyboard[1][0].url == "https://redirect.example/happ"
     assert render.await_args_list[1].args[2].inline_keyboard[1][0].url == "https://redirect.example/incy"
     assert render.await_args_list[2].args[2].inline_keyboard[1][0].url == "https://redirect.example/happ"
+
+
+async def test_connect_menu_detects_first_vpn_connection(monkeypatch):
+    """Меню «Подключиться» работает на локальном ключе и панель не трогает,
+    поэтому факт первого подключения тянем здесь — иначе has_connected_to_vpn
+    не выставится ни у кого."""
+    import app.services.subscription_service as subscription_module
+
+    sync = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        subscription_module,
+        "SubscriptionService",
+        lambda: SimpleNamespace(is_configured=True, sync_subscription_usage=sync),
+    )
+    callback = SimpleNamespace(from_user=SimpleNamespace(id=42), answer=AsyncMock())
+    subscription = SimpleNamespace(subscription_url=SUBSCRIPTION_LINK)
+    user = SimpleNamespace(
+        language="ru",
+        telegram_id=42,
+        has_connected_to_vpn=False,
+        subscription=subscription,
+    )
+    db = AsyncMock()
+    monkeypatch.setattr(menu, "get_user_by_telegram_id", AsyncMock(return_value=user))
+    monkeypatch.setattr(menu, "edit_or_answer_photo", AsyncMock())
+
+    await menu.handle_howto(callback, AsyncMock(), db)
+
+    sync.assert_awaited_once()
+    assert sync.await_args.args[1] is subscription
+
+
+async def test_connect_menu_skips_detection_for_connected_user(monkeypatch):
+    import app.services.subscription_service as subscription_module
+
+    sync = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        subscription_module,
+        "SubscriptionService",
+        lambda: SimpleNamespace(is_configured=True, sync_subscription_usage=sync),
+    )
+    callback = SimpleNamespace(from_user=SimpleNamespace(id=42), answer=AsyncMock())
+    user = SimpleNamespace(
+        language="ru",
+        telegram_id=42,
+        has_connected_to_vpn=True,
+        subscription=SimpleNamespace(subscription_url=SUBSCRIPTION_LINK),
+    )
+    monkeypatch.setattr(menu, "get_user_by_telegram_id", AsyncMock(return_value=user))
+    monkeypatch.setattr(menu, "edit_or_answer_photo", AsyncMock())
+
+    await menu.handle_howto(callback, AsyncMock(), AsyncMock())
+
+    sync.assert_not_awaited()
+
+
+async def test_connect_menu_survives_panel_failure(monkeypatch):
+    """Панель недоступна — экран подключения всё равно должен открыться."""
+    import app.services.subscription_service as subscription_module
+
+    monkeypatch.setattr(
+        subscription_module,
+        "SubscriptionService",
+        lambda: SimpleNamespace(
+            is_configured=True,
+            sync_subscription_usage=AsyncMock(side_effect=RuntimeError("panel down")),
+        ),
+    )
+    callback = SimpleNamespace(from_user=SimpleNamespace(id=42), answer=AsyncMock())
+    user = SimpleNamespace(
+        language="ru",
+        telegram_id=42,
+        has_connected_to_vpn=False,
+        subscription=SimpleNamespace(subscription_url=SUBSCRIPTION_LINK),
+    )
+    render = AsyncMock()
+    monkeypatch.setattr(menu, "get_user_by_telegram_id", AsyncMock(return_value=user))
+    monkeypatch.setattr(menu, "edit_or_answer_photo", render)
+
+    await menu.handle_howto(callback, AsyncMock(), AsyncMock())
+
+    render.assert_awaited_once()
+    callback.answer.assert_awaited_once()

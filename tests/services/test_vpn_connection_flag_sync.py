@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
+from sqlalchemy.exc import DBAPIError
+
 from app.external.remnawave_api import RemnaWaveUser, TrafficLimitStrategy, UserStatus, UserTraffic
 from app.services.monitoring_service import MonitoringService
 from app.services.remnawave_service import RemnaWaveService
@@ -128,7 +130,127 @@ async def test_batch_vpn_flag_sync_updates_from_panel_pages():
     assert stats["matched"] == 1
     assert stats["updated"] == 1
     api.get_all_users.assert_awaited_once_with(start=0, size=1000, enrich_happ_links=False)
-    db.commit.assert_awaited_once()
+    # Два коммита: закрыть транзакцию после выборки кандидатов и записать флаги.
+    assert db.commit.await_count == 2
+
+
+def _batch_service(api):
+    service = RemnaWaveService.__new__(RemnaWaveService)
+    service._config_error = None
+    service.api = object()
+    service.get_api_client = lambda: _api_context(api)
+    return service
+
+
+def _panel_page(connected_uuid=None, size=100):
+    """Страница панели: максимум один подключившийся кандидат, остальные — шум."""
+    page = [_make_remnawave_user() for _ in range(size)]
+    for index, panel_user in enumerate(page):
+        panel_user.uuid = f"noise-{connected_uuid}-{index}"
+    if connected_uuid is not None:
+        page[0] = _make_remnawave_user(used_traffic_bytes=1024)
+        page[0].uuid = connected_uuid
+    return page
+
+
+async def test_batch_vpn_flag_sync_releases_transaction_before_panel_scan():
+    """Выборка кандидатов открывает транзакцию, а обход панели идёт минуты.
+
+    Если транзакцию не закрыть, сервер обрывает соединение по
+    idle_in_transaction_session_timeout и запись флагов падает.
+    """
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[_ExecuteResult([(10, "connected-uuid")]), _UpdateResult(), _ExecuteResult([])]
+    )
+
+    commits_seen_by_panel = []
+
+    async def _get_all_users(**_kwargs):
+        commits_seen_by_panel.append(db.commit.await_count)
+        connected = _make_remnawave_user(used_traffic_bytes=1024)
+        connected.uuid = "connected-uuid"
+        return {"users": [connected], "total": 1}
+
+    api = SimpleNamespace(get_all_users=AsyncMock(side_effect=_get_all_users))
+
+    await _batch_service(api).sync_vpn_connection_flags_from_panel(db, page_size=1000)
+
+    assert commits_seen_by_panel == [1]
+
+
+async def test_batch_vpn_flag_sync_skips_deleted_users():
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[_ExecuteResult([])])
+    api = SimpleNamespace(get_all_users=AsyncMock())
+
+    await _batch_service(api).sync_vpn_connection_flags_from_panel(db, page_size=1000)
+
+    candidates_sql = str(db.execute.await_args_list[0].args[0])
+    assert "users.status !=" in candidates_sql
+    # status nullable — юзер без статуса не должен молча выпасть из кандидатов.
+    assert "users.status IS NULL" in candidates_sql
+    api.get_all_users.assert_not_awaited()
+
+
+async def test_batch_vpn_flag_sync_writes_flags_during_scan():
+    """Прирост за скан меньше update_chunk_size, поэтому без флаша по времени
+    вся работа писалась бы одним запросом в конце — и терялась целиком."""
+    candidates = [(index + 1, f"uuid-{index}") for index in range(10)]
+    pages = [_panel_page("uuid-0"), _panel_page("uuid-1"), _panel_page("uuid-2", size=10)]
+
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            _ExecuteResult(candidates),
+            _UpdateResult(), _ExecuteResult([]),
+            _UpdateResult(), _ExecuteResult([]),
+            _UpdateResult(), _ExecuteResult([]),
+        ]
+    )
+
+    async def _get_all_users(start=0, size=100, **_kwargs):
+        return {"users": pages[start // size], "total": 210}
+
+    api = SimpleNamespace(get_all_users=AsyncMock(side_effect=_get_all_users))
+
+    stats = await _batch_service(api).sync_vpn_connection_flags_from_panel(
+        db,
+        page_size=100,
+        flush_interval_seconds=0.0,
+    )
+
+    assert stats["matched"] == 3
+    assert stats["updated"] == 3
+    # Три записи по ходу скана вместо одной в самом конце.
+    assert db.commit.await_count == 4
+
+
+async def test_batch_vpn_flag_sync_retries_write_on_dead_connection():
+    """Коннект мог умереть, пока мы ходили в панель: откатываемся, берём
+    свежее соединение и дописываем — результат скана не теряется."""
+    candidates = [(10, "connected-uuid")]
+    connected = _make_remnawave_user(used_traffic_bytes=1024)
+    connected.uuid = "connected-uuid"
+
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            _ExecuteResult(candidates),
+            DBAPIError("UPDATE users", {}, Exception("connection is closed")),
+            _UpdateResult(),
+            _ExecuteResult([]),
+        ]
+    )
+    api = SimpleNamespace(
+        get_all_users=AsyncMock(return_value={"users": [connected], "total": 1})
+    )
+
+    stats = await _batch_service(api).sync_vpn_connection_flags_from_panel(db, page_size=1000)
+
+    db.rollback.assert_awaited_once()
+    assert stats["updated"] == 1
+    assert stats["errors"] == 0
 
 
 async def test_batch_vpn_flag_sync_stops_when_all_candidates_found():
@@ -201,6 +323,40 @@ async def test_monitoring_remnawave_sync_uses_batch_sync_without_exact_hour(monk
     batch_sync.assert_awaited_once_with(db)
     service._log_monitoring_event.assert_awaited_once()
     assert service._last_remnawave_sync_at == datetime(2026, 7, 27, 9, 13, 0)
+
+
+async def test_monitoring_remnawave_sync_keeps_interval_after_failure(monkeypatch):
+    """Скан панели стоит ~240 запросов, поэтому при поломке его нельзя
+    перезапускать каждым циклом мониторинга."""
+    failed_at = datetime(2026, 8, 10, 14, 24, 0)
+
+    class _FixedDatetime:
+        @staticmethod
+        def utcnow():
+            return failed_at
+
+        min = datetime.min
+
+    service = MonitoringService.__new__(MonitoringService)
+    service.subscription_service = SimpleNamespace(is_configured=True)
+    service._last_remnawave_sync_at = None
+    service._remnawave_sync_lock = asyncio.Lock()
+    service._log_monitoring_event = AsyncMock()
+
+    monkeypatch.setattr("app.services.monitoring_service.datetime", _FixedDatetime)
+    monkeypatch.setattr(
+        "app.services.monitoring_service.RemnaWaveService",
+        lambda: SimpleNamespace(
+            sync_vpn_connection_flags_from_panel=AsyncMock(
+                side_effect=RuntimeError("connection is closed")
+            )
+        ),
+    )
+
+    await service._sync_with_remnawave(AsyncMock())
+
+    assert service._last_remnawave_sync_at == failed_at
+    assert service._log_monitoring_event.await_args.args[1] == "remnawave_sync_error"
 
 
 async def test_monitoring_remnawave_sync_skips_when_previous_batch_is_running(monkeypatch):

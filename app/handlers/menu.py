@@ -1289,6 +1289,38 @@ def _get_happ_transfer_url(user: User) -> str | None:
     )
 
 
+async def _detect_vpn_connection(db: AsyncSession, user: User) -> None:
+    """Подтянуть из панели факт первого подключения к VPN.
+
+    Признак подключения живёт только в RemnaWave, а забирает его единственный
+    вызов `sync_subscription_usage`. Меню «Подключиться» работает на локальном
+    ключе и панель не трогает, поэтому дёргаем синк здесь — иначе
+    `has_connected_to_vpn` не выставится ни у кого, а на нём завязаны бонус за
+    первое подключение и отсев «неподключившихся» в триальных напоминаниях.
+    Только пока флаг не выставлен: дальше сигнал уже не нужен.
+    """
+    if getattr(user, "has_connected_to_vpn", False):
+        return
+
+    subscription = getattr(user, "subscription", None)
+    if not subscription:
+        return
+
+    try:
+        from app.services.subscription_service import SubscriptionService
+
+        service = SubscriptionService()
+        if not service.is_configured:
+            return
+        await service.sync_subscription_usage(db, subscription)
+    except Exception as error:
+        logger.warning(
+            "Не удалось определить подключение к VPN для пользователя %s: %s",
+            getattr(user, "telegram_id", None),
+            error,
+        )
+
+
 async def _get_connect_menu_user(
     callback: types.CallbackQuery,
     db: AsyncSession,
@@ -1304,6 +1336,8 @@ async def _get_connect_menu_user(
             show_alert=True,
         )
         return None
+
+    await _detect_vpn_connection(db, user)
 
     return user
 

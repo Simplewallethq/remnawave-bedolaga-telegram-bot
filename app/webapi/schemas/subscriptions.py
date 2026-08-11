@@ -18,6 +18,14 @@ class SubscriptionResponse(BaseModel):
     traffic_limit_gb: int
     traffic_used_gb: float
     device_limit: int
+    # Тариф из каталога subscription_plans (App/Solo/Plus/Pro). None у легаси-
+    # подписок и триалов, оформленных до тарифной сетки — у них plan_id в БД
+    # пустой. Потребители (teleVpn) используют plan_id как id тарифа, совпадающий
+    # с id в GET /api/plans; plan_code отдаётся рядом, чтобы не ходить в каталог
+    # ради машинного кода тарифа.
+    plan_id: Optional[int] = None
+    plan_code: Optional[str] = None
+    plan_period_days: Optional[int] = None
     autopay_enabled: bool
     autopay_days_before: Optional[int] = None
     subscription_url: Optional[str] = None
