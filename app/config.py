@@ -554,6 +554,11 @@ class Settings(BaseSettings):
     )
     APP_PUSH_TIMEOUT_SECONDS: int = 10
 
+    # Подключение телевизора из Telegram: вебхук в тот же teleVpn-бэкенд.
+    # Ключ и таймаут общие с APP_PUSH_* — это тот же доверенный канал.
+    # Пусто → кнопка «Войти через Telegram» на letovpn.com/tv работать не будет.
+    APP_TV_PAIRING_WEBHOOK_URL: str = ""  # напр. https://m-app.letovpn.com/internal/v1/tv/pairing/telegram
+
     # SendGrid (письма кабинета: коды подтверждения)
     SENDGRID_API_KEY: Optional[str] = None
     SENDGRID_FROM_EMAIL: Optional[str] = None

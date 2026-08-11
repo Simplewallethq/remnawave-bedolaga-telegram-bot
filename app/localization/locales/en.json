@@ -1776,5 +1776,17 @@
   "SUBSCRIPTION_TARIFFS_BUTTON": "📋 Plans",
   "SUBSCRIPTION_TARIFFS_LEGACY_BUTTON": "📋 Switch to new plans",
   "PROFILE_DEVICES_BUTTON": "📱 Devices",
-  "TARIFF_APP_HAPP_BLOCKED": "ℹ️ The App plan only works with our app. The Happ button is unavailable."
+  "TARIFF_APP_HAPP_BLOCKED": "ℹ️ The App plan only works with our app. The Happ button is unavailable.",
+  "TV_PAIRING_CONFIRM": "📺 <b>Connect your TV</b>\n\nConnect this Android TV to your account?\n\nThe TV becomes an ordinary device on your subscription — you can disconnect it from your cabinet at any time.",
+  "TV_PAIRING_CONFIRM_BUTTON": "✅ Connect",
+  "TV_PAIRING_CANCEL_BUTTON": "❌ Cancel",
+  "TV_PAIRING_SUCCESS": "✅ <b>TV connected</b>\n\nLeto VPN is ready on your TV — the screen will update on its own.",
+  "TV_PAIRING_CANCELLED": "TV connection cancelled.",
+  "TV_PAIRING_DEVICE_LIMIT": "⚠️ <b>Device limit reached</b>\n\nDisconnect one of your devices in the cabinet and press “Connect” again — you will not need a new code from the TV.",
+  "TV_PAIRING_NO_SUBSCRIPTION": "⚠️ <b>No active subscription</b>\n\nGet a subscription and press “Connect” again — the code on your TV stays valid.",
+  "TV_PAIRING_EXPIRED": "⌛️ <b>This code has expired</b>\n\nGet a new code on your TV and open the link again.",
+  "TV_PAIRING_USED": "ℹ️ <b>This code has already been used</b>\n\nThis TV is already connected, or a new code was generated for it.",
+  "TV_PAIRING_NOT_FOUND": "❌ <b>Code not found</b>\n\nGet a new code on your TV and open the link again.",
+  "TV_PAIRING_TOO_MANY_ATTEMPTS": "⏳ Too many attempts. Wait a minute and try again.",
+  "TV_PAIRING_ERROR": "⚠️ Could not connect the TV. Please try again in a minute."
 }

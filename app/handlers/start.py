@@ -27,6 +27,7 @@ from app.database.crud.ad_attribution import (
     record_ad_visit,
     set_user_attribution,
 )
+from app.external import tv_pairing
 from app.utils.ad_attribution import parse_ad_payload
 from app.database.models import PinnedMessage, SubscriptionStatus, UserStatus
 from app.keyboards.inline import (
@@ -683,6 +684,135 @@ async def _continue_registration_after_language(
 
 
 
+async def _prompt_tv_pairing(message: types.Message, texts) -> None:
+    """Спрашивает подтверждение перед подключением телевизора.
+
+    Подтверждение обязательно: ссылку можно переслать, и без явного «да» чужой
+    телевизор молча оказался бы на аккаунте того, кто её открыл.
+    """
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[[
+        types.InlineKeyboardButton(
+            text=texts.t("TV_PAIRING_CONFIRM_BUTTON", "✅ Подключить"),
+            callback_data="tv_pair_confirm",
+        ),
+        types.InlineKeyboardButton(
+            text=texts.t("TV_PAIRING_CANCEL_BUTTON", "❌ Отмена"),
+            callback_data="tv_pair_cancel",
+        ),
+    ]])
+    await message.answer(
+        texts.t(
+            "TV_PAIRING_CONFIRM",
+            "📺 <b>Подключение телевизора</b>\n\n"
+            "Подключить Android TV к вашему аккаунту?",
+        ),
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+
+# Ответ бэкенда → ключ текста. Разложено таблицей, потому что каждый исход
+# требует своего следующего шага, а не общего «что-то пошло не так».
+_TV_PAIRING_RESULT_TEXTS = {
+    tv_pairing.STATUS_COMPLETED: (
+        "TV_PAIRING_SUCCESS",
+        "✅ <b>Телевизор подключён</b>\n\nЭкран обновится сам.",
+    ),
+    tv_pairing.STATUS_DEVICE_LIMIT: (
+        "TV_PAIRING_DEVICE_LIMIT",
+        "⚠️ <b>Достигнут лимит устройств</b>\n\nОтключите одно устройство в личном "
+        "кабинете и нажмите «Подключить» ещё раз.",
+    ),
+    tv_pairing.STATUS_NO_SUBSCRIPTION: (
+        "TV_PAIRING_NO_SUBSCRIPTION",
+        "⚠️ <b>Нет активной подписки</b>\n\nОформите подписку и нажмите "
+        "«Подключить» ещё раз.",
+    ),
+    tv_pairing.STATUS_PAIRING_EXPIRED: (
+        "TV_PAIRING_EXPIRED",
+        "⌛️ <b>Срок действия кода истёк</b>\n\nПолучите новый код на телевизоре.",
+    ),
+    tv_pairing.STATUS_PAIRING_USED: (
+        "TV_PAIRING_USED",
+        "ℹ️ <b>Код уже использован</b>",
+    ),
+    tv_pairing.STATUS_PAIRING_NOT_FOUND: (
+        "TV_PAIRING_NOT_FOUND",
+        "❌ <b>Код не найден</b>\n\nПолучите новый код на телевизоре.",
+    ),
+    tv_pairing.STATUS_TOO_MANY_ATTEMPTS: (
+        "TV_PAIRING_TOO_MANY_ATTEMPTS",
+        "⏳ Слишком много попыток. Подождите минуту и попробуйте снова.",
+    ),
+}
+
+
+async def process_tv_pairing_decision(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db_user=None,
+    db=None,
+):
+    """Подключает телевизор после подтверждения зрителя.
+
+    Код живёт в FSM, а не в callback_data: там он остался бы в истории чата,
+    а пока сессия жива, он даёт право привязать телевизор.
+    """
+    texts = get_texts(db_user.language if db_user else DEFAULT_LANGUAGE)
+    data = await state.get_data() or {}
+    code = data.get("tv_pairing_code")
+
+    # Код одноразовый: убираем сразу, чтобы двойное нажатие не ушло на бэкенд
+    # вторым запросом — сессия к тому моменту уже потрачена.
+    await state.update_data(tv_pairing_code=None)
+
+    if callback.data == "tv_pair_cancel":
+        await callback.message.edit_text(
+            texts.t("TV_PAIRING_CANCELLED", "Подключение телевизора отменено.")
+        )
+        await callback.answer()
+        return
+
+    if not code or db_user is None:
+        await callback.message.edit_text(
+            texts.t("TV_PAIRING_NOT_FOUND", "❌ Код не найден. Получите новый код на телевизоре.")
+        )
+        await callback.answer()
+        return
+
+    result = await tv_pairing.authorize_tv(code, db_user.id)
+    key, fallback = _TV_PAIRING_RESULT_TEXTS.get(
+        result,
+        ("TV_PAIRING_ERROR", "⚠️ Не удалось подключить телевизор. Попробуйте ещё раз через минуту."),
+    )
+
+    # Лимит устройств и отсутствие подписки бэкенд оставляет сессию живой —
+    # зритель освобождает слот или покупает подписку и жмёт ту же кнопку снова,
+    # без нового кода с телевизора.
+    retryable = result in (
+        tv_pairing.STATUS_DEVICE_LIMIT,
+        tv_pairing.STATUS_NO_SUBSCRIPTION,
+        tv_pairing.STATUS_TOO_MANY_ATTEMPTS,
+        tv_pairing.STATUS_ERROR,
+    )
+    if retryable:
+        await state.update_data(tv_pairing_code=code)
+
+    keyboard = None
+    if retryable:
+        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[[
+            types.InlineKeyboardButton(
+                text=texts.t("TV_PAIRING_CONFIRM_BUTTON", "✅ Подключить"),
+                callback_data="tv_pair_confirm",
+            )
+        ]])
+
+    await callback.message.edit_text(
+        texts.t(key, fallback), reply_markup=keyboard, parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 async def _send_cabinet_login_link(message: types.Message, user, texts) -> None:
     """Выдаёт ссылку авто-входа в веб-кабинет (deep-link /start cabinet)."""
     from app.services.cabinet_auth_service import cabinet_auth_service
@@ -801,6 +931,14 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
                     ad_source,
                     ad_campaign_id,
                 )
+            elif start_parameter.startswith("tv_"):
+                # Подключение телевизора со страницы letovpn.com/tv. В payload —
+                # шестизначный код с экрана: device_id бэкенд наружу не отдаёт
+                # (по нему выдаётся токен аккаунта), а QR-токен не влезает в
+                # лимит Telegram в 64 символа. Код не логируем: пока сессия жива,
+                # он даёт право привязать телевизор.
+                await state.update_data(tv_pairing_code=start_parameter[3:])
+                logger.info("TV pairing code saved to FSM state")
             elif start_parameter.startswith("d_"):
                 raw_device_id = start_parameter[2:]
                 await state.update_data(device_id=raw_device_id)
@@ -954,6 +1092,13 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
         # Cabinet deep-link: отправляем ссылку авто-входа и не показываем меню.
         if cabinet_login:
             await _send_cabinet_login_link(message, user, texts)
+            return
+
+        # TV deep-link: спрашиваем подтверждение и не показываем меню — зритель
+        # пришёл сюда за одним действием. Токен остаётся в FSM до ответа.
+        _tv_state = await state.get_data() or {}
+        if _tv_state.get("tv_pairing_code"):
+            await _prompt_tv_pairing(message, texts)
             return
 
         # Device-link deeplink for existing user without any subscription:
@@ -2487,6 +2632,12 @@ def register_handlers(dp: Dispatcher):
         Command("start")
     )
     logger.info("✅ Зарегистрирован cmd_start")
+
+    dp.callback_query.register(
+        process_tv_pairing_decision,
+        F.data.in_(["tv_pair_confirm", "tv_pair_cancel"])
+    )
+    logger.info("✅ Зарегистрирован process_tv_pairing_decision")
 
     dp.callback_query.register(
         process_rules_accept,
