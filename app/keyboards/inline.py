@@ -1565,6 +1565,69 @@ def get_balance_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
+def get_balance_topup_payment_methods_keyboard(
+    amount_kopeks: int,
+    language: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    """Payment options reserved for direct balance top-ups."""
+
+    texts = get_texts(language)
+    amount_kopeks = max(0, int(amount_kopeks or 0))
+
+    def _build_callback(method: str) -> str:
+        return f"topup_amount|{method}|{amount_kopeks}"
+
+    keyboard: list[list[InlineKeyboardButton]] = []
+    if settings.is_platega_enabled():
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=texts.t(
+                        "PLATEGA_SUBSCRIPTION_BUTTON",
+                        "🕑 СБП — регулярно (раз в месяц)",
+                    ),
+                    callback_data=_build_callback("platega_subscription"),
+                )
+            ]
+        )
+
+    if settings.is_platega_universal_enabled():
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=texts.t(
+                        "PLATEGA_ONE_TIME_BUTTON",
+                        "💳 СБП/Карта/Крипто — разово",
+                    ),
+                    callback_data=_build_callback("platega_universal"),
+                )
+            ]
+        )
+
+    if not keyboard:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=texts.t(
+                        "PAYMENTS_TEMPORARILY_UNAVAILABLE",
+                        "⚠️ Способы оплаты временно недоступны",
+                    ),
+                    callback_data="payment_methods_unavailable",
+                )
+            ]
+        )
+
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text=texts.BACK,
+                callback_data="balance_topup_reset" if amount_kopeks else "back_to_menu",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
 def get_payment_methods_keyboard(
     amount_kopeks: int,
     language: str = DEFAULT_LANGUAGE,
@@ -3655,12 +3718,25 @@ def get_profile_keyboard(
     language: str = DEFAULT_LANGUAGE,
     balance_kopeks: int = 0,
     has_subscription: bool = False,
+    has_active_platega_subscription: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     Экран 9: Профиль пользователя
     """
     texts = get_texts(language)
     rows = []
+    if has_active_platega_subscription:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=texts.t(
+                        "PLATEGA_SUBSCRIPTION_CANCEL_BUTTON",
+                        "Отменить регулярные платежи",
+                    ),
+                    callback_data="profile_cancel_platega_subscription",
+                )
+            ]
+        )
     rows.extend([
         [InlineKeyboardButton(text=texts.t("MENU_PROMOCODE", "🎫 Ввести промокод"), callback_data="profile_promo")],
         [InlineKeyboardButton(text=texts.t("MENU_LANGUAGE", "🌐 Язык/Language"), callback_data="profile_language")],
