@@ -265,7 +265,7 @@ async def show_payment_methods(
         ).format(amount=texts.format_price(stored_amount))
 
         keyboard = get_balance_topup_payment_methods_keyboard(
-            stored_amount, db_user.language
+            stored_amount, db_user.language, db_user.username
         )
 
         try:
@@ -333,7 +333,7 @@ async def _render_payment_methods_with_amount(
     ).format(amount=texts.format_price(amount_kopeks))
 
     keyboard = get_balance_topup_payment_methods_keyboard(
-        amount_kopeks, db_user.language
+        amount_kopeks, db_user.language, db_user.username
     )
 
     try:

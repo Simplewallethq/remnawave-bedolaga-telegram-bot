@@ -102,7 +102,9 @@ def test_balance_topup_keyboard_contains_only_platega_options(
         type(inline.settings), "is_platega_universal_enabled", lambda _settings: True
     )
 
-    keyboard = inline.get_balance_topup_payment_methods_keyboard(10_000, "ru")
+    keyboard = inline.get_balance_topup_payment_methods_keyboard(
+        10_000, "ru", "@fake_me_x"
+    )
     callbacks = [
         button.callback_data
         for row in keyboard.inline_keyboard
@@ -111,6 +113,19 @@ def test_balance_topup_keyboard_contains_only_platega_options(
 
     assert callbacks == [
         "topup_amount|platega_subscription|10000",
+        "topup_amount|platega_universal|10000",
+        "balance_topup_reset",
+    ]
+
+    restricted_keyboard = inline.get_balance_topup_payment_methods_keyboard(
+        10_000, "ru", "unrelated_user"
+    )
+    restricted_callbacks = [
+        button.callback_data
+        for row in restricted_keyboard.inline_keyboard
+        for button in row
+    ]
+    assert restricted_callbacks == [
         "topup_amount|platega_universal|10000",
         "balance_topup_reset",
     ]

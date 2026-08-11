@@ -28,6 +28,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+PLATEGA_SUBSCRIPTION_LIMIT_TO_USERNAMES = True
+PLATEGA_SUBSCRIPTION_TEST_USERNAMES = frozenset(
+    {"fake_me_x", "cheechgodx", "shakestars"}
+)
+
+
+def can_use_platega_subscription(username: Optional[str]) -> bool:
+    if not PLATEGA_SUBSCRIPTION_LIMIT_TO_USERNAMES:
+        return True
+    normalized_username = (username or "").strip().lstrip("@").lower()
+    return normalized_username in PLATEGA_SUBSCRIPTION_TEST_USERNAMES
+
 
 async def get_main_menu_keyboard_async(
     db: AsyncSession,
@@ -1568,6 +1580,7 @@ def get_balance_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
 def get_balance_topup_payment_methods_keyboard(
     amount_kopeks: int,
     language: str = DEFAULT_LANGUAGE,
+    username: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """Payment options reserved for direct balance top-ups."""
 
@@ -1578,7 +1591,7 @@ def get_balance_topup_payment_methods_keyboard(
         return f"topup_amount|{method}|{amount_kopeks}"
 
     keyboard: list[list[InlineKeyboardButton]] = []
-    if settings.is_platega_enabled():
+    if settings.is_platega_enabled() and can_use_platega_subscription(username):
         keyboard.append(
             [
                 InlineKeyboardButton(
