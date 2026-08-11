@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -24,16 +25,16 @@ def test_connect_platform_keyboard_has_requested_order():
     ]
 
 
-def test_connect_menu_has_english_text_and_buttons():
+async def test_connect_menu_has_english_text_and_buttons():
     user = SimpleNamespace(
         language="en",
         subscription=SimpleNamespace(subscription_url=SUBSCRIPTION_LINK),
     )
     keyboard = inline.get_connection_platform_keyboard("en")
-    text = menu._build_connect_platform_selection_text(user)
+    text = await menu._build_connect_platform_selection_text(AsyncMock(), user)
 
     assert "To connect your primary or additional device" in text
-    assert "Access key link (for Leto, Happ, Incy)" in text
+    assert "Access key link (for Happ, Incy)" in text
     assert [(row[0].text, row[0].callback_data) for row in _button_rows(keyboard)] == [
         ("🤖 Android", "connect_platform_android"),
         ("🍎 iPhone/MacOS", "connect_platform_apple"),
@@ -122,6 +123,51 @@ def test_connect_platform_keyboards_include_transfer_buttons(monkeypatch):
     ]
 
 
+async def test_connect_menu_shows_16_char_binding_code(monkeypatch):
+    """В меню подключения показываем тот же 16-значный код, что и «Привязать
+    устройство»: им авторизуются в Leto и в личном кабинете."""
+    import app.database.crud.device_binding_code as binding_module
+
+    record = SimpleNamespace(
+        code="A2B3C4D5E6F7G8H9",
+        expires_at=datetime.utcnow() + timedelta(hours=24),
+    )
+    create = AsyncMock(return_value=record)
+    monkeypatch.setattr(binding_module, "get_or_create_binding_code", create)
+    user = SimpleNamespace(
+        language="ru",
+        telegram_id=42,
+        subscription=SimpleNamespace(id=7, subscription_url=SUBSCRIPTION_LINK),
+    )
+
+    text = await menu._build_connect_platform_selection_text(AsyncMock(), user)
+
+    assert "Ключ для входа в Leto VPN (действует 23 ч)" in text
+    assert "<pre><code>A2B3C4D5E6F7G8H9</code></pre>" in text
+    assert create.await_args.args[1] == 7
+
+
+async def test_connect_menu_hides_code_block_when_generation_fails(monkeypatch):
+    """Код не выдался — экран подключения всё равно открывается с ключом-ссылкой."""
+    import app.database.crud.device_binding_code as binding_module
+
+    monkeypatch.setattr(
+        binding_module,
+        "get_or_create_binding_code",
+        AsyncMock(side_effect=RuntimeError("db down")),
+    )
+    user = SimpleNamespace(
+        language="ru",
+        telegram_id=42,
+        subscription=SimpleNamespace(id=7, subscription_url=SUBSCRIPTION_LINK),
+    )
+
+    text = await menu._build_connect_platform_selection_text(AsyncMock(), user)
+
+    assert "Ключ для входа в Leto" not in text
+    assert SUBSCRIPTION_LINK in text
+
+
 def test_connection_key_is_a_copyable_code_block():
     assert menu._format_connection_key(SUBSCRIPTION_LINK) == (
         f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>"
@@ -152,7 +198,7 @@ async def test_connect_platform_handler_shows_raw_subscription_link(monkeypatch)
 
     rendered_text = render.await_args.args[1]
     rendered_keyboard = render.await_args.args[2]
-    assert "авторизуйся через ключ-ссылку" in rendered_text
+    assert "авторизуйся ключом для входа" in rendered_text
     assert SUBSCRIPTION_LINK in rendered_text
     assert rendered_keyboard.inline_keyboard[0][0].text == "☀️ Скачать Leto VPN"
     assert render.await_args.kwargs["photo_path"] == "images/connection.jpg"

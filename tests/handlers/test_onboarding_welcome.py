@@ -31,7 +31,7 @@ def test_onboarding_welcome_text_has_a_copyable_raw_subscription_key():
     text = start._build_onboarding_welcome_text(_user())
 
     assert "Привет, тебе доступна бесплатная подписка на 3 дня" in text
-    assert "Ключ-ссылка доступа (для Leto, Happ, Incy)" in text
+    assert "Ключ-ссылка доступа (для Happ, Incy)" in text
     assert f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>" in text
 
 

@@ -362,7 +362,7 @@ def _build_onboarding_welcome_text(user, language: str | None = None) -> str | N
         + "\n\n"
         + texts.t(
             "ONBOARDING_ACCESS_KEY_LABEL",
-            "Ключ-ссылка доступа (для Leto, Happ, Incy)",
+            "Ключ-ссылка доступа (для Happ, Incy)",
         )
         + "\n"
         + f"<pre><code>{html.escape(link, quote=True)}</code></pre>"
