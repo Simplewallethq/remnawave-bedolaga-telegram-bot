@@ -964,7 +964,7 @@ REMNAWAVE_SECRET_KEY=secret_key_name
 1. В кабинете Platega получите `Merchant ID` и `Secret` (раздел **Интеграция → API**).
 2. В настройках провайдера укажите URL возврата и ошибки. Их можно задать в `.env` (`PLATEGA_RETURN_URL`, `PLATEGA_FAILED_URL`).
 3. Активируйте только нужные платёжные методы и пропишите их ID через запятую в `PLATEGA_ACTIVE_METHODS`.
-4. Добавьте вебхук `https://your-domain.com/platega-webhook` в личном кабинете Platega.
+4. Добавьте вебхук `https://your-domain.com/platega-webhook` в личном кабинете Platega. Этот URL получает обычные платежи, статусы регулярных подписок и ежемесячные списания.
 
 Пример набора переменных окружения:
 
@@ -979,7 +979,10 @@ PLATEGA_MIN_AMOUNT_KOPEKS=100
 PLATEGA_MAX_AMOUNT_KOPEKS=5000000
 PLATEGA_CURRENCY=RUB
 PLATEGA_WEBHOOK_PATH=/platega-webhook
+PLATEGA_UNIVERSAL_ENABLED=true
 ```
+
+Для пополнения баланса разовым платежом включите `PLATEGA_UNIVERSAL_ENABLED=true`: на форме Platega пользователь выберет СБП, карту или криптовалюту. Регулярное пополнение работает только по СБП, раз в месяц; баланс зачисляется после каждого успешного списания.
 
 Остальные параметры (`PLATEGA_BASE_URL`, `PLATEGA_WEBHOOK_HOST`, `PLATEGA_WEBHOOK_PORT`) оставьте по умолчанию, если работаете через встроенный FastAPI сервер.
 
