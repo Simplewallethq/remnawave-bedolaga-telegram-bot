@@ -398,115 +398,6 @@ async def process_platega_payment_amount(
     await clear_state_preserve_topup_amount(state)
 
 
-@error_handler
-async def process_platega_subscription_amount(
-    message: types.Message,
-    db_user: User,
-    db: AsyncSession,
-    amount_kopeks: int,
-    state: FSMContext,
-) -> None:
-    texts = get_texts(db_user.language)
-
-    if not settings.is_platega_enabled():
-        await message.answer(
-            texts.t(
-                "PLATEGA_TEMPORARILY_UNAVAILABLE",
-                "❌ Оплата через Platega временно недоступна",
-            )
-        )
-        return
-
-    if amount_kopeks % 100:
-        await message.answer(
-            texts.t(
-                "PLATEGA_SUBSCRIPTION_WHOLE_RUBLES",
-                "Для регулярных платежей укажите сумму в целых рублях.",
-            )
-        )
-        return
-
-    if amount_kopeks < settings.PLATEGA_MIN_AMOUNT_KOPEKS:
-        await message.answer(
-            texts.t(
-                "PLATEGA_AMOUNT_TOO_LOW",
-                "Минимальная сумма для оплаты через Platega: {amount}",
-            ).format(amount=settings.format_price(settings.PLATEGA_MIN_AMOUNT_KOPEKS))
-        )
-        return
-
-    if amount_kopeks > settings.PLATEGA_MAX_AMOUNT_KOPEKS:
-        await message.answer(
-            texts.t(
-                "PLATEGA_AMOUNT_TOO_HIGH",
-                "Максимальная сумма для оплаты через Platega: {amount}",
-            ).format(amount=settings.format_price(settings.PLATEGA_MAX_AMOUNT_KOPEKS))
-        )
-        return
-
-    payment_service = PaymentService(message.bot)
-    try:
-        result = await payment_service.create_platega_subscription(
-            db,
-            user_id=db_user.id,
-            amount_kopeks=amount_kopeks,
-            description=settings.get_balance_payment_description(amount_kopeks),
-        )
-    except Exception as error:
-        logger.exception("Ошибка создания регулярной подписки Platega: %s", error)
-        result = None
-
-    if result and result.get("already_exists"):
-        await message.answer(
-            texts.t(
-                "PLATEGA_SUBSCRIPTION_ALREADY_EXISTS",
-                "Регулярные платежи уже подключены. Отменить их можно в профиле.",
-            )
-        )
-        await state.clear()
-        return
-
-    redirect_url = (result or {}).get("redirect_url")
-    if not redirect_url:
-        await message.answer(
-            texts.t(
-                "PLATEGA_SUBSCRIPTION_CREATE_ERROR",
-                "❌ Не удалось подключить регулярные платежи. Попробуйте позже.",
-            )
-        )
-        await state.clear()
-        return
-
-    try:
-        await message.delete()
-    except Exception as error:  # pragma: no cover - depends on bot rights
-        logger.warning("Не удалось удалить сообщение с суммой регулярного платежа: %s", error)
-
-    amount_rubles = amount_kopeks // 100
-    keyboard = types.InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                types.InlineKeyboardButton(
-                    text=texts.t(
-                        "PLATEGA_SUBSCRIPTION_PAY_BUTTON",
-                        "Автоплатеж — {amount} руб/мес",
-                    ).format(amount=amount_rubles),
-                    url=redirect_url,
-                )
-            ]
-        ]
-    )
-    await message.answer(
-        texts.t(
-            "PLATEGA_SUBSCRIPTION_INSTRUCTIONS",
-            "Чтобы подключить автоплатеж нажми на кнопку и соверши платеж.\n\n"
-            "Баланс пополняется после каждого успешного ежемесячного списания.",
-        ),
-        reply_markup=keyboard,
-    )
-    await state.clear()
-
-
 async def _prompt_universal_amount(
     message: types.Message,
     db_user: User,
@@ -687,7 +578,7 @@ async def process_platega_universal_payment_amount(
     ).format(amount=amount_label)
 
     data = await state.get_data()
-    back_callback = data.get("platega_back_callback", "balance_topup_reset")
+    back_callback = data.get("platega_back_callback", "balance_topup")
 
     keyboard = types.InlineKeyboardMarkup(
         inline_keyboard=[

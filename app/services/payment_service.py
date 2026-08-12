@@ -220,46 +220,6 @@ async def link_platega_payment_to_transaction(*args, **kwargs):
     return await platega_crud.link_platega_payment_to_transaction(*args, **kwargs)
 
 
-async def create_platega_subscription(*args, **kwargs):
-    platega_crud = import_module("app.database.crud.platega")
-    return await platega_crud.create_platega_subscription(*args, **kwargs)
-
-
-async def get_platega_subscription_by_id(*args, **kwargs):
-    platega_crud = import_module("app.database.crud.platega")
-    return await platega_crud.get_platega_subscription_by_id(*args, **kwargs)
-
-
-async def get_platega_subscription_by_id_for_update(*args, **kwargs):
-    platega_crud = import_module("app.database.crud.platega")
-    return await platega_crud.get_platega_subscription_by_id_for_update(*args, **kwargs)
-
-
-async def get_platega_subscription_by_provider_id(*args, **kwargs):
-    platega_crud = import_module("app.database.crud.platega")
-    return await platega_crud.get_platega_subscription_by_provider_id(*args, **kwargs)
-
-
-async def get_platega_subscription_by_provider_id_for_update(*args, **kwargs):
-    platega_crud = import_module("app.database.crud.platega")
-    return await platega_crud.get_platega_subscription_by_provider_id_for_update(*args, **kwargs)
-
-
-async def get_active_platega_subscription_for_user(*args, **kwargs):
-    platega_crud = import_module("app.database.crud.platega")
-    return await platega_crud.get_active_platega_subscription_for_user(*args, **kwargs)
-
-
-async def update_platega_subscription(*args, **kwargs):
-    platega_crud = import_module("app.database.crud.platega")
-    return await platega_crud.update_platega_subscription(*args, **kwargs)
-
-
-async def get_or_create_platega_subscription_charge(*args, **kwargs):
-    platega_crud = import_module("app.database.crud.platega")
-    return await platega_crud.get_or_create_platega_subscription_charge(*args, **kwargs)
-
-
 async def create_cryptobot_payment(*args, **kwargs):
     crypto_crud = import_module("app.database.crud.cryptobot")
     return await crypto_crud.create_cryptobot_payment(*args, **kwargs)

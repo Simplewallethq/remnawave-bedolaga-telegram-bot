@@ -2,10 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from urllib.parse import unquote
 
-import pytest
-
 from app.database.crud import share_token
-from app.handlers.balance import platega as balance_platega
 from app.handlers.subscription import purchase, tariffs
 from app.keyboards import inline
 from app.localization.texts import get_texts
@@ -65,114 +62,6 @@ def test_profile_keyboard_no_longer_contains_devices():
     callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
 
     assert "subscription_manage_devices" not in callbacks
-
-
-def test_profile_shows_regular_payment_cancellation_only_when_active():
-    active_keyboard = inline.get_profile_keyboard(
-        "ru", has_active_platega_subscription=True
-    )
-    inactive_keyboard = inline.get_profile_keyboard(
-        "ru", has_active_platega_subscription=False
-    )
-
-    active_callbacks = [
-        button.callback_data
-        for row in active_keyboard.inline_keyboard
-        for button in row
-    ]
-    inactive_callbacks = [
-        button.callback_data
-        for row in inactive_keyboard.inline_keyboard
-        for button in row
-    ]
-
-    assert active_callbacks.count("profile_cancel_platega_subscription") == 1
-    assert "profile_cancel_platega_subscription" not in inactive_callbacks
-
-
-def test_balance_topup_keyboard_contains_only_platega_options(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setattr(inline.settings, "TELEGRAM_STARS_ENABLED", True)
-    monkeypatch.setattr(inline.settings, "TRIBUTE_ENABLED", True)
-    monkeypatch.setattr(
-        type(inline.settings), "is_platega_enabled", lambda _settings: True
-    )
-    monkeypatch.setattr(
-        type(inline.settings), "is_platega_universal_enabled", lambda _settings: True
-    )
-
-    keyboard = inline.get_balance_topup_payment_methods_keyboard(
-        10_000, "ru", "@fake_me_x"
-    )
-    callbacks = [
-        button.callback_data
-        for row in keyboard.inline_keyboard
-        for button in row
-    ]
-
-    assert callbacks == [
-        "topup_amount|platega_subscription|10000",
-        "topup_amount|platega_universal|10000",
-        "balance_topup_reset",
-    ]
-
-    restricted_keyboard = inline.get_balance_topup_payment_methods_keyboard(
-        10_000, "ru", "unrelated_user"
-    )
-    restricted_callbacks = [
-        button.callback_data
-        for row in restricted_keyboard.inline_keyboard
-        for button in row
-    ]
-    assert restricted_callbacks == [
-        "topup_amount|platega_universal|10000",
-        "balance_topup_reset",
-    ]
-
-
-@pytest.mark.anyio("asyncio")
-async def test_regular_payment_button_uses_created_subscription_amount(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    class StubPaymentService:
-        def __init__(self, _bot):
-            pass
-
-        async def create_platega_subscription(self, *_args, **_kwargs):
-            return {"redirect_url": "https://platega.example/subscription"}
-
-    state = SimpleNamespace(clear=AsyncMock())
-    message = SimpleNamespace(
-        bot=SimpleNamespace(),
-        delete=AsyncMock(),
-        answer=AsyncMock(),
-    )
-    user = SimpleNamespace(id=42, language="ru")
-
-    monkeypatch.setattr(balance_platega, "PaymentService", StubPaymentService)
-    monkeypatch.setattr(
-        type(balance_platega.settings), "is_platega_enabled", lambda _settings: True
-    )
-    monkeypatch.setattr(
-        balance_platega.settings, "PLATEGA_MIN_AMOUNT_KOPEKS", 10_000
-    )
-    monkeypatch.setattr(
-        balance_platega.settings, "PLATEGA_MAX_AMOUNT_KOPEKS", 500_000
-    )
-
-    await balance_platega.process_platega_subscription_amount(
-        message,
-        user,
-        SimpleNamespace(),
-        10_000,
-        state,
-    )
-
-    keyboard = message.answer.await_args.kwargs["reply_markup"]
-    button = keyboard.inline_keyboard[0][0]
-    assert button.text == "Автоплатеж — 100 руб/мес"
-    assert button.url == "https://platega.example/subscription"
 
 
 def test_renew_periods_do_not_include_tariff_change():

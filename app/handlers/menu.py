@@ -1804,11 +1804,6 @@ async def handle_profile(callback: types.CallbackQuery, db_user: User, db: Async
          image_path = None
 
     has_subscription = db_user.subscription is not None
-    from app.services import payment_service as payment_module
-
-    active_platega_subscription = (
-        await payment_module.get_active_platega_subscription_for_user(db, db_user.id)
-    )
 
     await edit_or_answer_photo(
         callback,
@@ -1817,99 +1812,11 @@ async def handle_profile(callback: types.CallbackQuery, db_user: User, db: Async
             language=db_user.language,
             balance_kopeks=db_user.balance_kopeks,
             has_subscription=has_subscription,
-            has_active_platega_subscription=active_platega_subscription is not None,
         ),
         parse_mode="HTML",
         photo_path=image_path
     )
     await callback.answer()
-
-
-async def handle_platega_subscription_cancel_request(
-    callback: types.CallbackQuery,
-    db_user: User,
-    db: AsyncSession,
-):
-    from app.services import payment_service as payment_module
-
-    subscription = await payment_module.get_active_platega_subscription_for_user(
-        db, db_user.id
-    )
-    if not subscription:
-        await callback.answer(
-            get_texts(db_user.language).t(
-                "PLATEGA_SUBSCRIPTION_NOT_FOUND",
-                "Регулярные платежи не найдены.",
-            ),
-            show_alert=True,
-        )
-        return
-
-    texts = get_texts(db_user.language)
-    keyboard = types.InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                types.InlineKeyboardButton(
-                    text=texts.t("CONFIRM", "✅ Подтвердить"),
-                    callback_data=f"profile_confirm_cancel_platega_subscription:{subscription.id}",
-                )
-            ],
-            [
-                types.InlineKeyboardButton(
-                    text=texts.BACK,
-                    callback_data="profile",
-                )
-            ],
-        ]
-    )
-    prompt = texts.t(
-        "PLATEGA_SUBSCRIPTION_CANCEL_CONFIRM",
-        "Вы уверены, что хотите отменить регулярные платежи?",
-    )
-    if callback.message.caption:
-        await callback.message.edit_caption(prompt, reply_markup=keyboard)
-    else:
-        await callback.message.edit_text(prompt, reply_markup=keyboard)
-    await callback.answer()
-
-
-async def handle_platega_subscription_cancel_confirm(
-    callback: types.CallbackQuery,
-    db_user: User,
-    db: AsyncSession,
-):
-    try:
-        subscription_id = int(callback.data.rsplit(":", 1)[-1])
-    except (AttributeError, ValueError):
-        await callback.answer("Некорректный запрос", show_alert=True)
-        return
-
-    from app.services.payment_service import PaymentService
-
-    result = await PaymentService(callback.bot).cancel_platega_subscription(
-        db,
-        subscription_id=subscription_id,
-        user_id=db_user.id,
-    )
-    texts = get_texts(db_user.language)
-    if not result:
-        await callback.answer(
-            texts.t(
-                "PLATEGA_SUBSCRIPTION_CANCEL_ERROR",
-                "Не удалось отменить регулярные платежи. Попробуйте позже.",
-            ),
-            show_alert=True,
-        )
-        return
-
-    await callback.answer(
-        texts.t(
-            "PLATEGA_SUBSCRIPTION_CANCELLED",
-            "Регулярные платежи отменены.",
-        ),
-        show_alert=True,
-    )
-    await handle_profile(callback, db_user, db)
 
 async def handle_referral(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
     """Экран «Пригласить друзей»."""
@@ -2131,16 +2038,6 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         handle_profile,
         F.data == "profile"
-    )
-
-    dp.callback_query.register(
-        handle_platega_subscription_cancel_request,
-        F.data == "profile_cancel_platega_subscription",
-    )
-
-    dp.callback_query.register(
-        handle_platega_subscription_cancel_confirm,
-        F.data.startswith("profile_confirm_cancel_platega_subscription:"),
     )
 
     dp.callback_query.register(
