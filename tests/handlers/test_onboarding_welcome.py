@@ -1,5 +1,8 @@
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
+import pytest
 
 from app.handlers import start
 from app.keyboards import inline
@@ -12,7 +15,23 @@ def _user(language="ru"):
     return SimpleNamespace(
         telegram_id=42,
         language=language,
-        subscription=SimpleNamespace(subscription_url=SUBSCRIPTION_LINK),
+        subscription=SimpleNamespace(id=7, subscription_url=SUBSCRIPTION_LINK),
+    )
+
+
+@pytest.fixture(autouse=True)
+def binding_code(monkeypatch):
+    import app.database.crud.device_binding_code as binding_module
+
+    monkeypatch.setattr(
+        binding_module,
+        "get_or_create_binding_code",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                code="APPLETESTQWZX003",
+                expires_at=datetime.utcnow() + timedelta(hours=24),
+            )
+        ),
     )
 
 
@@ -27,12 +46,14 @@ def test_onboarding_welcome_keyboard_opens_connect_platform_submenus():
     ]
 
 
-def test_onboarding_welcome_text_has_a_copyable_raw_subscription_key():
-    text = start._build_onboarding_welcome_text(_user())
+async def test_onboarding_welcome_text_has_copyable_happ_and_leto_keys(monkeypatch):
+    text = await start._build_onboarding_welcome_text(AsyncMock(), _user())
 
     assert "Привет, тебе доступна бесплатная подписка на 3 дня" in text
-    assert "Ключ-ссылка доступа (для Happ, Incy)" in text
+    assert "Ключ доступа для Happ, Incy:" in text
     assert f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>" in text
+    assert "Ключ доступа для Leto VPN на Android:" in text
+    assert "<pre><code>APPLETESTQWZX003</code></pre>" in text
 
 
 async def test_trial_activation_shows_onboarding_welcome(monkeypatch):
@@ -87,6 +108,7 @@ async def test_onboarding_welcome_sends_connection_image_for_new_registration():
     message = AsyncMock()
 
     success = await start._show_onboarding_welcome(
+        AsyncMock(),
         _user(),
         message,
         is_callback=False,

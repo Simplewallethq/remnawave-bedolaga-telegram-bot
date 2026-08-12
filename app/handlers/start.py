@@ -341,6 +341,7 @@ async def _auto_activate_partner_and_show_device_selection(
         return False
 
     return await _show_onboarding_welcome(
+        db,
         user,
         message_or_callback,
         is_callback=is_callback,
@@ -348,14 +349,18 @@ async def _auto_activate_partner_and_show_device_selection(
     )
 
 
-def _build_onboarding_welcome_text(user, language: str | None = None) -> str | None:
+async def _build_onboarding_welcome_text(
+    db: AsyncSession,
+    user,
+    language: str | None = None,
+) -> str | None:
     lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
     texts = get_texts(lang)
     link = get_raw_subscription_link(getattr(user, "subscription", None))
     if not link:
         return None
 
-    return (
+    text = (
         texts.t(
             "ONBOARDING_WELCOME_TEXT",
             "Привет, тебе доступна бесплатная подписка на 3 дня! Установи приложение и пользуйся.",
@@ -368,9 +373,36 @@ def _build_onboarding_welcome_text(user, language: str | None = None) -> str | N
         + "\n"
         + f"<pre><code>{html.escape(link, quote=True)}</code></pre>"
     )
+    subscription_id = getattr(getattr(user, "subscription", None), "id", None)
+    if not subscription_id:
+        return text
+
+    from app.database.crud.device_binding_code import get_or_create_binding_code
+
+    try:
+        binding_code = await get_or_create_binding_code(db, subscription_id)
+    except Exception as error:
+        logger.warning(
+            "Could not create Leto onboarding code for user %s: %s",
+            getattr(user, "telegram_id", None),
+            error,
+        )
+        return text
+
+    return (
+        text
+        + "\n\n"
+        + texts.t(
+            "ONBOARDING_LETO_ACCESS_CODE_LABEL",
+            "Ключ доступа для Leto VPN на Android:",
+        )
+        + "\n"
+        + f"<pre><code>{html.escape(binding_code.code, quote=True)}</code></pre>"
+    )
 
 
 async def _show_onboarding_welcome(
+    db: AsyncSession,
     user,
     message_or_callback,
     *,
@@ -378,7 +410,7 @@ async def _show_onboarding_welcome(
     language: str | None = None,
 ) -> bool:
     lang = language or getattr(user, "language", None) or DEFAULT_LANGUAGE
-    text = _build_onboarding_welcome_text(user, lang)
+    text = await _build_onboarding_welcome_text(db, user, lang)
     if not text:
         logger.error("Subscription link is unavailable for onboarding user %s", user.telegram_id)
         return False
@@ -419,6 +451,7 @@ async def _auto_activate_trial_and_show_device_selection(
         return False
 
     return await _show_onboarding_welcome(
+        db,
         user,
         message_or_callback,
         is_callback=is_callback,
