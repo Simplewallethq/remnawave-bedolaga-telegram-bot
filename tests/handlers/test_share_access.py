@@ -175,7 +175,7 @@ async def test_regular_payment_button_uses_created_subscription_amount(
 
     keyboard = message.answer.await_args.kwargs["reply_markup"]
     button = keyboard.inline_keyboard[0][0]
-    assert button.text == "Автоплатеж — 100 руб/мес"
+    assert button.text == "✅ Автоплатеж — 100 руб/мес"
     assert button.url == "https://platega.example/subscription"
     cancel_button = keyboard.inline_keyboard[1][0]
     assert cancel_button.callback_data == "cancel_platega_subscription:71"

@@ -488,7 +488,7 @@ async def process_platega_subscription_amount(
         inline_keyboard=[
             [
                 types.InlineKeyboardButton(
-                    text=texts.t(
+                    text="✅ " + texts.t(
                         "PLATEGA_SUBSCRIPTION_PAY_BUTTON",
                         "Автоплатеж — {amount} руб/мес",
                     ).format(amount=amount_rubles),
