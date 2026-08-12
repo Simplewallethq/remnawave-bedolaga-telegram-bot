@@ -4053,6 +4053,212 @@ async def create_platega_unpaid_created_index() -> bool:
         return False
 
 
+async def create_platega_subscriptions_table() -> bool:
+    if await check_table_exists("platega_subscriptions"):
+        logger.info("Таблица platega_subscriptions уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == "sqlite":
+                create_sql = """
+                CREATE TABLE platega_subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    active_user_id INTEGER NULL,
+                    platega_subscription_id VARCHAR(255) NOT NULL,
+                    amount_kopeks INTEGER NOT NULL,
+                    currency VARCHAR(10) NOT NULL DEFAULT 'RUB',
+                    description TEXT NULL,
+                    status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+                    redirect_url TEXT NULL,
+                    next_charge_at DATETIME NULL,
+                    last_callback_payload JSON NULL,
+                    cancelled_at DATETIME NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+            elif db_type == "postgresql":
+                create_sql = """
+                CREATE TABLE platega_subscriptions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    active_user_id INTEGER NULL,
+                    platega_subscription_id VARCHAR(255) NOT NULL,
+                    amount_kopeks INTEGER NOT NULL,
+                    currency VARCHAR(10) NOT NULL DEFAULT 'RUB',
+                    description TEXT NULL,
+                    status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+                    redirect_url TEXT NULL,
+                    next_charge_at TIMESTAMP NULL,
+                    last_callback_payload JSON NULL,
+                    cancelled_at TIMESTAMP NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            elif db_type == "mysql":
+                create_sql = """
+                CREATE TABLE platega_subscriptions (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    active_user_id INT NULL,
+                    platega_subscription_id VARCHAR(255) NOT NULL,
+                    amount_kopeks INT NOT NULL,
+                    currency VARCHAR(10) NOT NULL DEFAULT 'RUB',
+                    description TEXT NULL,
+                    status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+                    redirect_url TEXT NULL,
+                    next_charge_at DATETIME NULL,
+                    last_callback_payload JSON NULL,
+                    cancelled_at DATETIME NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+            else:
+                logger.error(
+                    "Неподдерживаемый тип БД для создания platega_subscriptions: %s",
+                    db_type,
+                )
+                return False
+
+            await conn.execute(text(create_sql))
+
+        logger.info("✅ Таблица platega_subscriptions успешно создана")
+        return True
+    except Exception as error:
+        logger.error("Ошибка создания таблицы platega_subscriptions: %s", error)
+        return False
+
+
+async def add_platega_payment_subscription_id() -> bool:
+    if not await check_table_exists("platega_payments"):
+        logger.warning(
+            "Таблица platega_payments не найдена, связь с регулярными списаниями пропущена"
+        )
+        return False
+
+    try:
+        column_exists = await check_column_exists("platega_payments", "subscription_id")
+        db_type = await get_database_type()
+        constraint_exists = (
+            await check_constraint_exists(
+                "platega_payments", "fk_platega_payments_subscription_id"
+            )
+            if db_type in {"postgresql", "mysql"}
+            else True
+        )
+
+        async with engine.begin() as conn:
+            if not column_exists:
+                await conn.execute(
+                    text("ALTER TABLE platega_payments ADD COLUMN subscription_id INTEGER NULL")
+                )
+
+            # SQLite does not support adding a foreign key constraint to an existing table.
+            if db_type in {"postgresql", "mysql"} and not constraint_exists:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE platega_payments "
+                        "ADD CONSTRAINT fk_platega_payments_subscription_id "
+                        "FOREIGN KEY (subscription_id) REFERENCES platega_subscriptions(id) "
+                        "ON DELETE SET NULL"
+                    )
+                )
+
+        logger.info("✅ Колонка subscription_id в platega_payments готова")
+        return True
+    except Exception as error:
+        logger.error("Ошибка добавления subscription_id в platega_payments: %s", error)
+        return False
+
+
+async def add_platega_subscription_active_user_id() -> bool:
+    if not await check_table_exists("platega_subscriptions"):
+        logger.warning("Таблица platega_subscriptions не найдена, активный слот не добавлен")
+        return False
+
+    try:
+        if not await check_column_exists("platega_subscriptions", "active_user_id"):
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE platega_subscriptions "
+                        "ADD COLUMN active_user_id INTEGER NULL"
+                    )
+                )
+
+        logger.info("✅ Колонка active_user_id в platega_subscriptions готова")
+        return True
+    except Exception as error:
+        logger.error("Ошибка добавления active_user_id в platega_subscriptions: %s", error)
+        return False
+
+
+async def ensure_platega_subscription_indexes() -> bool:
+    indexes = (
+        (
+            "platega_subscriptions",
+            "ix_platega_subscriptions_platega_subscription_id",
+            "CREATE UNIQUE INDEX ix_platega_subscriptions_platega_subscription_id "
+            "ON platega_subscriptions(platega_subscription_id)",
+        ),
+        (
+            "platega_subscriptions",
+            "ix_platega_subscriptions_user_status",
+            "CREATE INDEX ix_platega_subscriptions_user_status "
+            "ON platega_subscriptions(user_id, status)",
+        ),
+        (
+            "platega_subscriptions",
+            "ix_platega_subscriptions_active_user_id",
+            "CREATE UNIQUE INDEX ix_platega_subscriptions_active_user_id "
+            "ON platega_subscriptions(active_user_id)",
+        ),
+        (
+            "platega_payments",
+            "ix_platega_payments_subscription_id",
+            "CREATE INDEX ix_platega_payments_subscription_id "
+            "ON platega_payments(subscription_id)",
+        ),
+    )
+
+    try:
+        missing_tables = [
+            table_name
+            for table_name in {item[0] for item in indexes}
+            if not await check_table_exists(table_name)
+        ]
+        if missing_tables:
+            logger.warning(
+                "Таблицы %s не найдены, индексы регулярных подписок Platega не созданы",
+                ", ".join(sorted(missing_tables)),
+            )
+            return False
+
+        missing_indexes = [
+            (index_name, create_sql)
+            for table_name, index_name, create_sql in indexes
+            if not await check_index_exists(table_name, index_name)
+        ]
+
+        async with engine.begin() as conn:
+            for _, create_sql in missing_indexes:
+                await conn.execute(text(create_sql))
+
+        logger.info("✅ Индексы регулярных подписок Platega готовы")
+        return True
+    except Exception as error:
+        logger.error("Ошибка создания индексов регулярных подписок Platega: %s", error)
+        return False
+
+
 async def create_subscription_short_uuid_index() -> bool:
     """Индекс под вход в приложение по коду/ссылке подписки (/sub/<short_uuid>)."""
     if not await check_table_exists("subscriptions"):
@@ -7931,6 +8137,29 @@ async def run_universal_migration():
         if not await create_platega_unpaid_created_index():
             logger.warning("⚠️ Проблемы с индексом неоплаченных Platega счетов")
 
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ PLATEGA_SUBSCRIPTIONS ===")
+        platega_subscriptions_ready = await create_platega_subscriptions_table()
+        if platega_subscriptions_ready:
+            logger.info("✅ Таблица platega_subscriptions готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей platega_subscriptions")
+
+        platega_active_slot_ready = await add_platega_subscription_active_user_id()
+        if platega_active_slot_ready:
+            logger.info("✅ Активный слот регулярной подписки Platega готов")
+        else:
+            logger.warning("⚠️ Проблемы с активным слотом регулярной подписки Platega")
+
+        logger.info("=== СВЯЗЬ PLATEGA_PAYMENTS С РЕГУЛЯРНЫМИ ПОДПИСКАМИ ===")
+        platega_payment_subscription_ready = await add_platega_payment_subscription_id()
+        if platega_payment_subscription_ready:
+            logger.info("✅ Связь platega_payments.subscription_id готова")
+        else:
+            logger.warning("⚠️ Проблемы со связью platega_payments.subscription_id")
+
+        if not await ensure_platega_subscription_indexes():
+            logger.warning("⚠️ Проблемы с индексами регулярных подписок Platega")
+
         if not await create_subscription_short_uuid_index():
             logger.warning("⚠️ Проблемы с индексом subscriptions.remnawave_short_uuid")
 
@@ -8231,6 +8460,13 @@ async def check_migration_status():
             "subscription_conversions_table": False,
             "subscription_events_table": False,
             "interactive_notification_logs_table": False,
+            "platega_subscriptions_table": False,
+            "platega_subscriptions_active_user_id_column": False,
+            "platega_payments_subscription_id_column": False,
+            "platega_subscriptions_provider_id_index": False,
+            "platega_subscriptions_user_status_index": False,
+            "platega_subscriptions_active_user_id_index": False,
+            "platega_payments_subscription_id_index": False,
             "promo_groups_table": False,
             "server_promo_groups_table": False,
             "server_squads_trial_column": False,
@@ -8286,6 +8522,25 @@ async def check_migration_status():
         status["subscription_conversions_table"] = await check_table_exists('subscription_conversions')
         status["subscription_events_table"] = await check_table_exists('subscription_events')
         status["interactive_notification_logs_table"] = await check_table_exists('interactive_notification_logs')
+        status["platega_subscriptions_table"] = await check_table_exists('platega_subscriptions')
+        status["platega_subscriptions_active_user_id_column"] = await check_column_exists(
+            'platega_subscriptions', 'active_user_id'
+        )
+        status["platega_payments_subscription_id_column"] = await check_column_exists(
+            'platega_payments', 'subscription_id'
+        )
+        status["platega_subscriptions_provider_id_index"] = await check_index_exists(
+            'platega_subscriptions', 'ix_platega_subscriptions_platega_subscription_id'
+        )
+        status["platega_subscriptions_user_status_index"] = await check_index_exists(
+            'platega_subscriptions', 'ix_platega_subscriptions_user_status'
+        )
+        status["platega_subscriptions_active_user_id_index"] = await check_index_exists(
+            'platega_subscriptions', 'ix_platega_subscriptions_active_user_id'
+        )
+        status["platega_payments_subscription_id_index"] = await check_index_exists(
+            'platega_payments', 'ix_platega_payments_subscription_id'
+        )
         status["promo_groups_table"] = await check_table_exists('promo_groups')
         status["server_promo_groups_table"] = await check_table_exists('server_squad_promo_groups')
         status["server_squads_trial_column"] = await check_column_exists('server_squads', 'is_trial_eligible')
@@ -8387,6 +8642,13 @@ async def check_migration_status():
             "broadcast_history_media_fields": "Медиа поля в broadcast_history",
             "subscription_conversions_table": "Таблица конверсий подписок",
             "subscription_events_table": "Таблица событий подписок",
+            "platega_subscriptions_table": "Таблица регулярных подписок Platega",
+            "platega_subscriptions_active_user_id_column": "Активный слот регулярной подписки Platega",
+            "platega_payments_subscription_id_column": "Связь платежей Platega с регулярными подписками",
+            "platega_subscriptions_provider_id_index": "Уникальный индекс ID подписки Platega",
+            "platega_subscriptions_user_status_index": "Индекс активных подписок Platega пользователя",
+            "platega_subscriptions_active_user_id_index": "Уникальный активный слот подписки Platega",
+            "platega_payments_subscription_id_index": "Индекс списаний регулярных подписок Platega",
             "subscription_duplicates": "Отсутствие дубликатов подписок",
             "promo_groups_table": "Таблица промо-групп",
             "server_promo_groups_table": "Связи серверов и промогрупп",

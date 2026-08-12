@@ -2,6 +2,7 @@
 
 import logging
 import os
+from datetime import datetime
 from typing import List
 
 from aiogram import types
@@ -398,6 +399,181 @@ async def process_platega_payment_amount(
     await clear_state_preserve_topup_amount(state)
 
 
+@error_handler
+async def process_platega_subscription_amount(
+    message: types.Message,
+    db_user: User,
+    db: AsyncSession,
+    amount_kopeks: int,
+    state: FSMContext,
+) -> None:
+    texts = get_texts(db_user.language)
+
+    if not settings.is_platega_enabled():
+        await message.answer(
+            texts.t(
+                "PLATEGA_TEMPORARILY_UNAVAILABLE",
+                "❌ Оплата через Platega временно недоступна",
+            )
+        )
+        return
+
+    if amount_kopeks % 100:
+        await message.answer(
+            texts.t(
+                "PLATEGA_SUBSCRIPTION_WHOLE_RUBLES",
+                "Для регулярных платежей укажите сумму в целых рублях.",
+            )
+        )
+        return
+
+    if amount_kopeks < settings.PLATEGA_MIN_AMOUNT_KOPEKS:
+        await message.answer(
+            texts.t(
+                "PLATEGA_AMOUNT_TOO_LOW",
+                "Минимальная сумма для оплаты через Platega: {amount}",
+            ).format(amount=settings.format_price(settings.PLATEGA_MIN_AMOUNT_KOPEKS))
+        )
+        return
+
+    if amount_kopeks > settings.PLATEGA_MAX_AMOUNT_KOPEKS:
+        await message.answer(
+            texts.t(
+                "PLATEGA_AMOUNT_TOO_HIGH",
+                "Максимальная сумма для оплаты через Platega: {amount}",
+            ).format(amount=settings.format_price(settings.PLATEGA_MAX_AMOUNT_KOPEKS))
+        )
+        return
+
+    payment_service = PaymentService(message.bot)
+    try:
+        result = await payment_service.create_platega_subscription(
+            db,
+            user_id=db_user.id,
+            amount_kopeks=amount_kopeks,
+            description=settings.get_balance_payment_description(amount_kopeks),
+        )
+    except Exception as error:
+        logger.exception("Ошибка создания регулярной подписки Platega: %s", error)
+        result = None
+
+    if result and result.get("already_exists"):
+        await message.answer(
+            texts.t(
+                "PLATEGA_SUBSCRIPTION_ALREADY_EXISTS",
+                "Регулярные платежи уже подключены. Отменить их можно в профиле.",
+            )
+        )
+        await state.clear()
+        return
+
+    redirect_url = (result or {}).get("redirect_url")
+    if not redirect_url:
+        await message.answer(
+            texts.t(
+                "PLATEGA_SUBSCRIPTION_CREATE_ERROR",
+                "❌ Не удалось подключить регулярные платежи. Попробуйте позже.",
+            )
+        )
+        await state.clear()
+        return
+
+    try:
+        await message.delete()
+    except Exception as error:  # pragma: no cover - depends on bot rights
+        logger.warning("Не удалось удалить сообщение с суммой регулярного платежа: %s", error)
+
+    amount_rubles = amount_kopeks // 100
+    keyboard = types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(
+                    text="✅ " + texts.t(
+                        "PLATEGA_SUBSCRIPTION_PAY_BUTTON",
+                        "Автоплатеж — {amount} руб/мес",
+                    ).format(amount=amount_rubles),
+                    url=redirect_url,
+                )
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text=texts.CANCEL,
+                    callback_data=f"cancel_platega_subscription:{result['subscription'].id}",
+                )
+            ],
+        ]
+    )
+    await message.answer(
+        texts.t(
+            "PLATEGA_SUBSCRIPTION_INSTRUCTIONS",
+            "Чтобы подключить автоплатеж нажми на кнопку и соверши платеж.\n\n"
+            "Баланс пополняется после каждого успешного ежемесячного списания.",
+        ),
+        reply_markup=keyboard,
+    )
+    await state.clear()
+
+
+@error_handler
+async def cancel_pending_platega_subscription(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+    state: FSMContext,
+) -> None:
+    """Cancel an unconfirmed recurring-payment setup and return to its payment choices."""
+    try:
+        subscription_id = int(callback.data.rsplit(":", 1)[-1])
+    except (AttributeError, ValueError):
+        await callback.answer("❌ Некорректная подписка", show_alert=True)
+        return
+
+    from app.services import payment_service as payment_module
+
+    subscription = await payment_module.get_platega_subscription_by_id_for_update(
+        db, subscription_id
+    )
+    if not subscription or subscription.user_id != db_user.id:
+        await callback.answer("⚠️ Регулярные платежи не найдены", show_alert=True)
+        return
+
+    amount_kopeks = subscription.amount_kopeks
+    provider_subscription_id = subscription.platega_subscription_id
+    if subscription.status != "SUBSCRIPTION_CANCELLED":
+        await payment_module.update_platega_subscription(
+            db,
+            subscription=subscription,
+            status="SUBSCRIPTION_CANCELLED",
+            cancelled_at=datetime.utcnow(),
+            set_cancelled_at=True,
+            active_user_id=None,
+            set_active_user_id=True,
+        )
+
+    # The user can immediately choose another method even if Platega is unavailable.
+    await state.clear()
+    await state.update_data(topup_amount_kopeks=amount_kopeks)
+
+    payment_service = PaymentService(callback.bot)
+    try:
+        service = getattr(payment_service, "platega_service", None)
+        if service and service.is_configured:
+            await service.cancel_subscription(provider_subscription_id)
+    except Exception as error:  # pragma: no cover - network errors
+        logger.warning(
+            "Не удалось отменить регулярную подписку Platega %s: %s",
+            provider_subscription_id,
+            error,
+        )
+
+    from .main import _render_payment_methods_with_amount
+
+    await _render_payment_methods_with_amount(
+        callback.message, db_user, amount_kopeks
+    )
+    await callback.answer()
+
+
 async def _prompt_universal_amount(
     message: types.Message,
     db_user: User,
@@ -578,7 +754,7 @@ async def process_platega_universal_payment_amount(
     ).format(amount=amount_label)
 
     data = await state.get_data()
-    back_callback = data.get("platega_back_callback", "balance_topup")
+    back_callback = data.get("platega_back_callback", "balance_topup_reset")
 
     keyboard = types.InlineKeyboardMarkup(
         inline_keyboard=[
