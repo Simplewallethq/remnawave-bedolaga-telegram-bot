@@ -1,6 +1,7 @@
 from typing import List, Optional
 from urllib.parse import quote
 from aiogram import types
+from aiogram.enums import ButtonStyle
 from aiogram.types import CopyTextButton, InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime, timezone
 from app.database.models import User
@@ -3162,12 +3163,14 @@ def get_new_main_menu_keyboard(
         )])
         keyboard.append([InlineKeyboardButton(
             text=texts.t("MENU_CONNECT_BUTTON", "⚙️ Подключиться"),
-            callback_data="howto"
+            callback_data="howto",
+            style=ButtonStyle.SUCCESS,
         )])
     elif trial_active or has_active_subscription:
         keyboard.append([InlineKeyboardButton(
             text=texts.t("MENU_CONNECT_BUTTON", "⚙️ Подключиться"),
-            callback_data="howto"
+            callback_data="howto",
+            style=ButtonStyle.SUCCESS,
         )])
         
     keyboard.append([
