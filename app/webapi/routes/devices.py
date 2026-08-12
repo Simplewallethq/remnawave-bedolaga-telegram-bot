@@ -77,6 +77,20 @@ async def get_device_subscription(
     return response
 
 
+@router.get(
+    "/{device_id}/revoked",
+    summary="Was this device removed from the cabinet or the bot?",
+)
+async def is_device_revoked(
+    device_id: str,
+    _=Security(require_api_token),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Неизвестное устройство не считается отозванным: оно просто ещё не привязано."""
+    link = await get_device_link(db, device_id)
+    return {"revoked": bool(link is not None and link.revoked_at is not None)}
+
+
 @router.post(
     "/{device_id}/link",
     response_model=DeviceLinkResponse,
