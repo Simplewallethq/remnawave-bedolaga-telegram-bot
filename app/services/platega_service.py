@@ -7,7 +7,6 @@ import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
-from urllib.parse import quote
 
 import aiohttp
 
@@ -98,36 +97,6 @@ class PlategaService:
             body["payload"] = payload
 
         return await self._request("POST", "/v2/transaction/process", json_data=body)
-
-    async def create_subscription(
-        self,
-        *,
-        amount: int,
-        currency: str,
-        description: str,
-    ) -> Optional[Dict[str, Any]]:
-        """Creates a monthly SBP subscription according to Platega's recurring API."""
-
-        body: Dict[str, Any] = {
-            "paymentMethod": 6,
-            "paymentDetails": {
-                "amount": amount,
-                "currency": currency,
-                "interval": 3,
-            },
-            "description": self._sanitize_description(
-                description, self._description_max_length
-            ),
-        }
-        return await self._request("POST", "/transaction/process", json_data=body)
-
-    async def cancel_subscription(
-        self, subscription_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """Stops future charges for a Platega subscription."""
-
-        endpoint = "/subscription/{}/cancel".format(quote(subscription_id, safe=""))
-        return await self._request("POST", endpoint)
 
     async def get_transaction(self, transaction_id: str) -> Optional[Dict[str, Any]]:
         endpoint = f"/transaction/{transaction_id}"

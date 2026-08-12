@@ -459,44 +459,6 @@ class WataPayment(Base):
         )
 
 
-class PlategaSubscription(Base):
-    __tablename__ = "platega_subscriptions"
-    __table_args__ = (
-        Index("ix_platega_subscriptions_user_status", "user_id", "status"),
-    )
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    # A nullable unique slot prevents concurrent active subscriptions per user.
-    active_user_id = Column(Integer, unique=True, nullable=True, index=True)
-
-    platega_subscription_id = Column(String(255), unique=True, nullable=False, index=True)
-    amount_kopeks = Column(Integer, nullable=False)
-    currency = Column(String(10), nullable=False, default="RUB")
-    description = Column(Text, nullable=True)
-    status = Column(String(50), nullable=False, default="PENDING")
-
-    redirect_url = Column(Text, nullable=True)
-    next_charge_at = Column(DateTime, nullable=True)
-    last_callback_payload = Column(JSON, nullable=True)
-    cancelled_at = Column(DateTime, nullable=True)
-
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-
-    user = relationship("User", backref="platega_subscriptions")
-
-    def __repr__(self) -> str:  # pragma: no cover - debug helper
-        return (
-            "<PlategaSubscription(id={0}, subscription_id={1}, user_id={2}, status={3})>".format(
-                self.id,
-                self.platega_subscription_id,
-                self.user_id,
-                self.status,
-            )
-        )
-
-
 class PlategaPayment(Base):
     __tablename__ = "platega_payments"
     __table_args__ = (
@@ -526,19 +488,12 @@ class PlategaPayment(Base):
 
     expires_at = Column(DateTime, nullable=True)
 
-    subscription_id = Column(
-        Integer,
-        ForeignKey("platega_subscriptions.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
     transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
 
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     user = relationship("User", backref="platega_payments")
-    subscription = relationship("PlategaSubscription", backref="payments")
     transaction = relationship("Transaction", backref="platega_payment")
 
     @property

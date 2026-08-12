@@ -17,8 +17,7 @@ from app.database.crud.transaction import (
 )
 from app.database.models import User, TransactionType, PaymentMethod
 from app.keyboards.inline import (
-    get_balance_keyboard, get_balance_topup_payment_methods_keyboard,
-    get_payment_methods_keyboard,
+    get_balance_keyboard, get_payment_methods_keyboard,
     get_back_keyboard, get_pagination_keyboard
 )
 from app.localization.texts import get_texts
@@ -264,9 +263,7 @@ async def show_payment_methods(
             "💳 Выберите способ оплаты на сумму {amount}:",
         ).format(amount=texts.format_price(stored_amount))
 
-        keyboard = get_balance_topup_payment_methods_keyboard(
-            stored_amount, db_user.language, db_user.username
-        )
+        keyboard = get_payment_methods_keyboard(stored_amount, db_user.language)
 
         try:
             await callback.message.edit_text(
@@ -332,9 +329,7 @@ async def _render_payment_methods_with_amount(
         "💳 Выберите способ оплаты на сумму {amount}:",
     ).format(amount=texts.format_price(amount_kopeks))
 
-    keyboard = get_balance_topup_payment_methods_keyboard(
-        amount_kopeks, db_user.language, db_user.username
-    )
+    keyboard = get_payment_methods_keyboard(amount_kopeks, db_user.language)
 
     try:
         if message.text:
@@ -584,27 +579,8 @@ async def process_topup_amount(
                 return
         
         if payment_method == "select_after":
-            from app.database.database import AsyncSessionLocal
-            from app.services import payment_service as payment_module
-
             await state.clear()
             await state.update_data(topup_amount_kopeks=amount_kopeks)
-
-            async with AsyncSessionLocal() as db:
-                active_subscription = (
-                    await payment_module.get_active_platega_subscription_for_user(
-                        db, db_user.id
-                    )
-                )
-
-                if active_subscription:
-                    from .platega import process_platega_universal_payment_amount
-
-                    await process_platega_universal_payment_amount(
-                        message, db_user, db, amount_kopeks, state
-                    )
-                    return
-
             await _render_payment_methods_with_amount(message, db_user, amount_kopeks)
             return
 
@@ -889,14 +865,6 @@ async def handle_topup_amount_callback(
 
             await state.update_data(platega_pending_amount=amount_kopeks)
             await start_platega_universal_payment(callback, db_user, state)
-        elif method == "platega_subscription":
-            from app.database.database import AsyncSessionLocal
-            from .platega import process_platega_subscription_amount
-
-            async with AsyncSessionLocal() as db:
-                await process_platega_subscription_amount(
-                    callback.message, db_user, db, amount_kopeks, state
-                )
         elif method == "pal24":
             from app.database.database import AsyncSessionLocal
             from .pal24 import process_pal24_payment_amount
@@ -1029,7 +997,6 @@ def register_balance_handlers(dp: Dispatcher):
         start_platega_payment,
         handle_platega_method_selection,
         start_platega_universal_payment,
-        cancel_pending_platega_subscription,
     )
     dp.callback_query.register(
         start_platega_payment,
@@ -1042,10 +1009,6 @@ def register_balance_handlers(dp: Dispatcher):
     dp.callback_query.register(
         start_platega_universal_payment,
         F.data == "topup_platega_universal",
-    )
-    dp.callback_query.register(
-        cancel_pending_platega_subscription,
-        F.data.startswith("cancel_platega_subscription:"),
     )
 
     from .yookassa import check_yookassa_payment_status

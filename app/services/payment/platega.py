@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from datetime import datetime
 from importlib import import_module
 from typing import Any, Dict, Optional
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -36,207 +34,6 @@ class PlategaPaymentMixin:
     _SUCCESS_STATUSES = {"CONFIRMED"}
     _FAILED_STATUSES = {"FAILED", "CANCELED", "EXPIRED"}
     _PENDING_STATUSES = {"PENDING", "INPROGRESS"}
-    _SUBSCRIPTION_TERMINAL_STATUSES = {
-        "SUBSCRIPTION_CANCELLED",
-        "SUBSCRIPTION_FAILED",
-    }
-
-    @staticmethod
-    def _payload_value(payload: Dict[str, Any], field_name: str) -> tuple[Any, bool]:
-        variants = (
-            field_name,
-            field_name[:1].lower() + field_name[1:],
-            field_name.lower(),
-        )
-        for name in variants:
-            if name in payload:
-                return payload[name], True
-        return None, False
-
-    @classmethod
-    def _normalize_webhook_payload(cls, payload: Dict[str, Any]) -> Dict[str, Any]:
-        transaction_id, _ = cls._payload_value(payload, "Id")
-        status, _ = cls._payload_value(payload, "Status")
-        subscription_id, _ = cls._payload_value(payload, "SubscriptionId")
-        amount, _ = cls._payload_value(payload, "Amount")
-        currency, _ = cls._payload_value(payload, "Currency")
-        callback_payload, _ = cls._payload_value(payload, "Payload")
-        next_charge_at, has_next_charge_at = cls._payload_value(payload, "NextChargeAt")
-
-        return {
-            "transaction_id": str(transaction_id or "").strip(),
-            "status": str(status or "").strip().upper(),
-            "subscription_id": str(subscription_id or "").strip(),
-            "amount": amount,
-            "currency": str(currency or "").strip(),
-            "payload": callback_payload,
-            "next_charge_at": next_charge_at,
-            "has_next_charge_at": has_next_charge_at,
-        }
-
-    @staticmethod
-    def _parse_callback_datetime(value: Any) -> Optional[datetime]:
-        if value in (None, ""):
-            return None
-        try:
-            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        except (TypeError, ValueError):
-            logger.warning("Некорректная дата callback Platega: %s", value)
-            return None
-
-        if parsed.tzinfo is not None:
-            return parsed.astimezone(timezone.utc).replace(tzinfo=None)
-        return parsed
-
-    @staticmethod
-    def _subscription_callback_amount_kopeks(value: Any) -> Optional[int]:
-        try:
-            amount_rub = Decimal(str(value))
-        except (InvalidOperation, TypeError, ValueError):
-            return None
-
-        if amount_rub < 0 or amount_rub != amount_rub.to_integral_value():
-            return None
-        return int(amount_rub) * 100
-
-    async def create_platega_subscription(
-        self,
-        db: AsyncSession,
-        *,
-        user_id: int,
-        amount_kopeks: int,
-        description: str,
-    ) -> Optional[Dict[str, Any]]:
-        service: Optional[PlategaService] = getattr(self, "platega_service", None)
-        if not service or not service.is_configured:
-            logger.error("Platega сервис не инициализирован")
-            return None
-
-        if amount_kopeks % 100:
-            logger.warning("Сумма регулярной подписки должна быть целым числом рублей")
-            return None
-        if not (
-            settings.PLATEGA_MIN_AMOUNT_KOPEKS
-            <= amount_kopeks
-            <= settings.PLATEGA_MAX_AMOUNT_KOPEKS
-        ):
-            logger.warning("Сумма регулярной подписки Platega вне допустимых лимитов")
-            return None
-
-        payment_module = import_module("app.services.payment_service")
-        existing = await payment_module.get_active_platega_subscription_for_user(db, user_id)
-        if existing:
-            return {"subscription": existing, "already_exists": True}
-
-        # Reserve the unique active slot before calling Platega to prevent two bindings.
-        reservation_id = f"pending:{uuid.uuid4()}"
-        try:
-            subscription = await payment_module.create_platega_subscription(
-                db,
-                user_id=user_id,
-                active_user_id=user_id,
-                platega_subscription_id=reservation_id,
-                amount_kopeks=amount_kopeks,
-                currency=settings.PLATEGA_CURRENCY,
-                description=description,
-                status="PENDING",
-                redirect_url=None,
-            )
-        except IntegrityError:
-            await db.rollback()
-            existing = await payment_module.get_active_platega_subscription_for_user(
-                db, user_id
-            )
-            if existing:
-                return {"subscription": existing, "already_exists": True}
-            logger.exception("Не удалось зарезервировать регулярную подписку Platega")
-            return None
-
-        try:
-            response = await service.create_subscription(
-                amount=amount_kopeks // 100,
-                currency=settings.PLATEGA_CURRENCY,
-                description=description,
-            )
-        except Exception as error:  # pragma: no cover - network errors
-            logger.exception("Ошибка создания регулярной подписки Platega: %s", error)
-            response = None
-
-        provider_id = str((response or {}).get("transactionId") or "").strip()
-        redirect_url = (response or {}).get("redirect")
-        if not provider_id or not redirect_url:
-            await payment_module.update_platega_subscription(
-                db,
-                subscription=subscription,
-                status="SUBSCRIPTION_FAILED",
-                last_callback_payload=response,
-                set_active_user_id=True,
-                active_user_id=None,
-            )
-            logger.error("Platega вернул неполный ответ при создании подписки")
-            return None
-
-        status = str(response.get("status") or "PENDING").upper()
-        subscription = await payment_module.update_platega_subscription(
-            db,
-            subscription=subscription,
-            platega_subscription_id=provider_id,
-            set_platega_subscription_id=True,
-            redirect_url=str(redirect_url),
-            set_redirect_url=True,
-            status=status,
-            last_callback_payload=response,
-        )
-
-        return {
-            "subscription": subscription,
-            "subscription_id": provider_id,
-            "redirect_url": redirect_url,
-            "status": status,
-            "already_exists": False,
-        }
-
-    async def cancel_platega_subscription(
-        self,
-        db: AsyncSession,
-        *,
-        subscription_id: int,
-        user_id: int,
-    ) -> Optional[Dict[str, Any]]:
-        payment_module = import_module("app.services.payment_service")
-        subscription = await payment_module.get_platega_subscription_by_id_for_update(
-            db, subscription_id
-        )
-        if not subscription or subscription.user_id != user_id:
-            return None
-        if subscription.status == "SUBSCRIPTION_CANCELLED":
-            return {"subscription": subscription, "already_cancelled": True}
-
-        service: Optional[PlategaService] = getattr(self, "platega_service", None)
-        if not service or not service.is_configured:
-            logger.error("Platega сервис не инициализирован")
-            return None
-
-        try:
-            response = await service.cancel_subscription(subscription.platega_subscription_id)
-        except Exception as error:  # pragma: no cover - network errors
-            logger.exception("Ошибка отмены регулярной подписки Platega: %s", error)
-            return None
-
-        if not response:
-            return None
-
-        subscription = await payment_module.update_platega_subscription(
-            db,
-            subscription=subscription,
-            status="SUBSCRIPTION_CANCELLED",
-            last_callback_payload=response,
-            cancelled_at=datetime.utcnow(),
-            set_cancelled_at=True,
-            active_user_id=None,
-            set_active_user_id=True,
-        )
-        return {"subscription": subscription, "already_cancelled": False}
 
     async def create_platega_payment(
         self,
@@ -460,23 +257,10 @@ class PlategaPaymentMixin:
         db: AsyncSession,
         payload: Dict[str, Any],
     ) -> bool:
-        normalized = self._normalize_webhook_payload(payload)
-        if normalized["subscription_id"]:
-            return await self._process_platega_subscription_webhook(
-                db, payload, normalized
-            )
-        return await self._process_regular_platega_webhook(db, payload, normalized)
-
-    async def _process_regular_platega_webhook(
-        self,
-        db: AsyncSession,
-        payload: Dict[str, Any],
-        normalized: Dict[str, Any],
-    ) -> bool:
         payment_module = import_module("app.services.payment_service")
 
-        transaction_id = normalized["transaction_id"]
-        payload_token = normalized["payload"]
+        transaction_id = str(payload.get("id") or "").strip()
+        payload_token = payload.get("payload")
 
         payment = None
         if transaction_id:
@@ -492,7 +276,7 @@ class PlategaPaymentMixin:
             logger.warning("Platega webhook: платеж не найден (id=%s)", transaction_id)
             return False
 
-        status_raw = normalized["status"]
+        status_raw = str(payload.get("status") or "").upper()
         if not status_raw:
             logger.warning("Platega webhook без статуса для платежа %s", payment.id)
             return False
@@ -542,171 +326,6 @@ class PlategaPaymentMixin:
             db,
             payment=payment,
             **update_kwargs,
-        )
-        return True
-
-    async def _process_platega_subscription_webhook(
-        self,
-        db: AsyncSession,
-        payload: Dict[str, Any],
-        normalized: Dict[str, Any],
-    ) -> bool:
-        payment_module = import_module("app.services.payment_service")
-        subscription_id = normalized["subscription_id"]
-        transaction_id = normalized["transaction_id"]
-        status_raw = normalized["status"]
-
-        if not transaction_id or not status_raw:
-            logger.warning("Некорректный callback регулярной подписки Platega")
-            return False
-
-        subscription = (
-            await payment_module.get_platega_subscription_by_provider_id_for_update(
-                db, subscription_id
-            )
-        )
-        if not subscription:
-            logger.warning(
-                "Platega callback: регулярная подписка не найдена (id=%s)",
-                subscription_id,
-            )
-            return False
-
-        # The user cancelled this setup locally. A delayed provider callback must
-        # not revive its slot or credit a charge after the cancellation request.
-        if getattr(subscription, "status", None) == "SUBSCRIPTION_CANCELLED":
-            logger.info(
-                "Игнорируется callback отменённой регулярной подписки Platega %s",
-                subscription_id,
-            )
-            return True
-
-        is_status_callback = (
-            status_raw.startswith("SUBSCRIPTION_")
-            or transaction_id == subscription_id
-        )
-        next_charge_at = self._parse_callback_datetime(normalized["next_charge_at"])
-
-        if is_status_callback:
-            if status_raw == "CANCELED":
-                status_raw = "SUBSCRIPTION_CANCELLED"
-
-            if status_raw not in {
-                "SUBSCRIPTION_ACTIVATED",
-                "SUBSCRIPTION_PAST_DUE",
-                "SUBSCRIPTION_CANCELLED",
-                "SUBSCRIPTION_FAILED",
-            }:
-                logger.warning(
-                    "Неизвестный статус регулярной подписки Platega: %s", status_raw
-                )
-                return False
-
-            is_terminal = status_raw in self._SUBSCRIPTION_TERMINAL_STATUSES
-            await payment_module.update_platega_subscription(
-                db,
-                subscription=subscription,
-                status=status_raw,
-                last_callback_payload=payload,
-                next_charge_at=next_charge_at,
-                set_next_charge_at=normalized["has_next_charge_at"],
-                cancelled_at=datetime.utcnow() if status_raw == "SUBSCRIPTION_CANCELLED" else None,
-                set_cancelled_at=status_raw == "SUBSCRIPTION_CANCELLED",
-                active_user_id=None if is_terminal else subscription.user_id,
-                set_active_user_id=True,
-            )
-            return True
-
-        amount_kopeks = self._subscription_callback_amount_kopeks(normalized["amount"])
-        if amount_kopeks is None:
-            logger.warning(
-                "Некорректная сумма регулярного списания Platega %s для подписки %s",
-                normalized["amount"],
-                subscription_id,
-            )
-            return False
-
-        currency = normalized["currency"] or settings.PLATEGA_CURRENCY
-        payment = await payment_module.get_or_create_platega_subscription_charge(
-            db,
-            subscription_id=subscription.id,
-            user_id=subscription.user_id,
-            platega_transaction_id=transaction_id,
-            amount_kopeks=amount_kopeks,
-            currency=currency,
-            description=subscription.description,
-            status=status_raw,
-            callback_payload=payload,
-        )
-
-        payment = await payment_module.get_platega_payment_by_id_for_update(db, payment.id)
-        if not payment:
-            logger.error("Не удалось заблокировать регулярное списание Platega %s", transaction_id)
-            return False
-
-        if status_raw in self._SUCCESS_STATUSES:
-            if payment.is_paid:
-                return True
-
-            payment = await payment_module.update_platega_payment(
-                db,
-                payment=payment,
-                status=status_raw,
-                callback_payload=payload,
-            )
-            await payment_module.update_platega_subscription(
-                db,
-                subscription=subscription,
-                status="SUBSCRIPTION_ACTIVATED",
-                last_callback_payload=payload,
-                next_charge_at=next_charge_at,
-                set_next_charge_at=normalized["has_next_charge_at"],
-                active_user_id=subscription.user_id,
-                set_active_user_id=True,
-            )
-            await self._finalize_platega_payment(db, payment, payload)
-            return True
-
-        if status_raw == "CANCELED":
-            await payment_module.update_platega_payment(
-                db,
-                payment=payment,
-                status=status_raw,
-                callback_payload=payload,
-                is_paid=False,
-            )
-            await payment_module.update_platega_subscription(
-                db,
-                subscription=subscription,
-                status="SUBSCRIPTION_PAST_DUE",
-                last_callback_payload=payload,
-                next_charge_at=None,
-                set_next_charge_at=True,
-                active_user_id=None,
-                set_active_user_id=True,
-            )
-            return True
-
-        if status_raw not in {"PENDING", "CHARGEBACKED"}:
-            logger.warning(
-                "Неизвестный статус списания регулярной подписки Platega: %s",
-                status_raw,
-            )
-            return False
-
-        await payment_module.update_platega_payment(
-            db,
-            payment=payment,
-            status=status_raw,
-            callback_payload=payload,
-            is_paid=False,
-        )
-        await payment_module.update_platega_subscription(
-            db,
-            subscription=subscription,
-            last_callback_payload=payload,
-            next_charge_at=next_charge_at,
-            set_next_charge_at=normalized["has_next_charge_at"],
         )
         return True
 
@@ -849,8 +468,8 @@ class PlategaPaymentMixin:
         referrer_info = format_referrer_info(user)
 
         transaction_external_id = (
-            str(payload.get("id") or payload.get("Id"))
-            if isinstance(payload, dict) and (payload.get("id") or payload.get("Id"))
+            str(payload.get("id"))
+            if isinstance(payload, dict) and payload.get("id")
             else payment.platega_transaction_id
         )
 
