@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import logging
 import math
 import os
@@ -437,6 +438,16 @@ class Settings(BaseSettings):
     CLOUDPAYMENTS_SKIN: str = "mini"  # mini, classic, modern
     CLOUDPAYMENTS_REQUIRE_EMAIL: bool = False
     CLOUDPAYMENTS_TEST_MODE: bool = False
+
+    # Apple In-App Purchase (StoreKit 2 server-side verification)
+    APPLE_IAP_BUNDLE_ID: Optional[str] = "com.letovpn.ios"
+    # App Store Connect numeric app id — required by SignedDataVerifier for the
+    # Production environment only (raises ValueError otherwise); Sandbox works without it.
+    APPLE_IAP_APP_APPLE_ID: Optional[int] = None
+    APPLE_IAP_PRODUCTS: str = (
+        '{"com.letovpn.ios.subscription.monthly": {"plan_code": "solo", "period_days": 30}, '
+        '"com.letovpn.ios.subscription.yearly": {"plan_code": "solo", "period_days": 365}}'
+    )
 
     MAIN_MENU_MODE: str = "default"
     CONNECT_BUTTON_MODE: str = "guide"
@@ -2148,6 +2159,37 @@ class Settings(BaseSettings):
             seen_tokens.add(token)
             logo = self.resolve_bot_logo(item.get("logo") or self.LOGO_FILE)
             result.append({"token": token, "logo": logo})
+        return result
+
+    def get_apple_iap_products(self) -> dict[str, dict]:
+        log = logging.getLogger(__name__)
+
+        raw = (self.APPLE_IAP_PRODUCTS or "").strip()
+        if not raw or raw == "{}":
+            return {}
+        try:
+            items = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            log.warning("APPLE_IAP_PRODUCTS invalid JSON, ignoring: %s", exc)
+            return {}
+        if not isinstance(items, dict):
+            return {}
+
+        result: dict[str, dict] = {}
+        for product_id, mapping in items.items():
+            if not isinstance(product_id, str) or not product_id.strip():
+                continue
+            if not isinstance(mapping, dict):
+                continue
+            plan_code = mapping.get("plan_code")
+            period_days = mapping.get("period_days")
+            if not isinstance(plan_code, str) or not plan_code.strip():
+                log.warning("APPLE_IAP_PRODUCTS entry %s missing plan_code, ignoring", product_id)
+                continue
+            if not isinstance(period_days, int) or period_days <= 0:
+                log.warning("APPLE_IAP_PRODUCTS entry %s has invalid period_days, ignoring", product_id)
+                continue
+            result[product_id] = {"plan_code": plan_code, "period_days": period_days}
         return result
 
     def get_bot_run_mode(self) -> str:

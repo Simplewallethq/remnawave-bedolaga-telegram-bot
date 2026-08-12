@@ -45,3 +45,6 @@ Flask==3.1.0
 # Личный кабинет (веб-аутентификация без Telegram)
 PyJWT==2.9.0
 bcrypt==4.2.1
+
+# Верификация Apple In-App Purchase (StoreKit 2 JWS)
+app-store-server-library==3.1.2
