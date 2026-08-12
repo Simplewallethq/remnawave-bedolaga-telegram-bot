@@ -43,7 +43,7 @@ def test_message_has_only_the_first_line_bold_and_extend_button() -> None:
     assert service.TEXT.startswith("<b>👍 Хорошие новости о ценах</b>\n\n")
     assert service.TEXT.count("<b>") == 1
     assert keyboard.inline_keyboard[0][0].text == "Продлить за 220₽"
-    assert keyboard.inline_keyboard[0][0].callback_data == "subscription_extend"
+    assert keyboard.inline_keyboard[0][0].callback_data == "tariff_select:solo"
 
 
 async def test_recipient_query_uses_sql_cohort_and_inactive_subscription_conditions(monkeypatch) -> None:
