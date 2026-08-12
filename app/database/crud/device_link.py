@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -39,6 +39,36 @@ async def create_device_link(db: AsyncSession, subscription_id: int, device_id: 
     return link
 
 
+async def revoke_device_links(db: AsyncSession, device_ids: list[str]) -> int:
+    """Пометить привязки как отозванные. Строки остаются — по ним видно, выдавался ли триал.
+
+    Возвращает число помеченных (уже отозванные не считаются).
+    """
+    if not device_ids:
+        return 0
+    result = await db.execute(
+        update(DeviceLink)
+        .where(DeviceLink.device_id.in_(device_ids), DeviceLink.revoked_at.is_(None))
+        .values(revoked_at=datetime.utcnow())
+    )
+    await db.commit()
+    return result.rowcount or 0
+
+
+async def revoke_all_device_links(db: AsyncSession, subscription_id: int) -> int:
+    """То же для всех устройств подписки — сброс из ЛК/бота."""
+    result = await db.execute(
+        update(DeviceLink)
+        .where(
+            DeviceLink.subscription_id == subscription_id,
+            DeviceLink.revoked_at.is_(None),
+        )
+        .values(revoked_at=datetime.utcnow())
+    )
+    await db.commit()
+    return result.rowcount or 0
+
+
 async def rebind_device_link(
     db: AsyncSession, link: DeviceLink, new_subscription_id: int
 ) -> DeviceLink:
@@ -50,8 +80,20 @@ async def rebind_device_link(
     """
     link.subscription_id = new_subscription_id
     link.linked_at = datetime.utcnow()
+    link.revoked_at = None
     await db.commit()
     await db.refresh(link)
+    return link
+
+
+async def reactivate_device_link(db: AsyncSession, link: DeviceLink) -> DeviceLink:
+    """Снять отзыв: устройство подключили заново. Без этого отозванное однажды
+    устройство осталось бы отозванным навсегда."""
+    if link.revoked_at is not None:
+        link.revoked_at = None
+        link.linked_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(link)
     return link
 
 

@@ -774,8 +774,9 @@ async def get_devices(
 async def delete_device(
     device_id: str,
     user: User = Depends(get_current_cabinet_user),
+    db: AsyncSession = Depends(get_db_session),
 ) -> Dict[str, Any]:
-    ok = await cabinet_service.remove_device(user, device_id)
+    ok = await cabinet_service.remove_device(db, user, device_id)
     if not ok:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="Failed to remove device")
     return {"success": True}
@@ -784,8 +785,9 @@ async def delete_device(
 @router.post("/devices/reset")
 async def reset_devices(
     user: User = Depends(get_current_cabinet_user),
+    db: AsyncSession = Depends(get_db_session),
 ) -> Dict[str, Any]:
-    ok = await cabinet_service.reset_devices(user)
+    ok = await cabinet_service.reset_devices(db, user)
     return {"success": ok}
 
 

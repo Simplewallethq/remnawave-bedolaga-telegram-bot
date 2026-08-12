@@ -33,6 +33,7 @@ from app.keyboards.admin import (
 from app.localization.texts import get_texts
 from app.services.user_service import UserService
 from app.services.admin_notification_service import AdminNotificationService
+from app.database.crud.device_link import revoke_all_device_links
 from app.database.crud.promo_group import get_promo_groups_with_counts
 from app.utils.decorators import admin_required, error_handler
 from app.utils.formatters import format_datetime, format_time_ago
@@ -4052,6 +4053,11 @@ async def reset_user_devices(
             success = await api.reset_user_devices(user.remnawave_uuid)
         
         if success:
+            if user.subscription is not None:
+                try:
+                    await revoke_all_device_links(db, user.subscription.id)
+                except Exception as revoke_error:
+                    logger.error(f"Ошибка отзыва привязок пользователя {user_id}: {revoke_error}")
             await callback.message.edit_text(
                 "✅ Устройства пользователя успешно сброшены",
                 reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[

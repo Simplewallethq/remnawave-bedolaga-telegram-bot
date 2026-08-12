@@ -15,6 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.database.crud.device_link import (
+    revoke_all_device_links,
+    revoke_device_links,
+)
 from app.database.crud.referral import (
     get_referral_earnings_by_user,
     get_user_referral_stats,
@@ -567,28 +571,51 @@ async def build_devices(user: User) -> List[Dict[str, Any]]:
         return []
 
 
-async def remove_device(user: User, device_hwid: str) -> bool:
+async def remove_device(db: AsyncSession, user: User, device_hwid: str) -> bool:
     if not user.remnawave_uuid:
         return False
     try:
         service = RemnaWaveService()
         async with service.get_api_client() as api:
-            return await api.remove_device(user.remnawave_uuid, device_hwid)
+            removed = await api.remove_device(user.remnawave_uuid, device_hwid)
     except Exception as error:
         logger.error(f"Ошибка удаления устройства {device_hwid}: {error}")
         return False
 
+    # Только после успеха в панели: иначе пометим отозванным то, что осталось на месте.
+    if removed:
+        await _revoke_links(db, [device_hwid])
+    return removed
 
-async def reset_devices(user: User) -> bool:
+
+async def reset_devices(db: AsyncSession, user: User) -> bool:
     if not user.remnawave_uuid:
         return False
     try:
         service = RemnaWaveService()
         async with service.get_api_client() as api:
-            return await api.reset_user_devices(user.remnawave_uuid)
+            reset = await api.reset_user_devices(user.remnawave_uuid)
     except Exception as error:
         logger.error(f"Ошибка сброса устройств пользователя {user.id}: {error}")
         return False
+
+    if reset and user.subscription is not None:
+        try:
+            count = await revoke_all_device_links(db, user.subscription.id)
+            logger.info(f"Отозвано привязок при сбросе устройств: {count}")
+        except Exception as error:
+            logger.error(f"Ошибка отзыва привязок пользователя {user.id}: {error}")
+    return reset
+
+
+async def _revoke_links(db: AsyncSession, device_ids: List[str]) -> None:
+    """Отзыв не должен ронять удаление: панель уже отработала."""
+    try:
+        count = await revoke_device_links(db, device_ids)
+        if count:
+            logger.info(f"Отозвано привязок устройств: {count}")
+    except Exception as error:
+        logger.error(f"Ошибка отзыва привязки устройства: {error}")
 
 
 # ── Уведомления ──────────────────────────────────────────────────────────

@@ -1038,8 +1038,14 @@ class DeviceLink(Base):
     subscription_id = Column(Integer, ForeignKey("subscriptions.id"), nullable=False, index=True)
     device_id = Column(String(255), nullable=False, unique=True, index=True)
     linked_at = Column(DateTime, default=func.now())
+    # Устройство удалили из ЛК/бота. Строка остаётся: по ней видно, выдавался ли триал.
+    revoked_at = Column(DateTime, nullable=True)
 
     subscription = relationship("Subscription", back_populates="device_links")
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None
 
 
 class DeviceBindingCode(Base):

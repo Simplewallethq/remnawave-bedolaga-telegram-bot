@@ -92,10 +92,13 @@ async def _link_device_to_subscription(
     try:
         existing = await get_device_link(db, device_id)
         if existing and existing.subscription_id == subscription.id:
+            existing.revoked_at = None
+            await db.commit()
             await target.answer("Device already linked to your subscription.")
             return
         if existing:
             existing.subscription_id = subscription.id
+            existing.revoked_at = None
             await db.commit()
             await target.answer("Device re-linked to your subscription.")
             return

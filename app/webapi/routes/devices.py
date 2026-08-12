@@ -19,6 +19,7 @@ from app.database.crud.device_link import (
     create_device_link,
     get_device_link,
     get_subscription_by_device_id,
+    reactivate_device_link,
     rebind_device_link,
 )
 from app.database.crud.share_token import (
@@ -113,6 +114,7 @@ async def link_device(
     existing = await get_device_link(db, device_id)
     if existing and existing.subscription_id == subscription.id:
         # Idempotent: already linked to the same subscription.
+        await reactivate_device_link(db, existing)
         return DeviceLinkResponse(
             device_id=device_id,
             subscription_id=subscription.id,
@@ -275,6 +277,7 @@ async def _attach_device_and_serialize(
     на ЦЕЛЕВОЙ подписке.
     """
     if existing_link is not None and existing_link.subscription_id == subscription.id:
+        await reactivate_device_link(db, existing_link)
         return await _serialize_with_devices(db, subscription)
 
     # Enforce device limit on the TARGET subscription. The incoming device is

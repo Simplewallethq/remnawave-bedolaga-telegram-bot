@@ -3235,6 +3235,20 @@ async def ensure_user_bot_id_column():
         return False
 
 
+async def ensure_device_link_revoked_at_column():
+    try:
+        async with engine.begin() as conn:
+            if not await check_column_exists("device_links", "revoked_at"):
+                await conn.execute(
+                    text("ALTER TABLE device_links ADD COLUMN revoked_at TIMESTAMP NULL")
+                )
+        logger.info("✅ Поле revoked_at у привязок устройств готово")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления поля revoked_at: {e}")
+        return False
+
+
 async def ensure_user_web_auth_columns() -> bool:
     """Колонки для веб-аутентификации личного кабинета (email/пароль)."""
 
@@ -7642,6 +7656,10 @@ async def run_universal_migration():
                 logger.info("✅ Последовательности PostgreSQL синхронизированы")
             else:
                 logger.warning("⚠️ Не удалось синхронизировать последовательности PostgreSQL")
+
+        revoked_at_ready = await ensure_device_link_revoked_at_column()
+        if not revoked_at_ready:
+            logger.warning("⚠️ Проблемы с колонкой revoked_at у привязок устройств")
 
         logger.info("=== ВЕБ-АУТЕНТИФИКАЦИЯ ЛИЧНОГО КАБИНЕТА ===")
         web_auth_columns_ready = await ensure_user_web_auth_columns()
