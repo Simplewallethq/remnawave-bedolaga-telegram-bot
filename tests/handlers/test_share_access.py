@@ -9,6 +9,7 @@ from app.handlers.balance import platega as balance_platega
 from app.handlers.subscription import purchase, tariffs
 from app.keyboards import inline
 from app.localization.texts import get_texts
+from app.services import payment_service as payment_service_module
 
 
 SUBSCRIPTION_LINK = "https://letovpn.com/sub/private-subscription-key"
@@ -140,7 +141,10 @@ async def test_regular_payment_button_uses_created_subscription_amount(
             pass
 
         async def create_platega_subscription(self, *_args, **_kwargs):
-            return {"redirect_url": "https://platega.example/subscription"}
+            return {
+                "redirect_url": "https://platega.example/subscription",
+                "subscription": SimpleNamespace(id=71),
+            }
 
     state = SimpleNamespace(clear=AsyncMock())
     message = SimpleNamespace(
@@ -173,6 +177,73 @@ async def test_regular_payment_button_uses_created_subscription_amount(
     button = keyboard.inline_keyboard[0][0]
     assert button.text == "Автоплатеж — 100 руб/мес"
     assert button.url == "https://platega.example/subscription"
+    cancel_button = keyboard.inline_keyboard[1][0]
+    assert cancel_button.callback_data == "cancel_platega_subscription:71"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_cancel_pending_regular_payment_releases_slot_and_returns_to_choices(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    subscription = SimpleNamespace(
+        id=71,
+        user_id=42,
+        amount_kopeks=10_000,
+        platega_subscription_id="subscription-001",
+        status="PENDING",
+    )
+    update_mock = AsyncMock(return_value=subscription)
+    render_mock = AsyncMock()
+    service = SimpleNamespace(
+        is_configured=True,
+        cancel_subscription=AsyncMock(),
+    )
+
+    class StubPaymentService:
+        def __init__(self, _bot):
+            self.platega_service = service
+
+    async def fake_get_subscription(*_args, **_kwargs):
+        return subscription
+
+    monkeypatch.setattr(balance_platega, "PaymentService", StubPaymentService)
+    monkeypatch.setattr(
+        payment_service_module,
+        "get_platega_subscription_by_id_for_update",
+        fake_get_subscription,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        payment_service_module,
+        "update_platega_subscription",
+        update_mock,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.handlers.balance.main._render_payment_methods_with_amount",
+        render_mock,
+    )
+
+    callback = SimpleNamespace(
+        data="cancel_platega_subscription:71",
+        bot=SimpleNamespace(),
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = SimpleNamespace(clear=AsyncMock(), update_data=AsyncMock())
+    user = SimpleNamespace(id=42, language="ru", username="fake_me_x")
+
+    await balance_platega.cancel_pending_platega_subscription(
+        callback, user, SimpleNamespace(), state
+    )
+
+    update_mock.assert_awaited_once()
+    assert update_mock.await_args.kwargs["status"] == "SUBSCRIPTION_CANCELLED"
+    assert update_mock.await_args.kwargs["active_user_id"] is None
+    service.cancel_subscription.assert_awaited_once_with("subscription-001")
+    state.clear.assert_awaited_once()
+    state.update_data.assert_awaited_once_with(topup_amount_kopeks=10_000)
+    render_mock.assert_awaited_once_with(callback.message, user, 10_000)
 
 
 def test_renew_periods_do_not_include_tariff_change():

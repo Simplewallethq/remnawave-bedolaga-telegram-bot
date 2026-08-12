@@ -2,6 +2,7 @@
 
 import logging
 import os
+from datetime import datetime
 from typing import List
 
 from aiogram import types
@@ -493,7 +494,13 @@ async def process_platega_subscription_amount(
                     ).format(amount=amount_rubles),
                     url=redirect_url,
                 )
-            ]
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text=texts.CANCEL,
+                    callback_data=f"cancel_platega_subscription:{result['subscription'].id}",
+                )
+            ],
         ]
     )
     await message.answer(
@@ -505,6 +512,66 @@ async def process_platega_subscription_amount(
         reply_markup=keyboard,
     )
     await state.clear()
+
+
+@error_handler
+async def cancel_pending_platega_subscription(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+    state: FSMContext,
+) -> None:
+    """Cancel an unconfirmed recurring-payment setup and return to its payment choices."""
+    try:
+        subscription_id = int(callback.data.rsplit(":", 1)[-1])
+    except (AttributeError, ValueError):
+        await callback.answer("❌ Некорректная подписка", show_alert=True)
+        return
+
+    from app.services import payment_service as payment_module
+
+    subscription = await payment_module.get_platega_subscription_by_id_for_update(
+        db, subscription_id
+    )
+    if not subscription or subscription.user_id != db_user.id:
+        await callback.answer("⚠️ Регулярные платежи не найдены", show_alert=True)
+        return
+
+    amount_kopeks = subscription.amount_kopeks
+    provider_subscription_id = subscription.platega_subscription_id
+    if subscription.status != "SUBSCRIPTION_CANCELLED":
+        await payment_module.update_platega_subscription(
+            db,
+            subscription=subscription,
+            status="SUBSCRIPTION_CANCELLED",
+            cancelled_at=datetime.utcnow(),
+            set_cancelled_at=True,
+            active_user_id=None,
+            set_active_user_id=True,
+        )
+
+    # The user can immediately choose another method even if Platega is unavailable.
+    await state.clear()
+    await state.update_data(topup_amount_kopeks=amount_kopeks)
+
+    payment_service = PaymentService(callback.bot)
+    try:
+        service = getattr(payment_service, "platega_service", None)
+        if service and service.is_configured:
+            await service.cancel_subscription(provider_subscription_id)
+    except Exception as error:  # pragma: no cover - network errors
+        logger.warning(
+            "Не удалось отменить регулярную подписку Platega %s: %s",
+            provider_subscription_id,
+            error,
+        )
+
+    from .main import _render_payment_methods_with_amount
+
+    await _render_payment_methods_with_amount(
+        callback.message, db_user, amount_kopeks
+    )
+    await callback.answer()
 
 
 async def _prompt_universal_amount(

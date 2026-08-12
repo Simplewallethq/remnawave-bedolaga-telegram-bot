@@ -384,6 +384,79 @@ async def test_subscription_status_callback_updates_subscription(
 
 
 @pytest.mark.anyio("asyncio")
+async def test_failed_subscription_status_callback_releases_active_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _make_service(None)
+    subscription = SimpleNamespace(id=1, user_id=42, status="PENDING")
+    update_mock = AsyncMock(return_value=subscription)
+
+    monkeypatch.setattr(
+        payment_service_module,
+        "get_platega_subscription_by_provider_id_for_update",
+        AsyncMock(return_value=subscription),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        payment_service_module,
+        "update_platega_subscription",
+        update_mock,
+        raising=False,
+    )
+
+    result = await service.process_platega_webhook(
+        DummySession(),
+        {
+            "Id": "subscription-001",
+            "SubscriptionId": "subscription-001",
+            "Status": "SUBSCRIPTION_FAILED",
+            "NextChargeAt": None,
+        },
+    )
+
+    assert result is True
+    assert update_mock.await_args.kwargs["status"] == "SUBSCRIPTION_FAILED"
+    assert update_mock.await_args.kwargs["active_user_id"] is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_cancelled_subscription_ignores_late_activation_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _make_service(None)
+    subscription = SimpleNamespace(
+        id=1, user_id=42, status="SUBSCRIPTION_CANCELLED"
+    )
+    update_mock = AsyncMock()
+
+    monkeypatch.setattr(
+        payment_service_module,
+        "get_platega_subscription_by_provider_id_for_update",
+        AsyncMock(return_value=subscription),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        payment_service_module,
+        "update_platega_subscription",
+        update_mock,
+        raising=False,
+    )
+
+    result = await service.process_platega_webhook(
+        DummySession(),
+        {
+            "Id": "subscription-001",
+            "SubscriptionId": "subscription-001",
+            "Status": "SUBSCRIPTION_ACTIVATED",
+            "NextChargeAt": "2026-08-09T09:10:00Z",
+        },
+    )
+
+    assert result is True
+    update_mock.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
 async def test_cancelled_subscription_charge_does_not_finalize_payment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -441,6 +514,7 @@ async def test_cancelled_subscription_charge_does_not_finalize_payment(
     assert result is True
     update_payment_mock.assert_awaited_once()
     assert update_subscription_mock.await_args.kwargs["status"] == "SUBSCRIPTION_PAST_DUE"
+    assert update_subscription_mock.await_args.kwargs["active_user_id"] is None
     finalize_mock.assert_not_awaited()
 
 

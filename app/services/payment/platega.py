@@ -572,6 +572,15 @@ class PlategaPaymentMixin:
             )
             return False
 
+        # The user cancelled this setup locally. A delayed provider callback must
+        # not revive its slot or credit a charge after the cancellation request.
+        if getattr(subscription, "status", None) == "SUBSCRIPTION_CANCELLED":
+            logger.info(
+                "Игнорируется callback отменённой регулярной подписки Platega %s",
+                subscription_id,
+            )
+            return True
+
         is_status_callback = (
             status_raw.startswith("SUBSCRIPTION_")
             or transaction_id == subscription_id
@@ -673,7 +682,7 @@ class PlategaPaymentMixin:
                 last_callback_payload=payload,
                 next_charge_at=None,
                 set_next_charge_at=True,
-                active_user_id=subscription.user_id,
+                active_user_id=None,
                 set_active_user_id=True,
             )
             return True

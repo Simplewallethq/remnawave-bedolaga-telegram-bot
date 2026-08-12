@@ -1029,6 +1029,7 @@ def register_balance_handlers(dp: Dispatcher):
         start_platega_payment,
         handle_platega_method_selection,
         start_platega_universal_payment,
+        cancel_pending_platega_subscription,
     )
     dp.callback_query.register(
         start_platega_payment,
@@ -1041,6 +1042,10 @@ def register_balance_handlers(dp: Dispatcher):
     dp.callback_query.register(
         start_platega_universal_payment,
         F.data == "topup_platega_universal",
+    )
+    dp.callback_query.register(
+        cancel_pending_platega_subscription,
+        F.data.startswith("cancel_platega_subscription:"),
     )
 
     from .yookassa import check_yookassa_payment_status
