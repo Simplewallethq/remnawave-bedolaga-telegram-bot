@@ -13,7 +13,10 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.services.payment.common import PaymentCommonMixin
-from app.utils.success_notifications import format_subscription_purchase_success
+from app.utils.success_notifications import (
+    build_success_management_keyboard,
+    format_subscription_purchase_success,
+)
 
 
 @pytest.fixture
@@ -108,3 +111,14 @@ def test_subscription_success_message_escapes_plan_html() -> None:
     )
 
     assert "Тариф A&amp;B &lt;Pro&gt;" in message
+
+
+def test_subscription_success_keyboard_leads_to_connection_first() -> None:
+    keyboard = build_success_management_keyboard()
+
+    buttons = [row[0] for row in keyboard.inline_keyboard]
+    assert [(button.text, button.callback_data) for button in buttons] == [
+        ("🔗 Подключиться", "howto"),
+        ("📦 Управление подпиской", "menu_subscription"),
+        ("🏠 Главное меню", "back_to_menu"),
+    ]

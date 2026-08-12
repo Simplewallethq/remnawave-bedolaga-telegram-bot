@@ -14,6 +14,12 @@ def build_success_management_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
+                    text="🔗 Подключиться",
+                    callback_data="howto",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="📦 Управление подпиской",
                     callback_data="menu_subscription",
                 )
