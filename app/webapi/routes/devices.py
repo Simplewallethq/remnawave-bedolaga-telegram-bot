@@ -122,13 +122,18 @@ async def link_device(
     # Enforce device limit on the TARGET subscription. The incoming device is
     # never on the target yet (otherwise we'd have returned above), so the raw
     # count is the right comparison even for rebinds.
-    count = await count_device_links(db, subscription.id)
-    limit = subscription.device_limit or 1
-    if count >= limit:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Device limit exceeded ({count}/{limit})",
-        )
+    #
+    # Skipped when the caller has already identified the owner in Telegram —
+    # the same position /start d_<device_id> is in, and that path deliberately
+    # does not enforce it either.
+    if payload.enforce_device_limit:
+        count = await count_device_links(db, subscription.id)
+        limit = subscription.device_limit or 1
+        if count >= limit:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Device limit exceeded ({count}/{limit})",
+            )
 
     if existing is not None:
         logger.info(

@@ -131,6 +131,19 @@ async def test_english_user_gets_english_copy(authorize):
     assert "TV connected" in callback.message.edit_text.await_args.args[0]
 
 
+def test_device_limit_stays_enforced_unless_explicitly_waived():
+    """Существующие вызовы привязки не должны изменить поведение: лимит
+    выключается только тем, кто попросил явно."""
+    from app.webapi.schemas.devices import DeviceLinkRequest
+
+    assert DeviceLinkRequest(subscription_id=1).enforce_device_limit is True
+    assert (
+        DeviceLinkRequest(subscription_id=1, enforce_device_limit=False)
+        .enforce_device_limit
+        is False
+    )
+
+
 def test_is_configured_requires_a_url(monkeypatch):
     monkeypatch.setattr(tv_pairing.settings, "APP_TV_PAIRING_WEBHOOK_URL", "")
     assert tv_pairing.is_configured() is False

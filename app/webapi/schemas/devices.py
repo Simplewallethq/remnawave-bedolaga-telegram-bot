@@ -9,6 +9,11 @@ from pydantic import BaseModel, Field
 class DeviceLinkRequest(BaseModel):
     """Request body for POST /api/devices/{device_id}/link."""
     subscription_id: int
+    # Выключается для привязки, где владельца уже опознали в Telegram — как в
+    # _link_device_to_subscription. device_links это журнал анти-абуза триала,
+    # он не чистится и расходится с живым списком устройств; настоящий лимит
+    # применяет Remnawave по HWID при подключении.
+    enforce_device_limit: bool = True
 
 
 class DeviceLinkResponse(BaseModel):
