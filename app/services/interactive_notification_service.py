@@ -23,6 +23,7 @@ from app.services.expired_subscription_offer_service import (
 )
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.legacy_notify_once_service import legacy_notify_once_service
+from app.services.legacy_review_bonus_service import legacy_review_bonus_service
 from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
 
 
@@ -115,6 +116,10 @@ class InteractiveNotificationService:
         InteractiveNotificationSlot(
             legacy_notify_once_service.SLOT_KEY,
             run_at=legacy_notify_once_service.RUN_AT,
+        ),
+        InteractiveNotificationSlot(
+            legacy_review_bonus_service.SLOT_KEY,
+            datetime_time(hour=21, minute=0),
         ),
     )
     BATCH_LIMIT = 500
@@ -238,7 +243,11 @@ class InteractiveNotificationService:
         if not candidates:
             recurring_slots = [
                 slot for slot in self.SLOTS
-                if not slot.is_one_off and not slot.is_interval and slot.time is not None
+                if (
+                    not slot.is_one_off
+                    and not slot.is_interval
+                    and slot.time is not None
+                )
             ]
             first_slot = sorted(recurring_slots, key=lambda item: item.time)[0]
             next_day = today + timedelta(days=1)
@@ -293,6 +302,9 @@ class InteractiveNotificationService:
     async def _process_slot(self, slot: InteractiveNotificationSlot) -> None:
         if legacy_notify_once_service.is_slot(slot.key):
             await legacy_notify_once_service.run(self.bot)
+            return
+        if legacy_review_bonus_service.is_slot(slot.key):
+            await legacy_review_bonus_service.run(self.bot)
             return
 
         payload = {
