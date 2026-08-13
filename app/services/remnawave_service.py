@@ -188,6 +188,10 @@ class RemnaWaveConfigurationError(Exception):
 
 class RemnaWaveService:
 
+    # Запас на расхождение часов и на func.now() (= время старта транзакции)
+    # при проверке «не изменилась ли подписка после снятия слепка панели».
+    PANEL_SNAPSHOT_STALE_MARGIN = timedelta(seconds=60)
+
     def __init__(self):
         auth_params = settings.get_remnawave_auth_params()
         base_url = (auth_params.get("base_url") or "").strip()
@@ -1376,10 +1380,13 @@ class RemnaWaveService:
 
     async def sync_users_from_panel(self, db: AsyncSession, sync_type: str = "all") -> Dict[str, int]:
         try:
-            stats = {"created": 0, "updated": 0, "errors": 0, "deleted": 0, "skipped": 0}
-            
+            stats = {"created": 0, "updated": 0, "errors": 0, "deleted": 0, "skipped": 0, "skipped_stale": 0}
+
             logger.info(f"🔄 Начинаем синхронизацию типа: {sync_type}")
-            
+
+            # Время снятия слепка панели: всё, что изменилось в БД позже, синк не трогает.
+            snapshot_taken_at = datetime.utcnow()
+
             async with self.get_api_client() as api:
                 panel_users = []
                 start = 0
@@ -1538,11 +1545,19 @@ class RemnaWaveService:
                             else:
                                 # Обновляем данные существующего пользователя
                                 # Но теперь мы уже загрузили подписку с пользователем, нет необходимости перезагружать
-                                await self._update_subscription_from_panel_data(db, db_user, panel_user)
-                                stats["updated"] += 1
-                                logger.info(
-                                    f"♻️ Обновлена подписка существующего пользователя {telegram_id}"
+                                applied = await self._update_subscription_from_panel_data(
+                                    db,
+                                    db_user,
+                                    panel_user,
+                                    snapshot_taken_at=snapshot_taken_at,
                                 )
+                                if applied:
+                                    stats["updated"] += 1
+                                    logger.info(
+                                        f"♻️ Обновлена подписка существующего пользователя {telegram_id}"
+                                    )
+                                else:
+                                    stats["skipped_stale"] += 1
                     
                     else:
                         if sync_type in ["update_only", "all"]:
@@ -1557,9 +1572,15 @@ class RemnaWaveService:
                                 await db.flush()  # Сохраняем изменения без коммита
                             
                             # Проверяем, есть ли у пользователя подписка, загруженная с пользователем
+                            applied = True
                             if hasattr(db_user, 'subscription') and db_user.subscription:
                                 # Используем уже загруженную подписку
-                                await self._update_subscription_from_panel_data(db, db_user, panel_user)
+                                applied = await self._update_subscription_from_panel_data(
+                                    db,
+                                    db_user,
+                                    panel_user,
+                                    snapshot_taken_at=snapshot_taken_at,
+                                )
                             else:
                                 # Если подписки нет, создаем новую
                                 await self._create_subscription_from_panel_data(db, db_user, panel_user)
@@ -1570,8 +1591,11 @@ class RemnaWaveService:
                                 bot_users_by_uuid,
                             )
 
-                            stats["updated"] += 1
-                            logger.debug(f"✅ Обновлён пользователь {telegram_id}")
+                            if applied:
+                                stats["updated"] += 1
+                                logger.debug(f"✅ Обновлён пользователь {telegram_id}")
+                            else:
+                                stats["skipped_stale"] += 1
 
                 except Exception as user_error:
                     logger.error(f"❌ Ошибка обработки пользователя {telegram_id}: {user_error}")
@@ -1887,11 +1911,55 @@ class RemnaWaveService:
             except Exception as basic_error:
                 logger.error(f"❌ Ошибка создания базовой подписки: {basic_error}")
 
-    async def _update_subscription_from_panel_data(self, db: AsyncSession, user, panel_user):
+    async def _is_panel_snapshot_stale_for_subscription(
+        self,
+        db: AsyncSession,
+        subscription,
+        snapshot_taken_at: Optional[datetime],
+    ) -> bool:
+        """True, если подписку изменили уже после того, как мы сняли слепок панели.
+
+        Обход панели занимает минуты, а сессия синка живёт с expire_on_commit=False,
+        то есть держит в памяти версию строки на момент старта. Покупка, прошедшая
+        в этом окне, откатывалась обратно к досинковым значениям (лимит трафика,
+        устройства, дата окончания). Поэтому свежесть строки проверяем отдельным
+        запросом в БД, а не по устаревшему ORM-объекту.
+        """
+        if snapshot_taken_at is None or not getattr(subscription, "id", None):
+            return False
+
+        try:
+            fresh_updated_at = await db.scalar(
+                select(Subscription.updated_at).where(Subscription.id == subscription.id)
+            )
+        except Exception as error:  # pragma: no cover - диагностический лог
+            logger.warning(
+                "⚠️ Не удалось проверить свежесть подписки %s: %s",
+                subscription.id,
+                error,
+            )
+            return False
+
+        if not fresh_updated_at:
+            return False
+
+        # updated_at пишется через func.now() = время старта транзакции, поэтому
+        # берём небольшой запас. Лишний пропуск безвреден: подписку подхватит
+        # следующий прогон синхронизации.
+        return fresh_updated_at > snapshot_taken_at - self.PANEL_SNAPSHOT_STALE_MARGIN
+
+    async def _update_subscription_from_panel_data(
+        self,
+        db: AsyncSession,
+        user,
+        panel_user,
+        *,
+        snapshot_taken_at: Optional[datetime] = None,
+    ) -> bool:
         try:
             from app.database.crud.subscription import get_subscription_by_user_id
             from app.database.models import SubscriptionStatus
-            
+
             # Сначала пытаемся использовать уже загруженную подписку, если она есть
             subscription = None
             try:
@@ -1904,21 +1972,48 @@ class RemnaWaveService:
             except:
                 # Если не удалось получить подписку через ленивую загрузку
                 subscription = await get_subscription_by_user_id(db, user.id)
-            
+
             if not subscription:
                 await self._create_subscription_from_panel_data(db, user, panel_user)
-                return
-        
+                return True
+
+            if await self._is_panel_snapshot_stale_for_subscription(
+                db, subscription, snapshot_taken_at
+            ):
+                logger.info(
+                    "⏭️ Пропускаем подписку %s пользователя %s: изменена после снятия слепка панели (%s)",
+                    subscription.id,
+                    getattr(user, "telegram_id", "?"),
+                    snapshot_taken_at,
+                )
+                return False
+
+            # Лимиты и срок тарифной подписки задаёт бот (тариф + оплаченный период),
+            # панель тут ведомая. Импортировать их обратно нельзя: панель может
+            # отставать, и подписка «откатится» к предыдущим значениям.
+            plan_managed = bool(getattr(subscription, "plan_id", None)) and not subscription.is_trial
+
             panel_status = panel_user.get('status', 'ACTIVE')
             expire_at_str = panel_user.get('expireAt', '')
-            
-            if expire_at_str:
+
+            if expire_at_str and not plan_managed:
                 expire_at = self._parse_remnawave_date(expire_at_str)
-                
-                if abs((subscription.end_date - expire_at).total_seconds()) > 60: 
-                    subscription.end_date = expire_at
-                    logger.debug(f"Обновлена дата окончания подписки до {expire_at}")
-            
+
+                if abs((subscription.end_date - expire_at).total_seconds()) > 60:
+                    start_date = getattr(subscription, "start_date", None)
+                    if start_date and expire_at < start_date:
+                        logger.warning(
+                            "⚠️ Панель вернула дату окончания %s раньше начала подписки %s "
+                            "(подписка %s, пользователь %s) — не применяем",
+                            expire_at,
+                            start_date,
+                            subscription.id,
+                            getattr(user, "telegram_id", "?"),
+                        )
+                    else:
+                        subscription.end_date = expire_at
+                        logger.debug(f"Обновлена дата окончания подписки до {expire_at}")
+
             current_time = self._now_utc()
             if panel_status == 'ACTIVE' and subscription.end_date > current_time:
                 new_status = SubscriptionStatus.ACTIVE.value
@@ -1954,18 +2049,20 @@ class RemnaWaveService:
                 subscription.traffic_used_gb = traffic_used_gb
                 logger.debug(f"Обновлен использованный трафик: {traffic_used_gb} GB")
             
-            traffic_limit_bytes = panel_user.get('trafficLimitBytes', 0)
-            traffic_limit_gb = traffic_limit_bytes // (1024**3) if traffic_limit_bytes > 0 else 0
-            
-            if subscription.traffic_limit_gb != traffic_limit_gb:
-                subscription.traffic_limit_gb = traffic_limit_gb
-                logger.debug(f"Обновлен лимит трафика: {traffic_limit_gb} GB")
-            
-            device_limit = panel_user.get('hwidDeviceLimit', 1) or 1
-            if subscription.device_limit != device_limit:
-                subscription.device_limit = device_limit
-                logger.debug(f"Обновлен лимит устройств: {device_limit}")
-        
+            if not plan_managed:
+                traffic_limit_bytes = panel_user.get('trafficLimitBytes', 0)
+                traffic_limit_gb = traffic_limit_bytes // (1024**3) if traffic_limit_bytes > 0 else 0
+
+                if subscription.traffic_limit_gb != traffic_limit_gb:
+                    subscription.traffic_limit_gb = traffic_limit_gb
+                    logger.debug(f"Обновлен лимит трафика: {traffic_limit_gb} GB")
+
+                device_limit = panel_user.get('hwidDeviceLimit', 1) or 1
+                if subscription.device_limit != device_limit:
+                    subscription.device_limit = device_limit
+                    logger.debug(f"Обновлен лимит устройств: {device_limit}")
+
+
             new_short_uuid = panel_user.get('shortUuid')
             if new_short_uuid and subscription.remnawave_short_uuid != new_short_uuid:
                 old_short_uuid = subscription.remnawave_short_uuid
@@ -2006,7 +2103,8 @@ class RemnaWaveService:
         
             # Коммитим изменения позже, в основном цикле, чтобы уменьшить количество транзакций
             logger.debug(f"✅ Обновлена подписка для пользователя {user.telegram_id}")
-        
+            return True
+
         except Exception as e:
             logger.error(f"❌ Ошибка обновления подписки для пользователя {user.telegram_id}: {e}")
             # Не делаем rollback, так как это может повлиять на другие операции
@@ -2552,10 +2650,13 @@ class RemnaWaveService:
 
     async def sync_subscription_statuses(self, db: AsyncSession) -> Dict[str, int]:
         try:
-            stats = {"updated": 0, "errors": 0, "checked": 0}
-        
+            stats = {"updated": 0, "errors": 0, "checked": 0, "skipped_stale": 0}
+
             logger.info("🔄 Начинаем синхронизацию статусов подписок...")
-        
+
+            # Время снятия слепка панели: всё, что изменилось в БД позже, синк не трогает.
+            snapshot_taken_at = datetime.utcnow()
+
             async with self.get_api_client() as api:
                 panel_users_data = await api._make_request('GET', '/api/users')
                 panel_users = panel_users_data['response']['users']
@@ -2588,12 +2689,32 @@ class RemnaWaveService:
                         panel_user = panel_users_dict.get(user.telegram_id)
                     
                         if panel_user:
-                            await self._update_subscription_from_panel_data(db, user, panel_user)
-                            stats["updated"] += 1
+                            applied = await self._update_subscription_from_panel_data(
+                                db,
+                                user,
+                                panel_user,
+                                snapshot_taken_at=snapshot_taken_at,
+                            )
+                            if applied:
+                                stats["updated"] += 1
+                            else:
+                                stats["skipped_stale"] += 1
+                        elif await self._is_panel_snapshot_stale_for_subscription(
+                            db, subscription, snapshot_taken_at
+                        ):
+                            # Подписку успели изменить (например, оформить) уже после
+                            # снятия слепка — в панели она наверняка есть, просто в
+                            # нашем снимке её ещё не было.
+                            logger.info(
+                                "⏭️ Не деактивируем подписку %s пользователя %s: изменена после снятия слепка панели",
+                                subscription.id,
+                                user.telegram_id,
+                            )
+                            stats["skipped_stale"] += 1
                         else:
                             if subscription.status != SubscriptionStatus.DISABLED.value:
                                 logger.info(f"🗑️ Деактивируем подписку пользователя {user.telegram_id} (нет в панели)")
-                            
+
                                 from app.database.crud.subscription import deactivate_subscription
                                 await deactivate_subscription(db, subscription)
                                 stats["updated"] += 1

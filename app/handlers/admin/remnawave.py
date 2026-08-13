@@ -2668,9 +2668,10 @@ async def sync_all_users(
 • 🆕 Создано: {stats['created']}
 • 🔄 Обновлено: {stats['updated']}  
 • 🗑️ Деактивировано: {stats.get('deleted', 0)}
+• ⏭️ Пропущено (изменены во время синка): {stats.get('skipped_stale', 0)}
 • ❌ Ошибок: {stats['errors']}
 """
-    
+
     if stats.get('deleted', 0) > 0:
         text += f"""
 
