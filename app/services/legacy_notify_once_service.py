@@ -217,7 +217,7 @@ class LegacyNotifyOnceService:
                 [
                     InlineKeyboardButton(
                         text=self.BUTTON_TEXT,
-                        callback_data="subscription_extend",
+                        callback_data="tariff_select:solo",
                     )
                 ]
             ]
