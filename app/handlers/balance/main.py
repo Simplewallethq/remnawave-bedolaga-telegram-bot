@@ -268,22 +268,13 @@ async def show_payment_methods(
             stored_amount, db_user.language, db_user.username
         )
 
-        try:
-            await callback.message.edit_text(
-                prompt,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
-        except TelegramBadRequest:
-            try:
-                await callback.message.delete()
-            except TelegramBadRequest:
-                pass
-            await callback.message.answer(
-                prompt,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
+        image_path = os.path.join("images", "pay.jpg")
+        await edit_or_answer_photo(
+            callback,
+            prompt,
+            keyboard,
+            photo_path=image_path if os.path.exists(image_path) else None,
+        )
         await callback.answer()
         return
 
@@ -336,15 +327,44 @@ async def _render_payment_methods_with_amount(
         amount_kopeks, db_user.language, db_user.username
     )
 
-    try:
-        if message.text:
-            await message.edit_text(prompt, reply_markup=keyboard, parse_mode="HTML")
-        elif message.caption:
-            await message.edit_caption(prompt, reply_markup=keyboard, parse_mode="HTML")
-        else:
+    image_path = os.path.join("images", "pay.jpg")
+    if not os.path.exists(image_path):
+        try:
+            if message.text:
+                await message.edit_text(prompt, reply_markup=keyboard, parse_mode="HTML")
+            elif message.caption:
+                await message.edit_caption(prompt, reply_markup=keyboard, parse_mode="HTML")
+            else:
+                await message.answer(prompt, reply_markup=keyboard, parse_mode="HTML")
+        except TelegramBadRequest:
             await message.answer(prompt, reply_markup=keyboard, parse_mode="HTML")
+        return
+
+    try:
+        if message.photo:
+            await message.edit_media(
+                types.InputMediaPhoto(
+                    media=types.FSInputFile(image_path),
+                    caption=prompt,
+                    parse_mode="HTML",
+                ),
+                reply_markup=keyboard,
+            )
+        else:
+            await message.delete()
+            await message.answer_photo(
+                types.FSInputFile(image_path),
+                caption=prompt,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+            )
     except TelegramBadRequest:
-        await message.answer(prompt, reply_markup=keyboard, parse_mode="HTML")
+        await message.answer_photo(
+            types.FSInputFile(image_path),
+            caption=prompt,
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
 
 
 @error_handler
@@ -642,6 +662,14 @@ async def process_topup_amount(
                 await process_platega_universal_payment_amount(
                     message, db_user, db, amount_kopeks, state
                 )
+        elif payment_method == "platega_subscription":
+            from app.database.database import AsyncSessionLocal
+            from .platega import process_platega_subscription_amount
+
+            async with AsyncSessionLocal() as db:
+                await process_platega_subscription_amount(
+                    message, db_user, db, amount_kopeks, state
+                )
         elif payment_method == "wata":
             from app.database.database import AsyncSessionLocal
             from .wata import process_wata_payment_amount
@@ -672,9 +700,15 @@ async def process_topup_amount(
             await message.answer("Неизвестный способ оплаты")
 
     except ValueError:
+        data = await state.get_data()
+        back_callback = (
+            "subscription_platega_autopay"
+            if data.get("platega_subscription_origin") == "management"
+            else "back_to_menu"
+        )
         await message.answer(
             texts.INVALID_AMOUNT,
-            reply_markup=get_back_keyboard(db_user.language)
+            reply_markup=get_back_keyboard(db_user.language, back_callback),
         )
 
 
@@ -1030,6 +1064,26 @@ def register_balance_handlers(dp: Dispatcher):
         handle_platega_method_selection,
         start_platega_universal_payment,
         cancel_pending_platega_subscription,
+        show_platega_autopay_menu,
+        start_platega_autopay_setup,
+        request_platega_autopay_cancellation,
+        confirm_platega_autopay_cancellation,
+    )
+    dp.callback_query.register(
+        show_platega_autopay_menu,
+        F.data == "subscription_platega_autopay",
+    )
+    dp.callback_query.register(
+        start_platega_autopay_setup,
+        F.data == "subscription_platega_autopay_connect",
+    )
+    dp.callback_query.register(
+        request_platega_autopay_cancellation,
+        F.data == "subscription_platega_autopay_cancel",
+    )
+    dp.callback_query.register(
+        confirm_platega_autopay_cancellation,
+        F.data.startswith("subscription_platega_autopay_confirm_cancel:"),
     )
     dp.callback_query.register(
         start_platega_payment,

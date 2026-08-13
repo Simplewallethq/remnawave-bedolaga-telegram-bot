@@ -2705,6 +2705,7 @@ async def handle_subscription_menu(
             language=db_user.language,
             balance_kopeks=db_user.balance_kopeks,
             autopay_enabled=bool(subscription.autopay_enabled),
+            username=db_user.username,
         ),
         parse_mode="HTML",
         photo_path=image_path

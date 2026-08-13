@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 from urllib.parse import unquote
 
 import pytest
@@ -48,17 +48,25 @@ def test_share_access_has_english_text_and_action_button():
     assert texts.t("SHARE_ACCESS_SEND_BUTTON") == "📤 Share access"
 
 
-def test_subscription_management_has_devices_and_tariff_change_but_no_share_button():
-    keyboard = inline.get_subscription_menu_keyboard("ru")
+def test_subscription_management_has_autopayment_devices_and_tariff_change_but_no_share_button():
+    keyboard = inline.get_subscription_menu_keyboard("ru", username="fake_me_x")
     callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
 
-    assert [button.callback_data for button in keyboard.inline_keyboard[2]] == [
+    assert keyboard.inline_keyboard[2][0].callback_data == "subscription_platega_autopay"
+    assert [button.callback_data for button in keyboard.inline_keyboard[3]] == [
         "sub_add_days",
         "subscription_manage_devices",
     ]
-    assert keyboard.inline_keyboard[3][0].callback_data == "subscription_change_tariff"
+    assert keyboard.inline_keyboard[4][0].callback_data == "subscription_change_tariff"
     assert keyboard.inline_keyboard[-1][0].callback_data == "main_menu"
     assert "share_access" not in callbacks
+
+
+def test_subscription_management_hides_platega_autopayment_for_non_test_user():
+    keyboard = inline.get_subscription_menu_keyboard("ru", username="unrelated_user")
+    callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
+
+    assert "subscription_platega_autopay" not in callbacks
 
 
 def test_profile_keyboard_no_longer_contains_devices():
@@ -68,27 +76,23 @@ def test_profile_keyboard_no_longer_contains_devices():
     assert "subscription_manage_devices" not in callbacks
 
 
-def test_profile_shows_regular_payment_cancellation_only_when_active():
-    active_keyboard = inline.get_profile_keyboard(
-        "ru", has_active_platega_subscription=True
-    )
-    inactive_keyboard = inline.get_profile_keyboard(
-        "ru", has_active_platega_subscription=False
+def test_platega_autopay_keyboard_changes_action_for_subscription_status():
+    inactive_keyboard = inline.get_platega_autopay_keyboard("ru")
+    active_keyboard = inline.get_platega_autopay_keyboard(
+        "ru", has_active_subscription=True
     )
 
-    active_callbacks = [
-        button.callback_data
-        for row in active_keyboard.inline_keyboard
-        for button in row
-    ]
-    inactive_callbacks = [
-        button.callback_data
-        for row in inactive_keyboard.inline_keyboard
-        for button in row
-    ]
-
-    assert active_callbacks.count("profile_cancel_platega_subscription") == 1
-    assert "profile_cancel_platega_subscription" not in inactive_callbacks
+    assert inactive_keyboard.inline_keyboard[0][0].text == "➕ Подключить автоплатеж"
+    assert (
+        inactive_keyboard.inline_keyboard[0][0].callback_data
+        == "subscription_platega_autopay_connect"
+    )
+    assert active_keyboard.inline_keyboard[0][0].text == "Отменить автоплатеж"
+    assert (
+        active_keyboard.inline_keyboard[0][0].callback_data
+        == "subscription_platega_autopay_cancel"
+    )
+    assert inactive_keyboard.inline_keyboard[-1][0].callback_data == "subscription"
 
 
 def test_balance_topup_keyboard_contains_only_platega_options(
@@ -146,11 +150,12 @@ async def test_regular_payment_button_uses_created_subscription_amount(
                 "subscription": SimpleNamespace(id=71),
             }
 
-    state = SimpleNamespace(clear=AsyncMock())
+    state = SimpleNamespace(clear=AsyncMock(), get_data=AsyncMock(return_value={}))
     message = SimpleNamespace(
         bot=SimpleNamespace(),
         delete=AsyncMock(),
         answer=AsyncMock(),
+        answer_photo=AsyncMock(),
     )
     user = SimpleNamespace(id=42, language="ru")
 
@@ -173,7 +178,7 @@ async def test_regular_payment_button_uses_created_subscription_amount(
         state,
     )
 
-    keyboard = message.answer.await_args.kwargs["reply_markup"]
+    keyboard = message.answer_photo.await_args.kwargs["reply_markup"]
     button = keyboard.inline_keyboard[0][0]
     assert button.text == "✅ Автоплатеж — 100 руб/мес"
     assert button.url == "https://platega.example/subscription"
@@ -244,6 +249,62 @@ async def test_cancel_pending_regular_payment_releases_slot_and_returns_to_choic
     state.clear.assert_awaited_once()
     state.update_data.assert_awaited_once_with(topup_amount_kopeks=10_000)
     render_mock.assert_awaited_once_with(callback.message, user, 10_000)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_cancel_pending_regular_payment_from_management_returns_to_autopay_menu(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    subscription = SimpleNamespace(
+        id=71,
+        user_id=42,
+        amount_kopeks=10_000,
+        platega_subscription_id="subscription-001",
+        status="PENDING",
+    )
+    update_mock = AsyncMock(return_value=subscription)
+    show_menu_mock = AsyncMock()
+    service = SimpleNamespace(
+        is_configured=True,
+        cancel_subscription=AsyncMock(),
+    )
+
+    class StubPaymentService:
+        def __init__(self, _bot):
+            self.platega_service = service
+
+    monkeypatch.setattr(balance_platega, "PaymentService", StubPaymentService)
+    monkeypatch.setattr(
+        payment_service_module,
+        "get_platega_subscription_by_id_for_update",
+        AsyncMock(return_value=subscription),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        payment_service_module,
+        "update_platega_subscription",
+        update_mock,
+        raising=False,
+    )
+    monkeypatch.setattr(balance_platega, "show_platega_autopay_menu", show_menu_mock)
+
+    callback = SimpleNamespace(
+        data="cancel_platega_subscription:71:management",
+        bot=SimpleNamespace(),
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    state = SimpleNamespace(clear=AsyncMock(), update_data=AsyncMock())
+    user = SimpleNamespace(id=42, language="ru")
+
+    await balance_platega.cancel_pending_platega_subscription(
+        callback, user, SimpleNamespace(), state
+    )
+
+    service.cancel_subscription.assert_awaited_once_with("subscription-001")
+    state.clear.assert_awaited_once()
+    state.update_data.assert_not_awaited()
+    show_menu_mock.assert_awaited_once_with(callback, user, ANY)
 
 
 def test_renew_periods_do_not_include_tariff_change():

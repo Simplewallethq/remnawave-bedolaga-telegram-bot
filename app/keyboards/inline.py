@@ -3502,6 +3502,7 @@ def get_subscription_menu_keyboard(
     language: str = DEFAULT_LANGUAGE,
     balance_kopeks: int = 0,
     autopay_enabled: bool = False,
+    username: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """
     Экран 5: Меню подписки
@@ -3543,8 +3544,17 @@ def get_subscription_menu_keyboard(
     buttons = [
         [InlineKeyboardButton(text=balance_button_text, callback_data="balance_topup")],
         [InlineKeyboardButton(text=autopay_button_text, callback_data="subscription_autopay")],
-        action_row,
     ]
+    if can_use_platega_subscription(username):
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=texts.t("PLATEGA_AUTOPAY_MENU_BUTTON", "🔄 Автоплатеж"),
+                    callback_data="subscription_platega_autopay",
+                )
+            ]
+        )
+    buttons.append(action_row)
 
     buttons.append([
         InlineKeyboardButton(
@@ -3557,6 +3567,40 @@ def get_subscription_menu_keyboard(
         [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
     )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_platega_autopay_keyboard(
+    language: str = DEFAULT_LANGUAGE,
+    has_active_subscription: bool = False,
+    can_connect: bool = True,
+) -> InlineKeyboardMarkup:
+    texts = get_texts(language)
+    if not has_active_subscription and not can_connect:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=texts.BACK, callback_data="subscription")],
+            ]
+        )
+    action_button = InlineKeyboardButton(
+        text=texts.t(
+            "PLATEGA_AUTOPAY_CANCEL_BUTTON",
+            "Отменить автоплатеж",
+        )
+        if has_active_subscription
+        else texts.t(
+            "PLATEGA_AUTOPAY_CONNECT_BUTTON",
+            "➕ Подключить автоплатеж",
+        ),
+        callback_data="subscription_platega_autopay_cancel"
+        if has_active_subscription
+        else "subscription_platega_autopay_connect",
+    )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [action_button],
+            [InlineKeyboardButton(text=texts.BACK, callback_data="subscription")],
+        ]
+    )
 
 def get_topup_keyboard(
     prices: dict,
@@ -3734,31 +3778,17 @@ def get_profile_keyboard(
     language: str = DEFAULT_LANGUAGE,
     balance_kopeks: int = 0,
     has_subscription: bool = False,
-    has_active_platega_subscription: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     Экран 9: Профиль пользователя
     """
     texts = get_texts(language)
-    rows = []
-    if has_active_platega_subscription:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=texts.t(
-                        "PLATEGA_SUBSCRIPTION_CANCEL_BUTTON",
-                        "Отменить регулярные платежи",
-                    ),
-                    callback_data="profile_cancel_platega_subscription",
-                )
-            ]
-        )
-    rows.extend([
+    rows = [
         [InlineKeyboardButton(text=texts.t("MENU_PROMOCODE", "🎫 Ввести промокод"), callback_data="profile_promo")],
         [InlineKeyboardButton(text=texts.t("MENU_LANGUAGE", "🌐 Язык/Language"), callback_data="profile_language")],
         [InlineKeyboardButton(text=texts.t("MENU_INFO", "ℹ️ Инфо"), callback_data="menu_info")],
         [InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")],
-    ])
+    ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def get_referral_keyboard(
