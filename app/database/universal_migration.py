@@ -3978,6 +3978,7 @@ async def create_interactive_notification_logs_table() -> bool:
 
                 CREATE INDEX ix_interactive_notification_logs_slot_key ON interactive_notification_logs(slot_key);
                 CREATE INDEX ix_interactive_notification_logs_user_id ON interactive_notification_logs(user_id);
+                CREATE INDEX ix_interactive_notification_logs_slot_key_user_id ON interactive_notification_logs(slot_key, user_id);
                 CREATE INDEX ix_interactive_notification_logs_status ON interactive_notification_logs(status);
                 """
             elif db_type == "postgresql":
@@ -3996,6 +3997,7 @@ async def create_interactive_notification_logs_table() -> bool:
 
                 CREATE INDEX IF NOT EXISTS ix_interactive_notification_logs_slot_key ON interactive_notification_logs(slot_key);
                 CREATE INDEX IF NOT EXISTS ix_interactive_notification_logs_user_id ON interactive_notification_logs(user_id);
+                CREATE INDEX IF NOT EXISTS ix_interactive_notification_logs_slot_key_user_id ON interactive_notification_logs(slot_key, user_id);
                 CREATE INDEX IF NOT EXISTS ix_interactive_notification_logs_status ON interactive_notification_logs(status);
                 """
             elif db_type == "mysql":
@@ -4015,6 +4017,7 @@ async def create_interactive_notification_logs_table() -> bool:
 
                 CREATE INDEX ix_interactive_notification_logs_slot_key ON interactive_notification_logs(slot_key);
                 CREATE INDEX ix_interactive_notification_logs_user_id ON interactive_notification_logs(user_id);
+                CREATE INDEX ix_interactive_notification_logs_slot_key_user_id ON interactive_notification_logs(slot_key, user_id);
                 CREATE INDEX ix_interactive_notification_logs_status ON interactive_notification_logs(status);
                 """
             else:
@@ -4029,6 +4032,27 @@ async def create_interactive_notification_logs_table() -> bool:
 
     except Exception as e:
         logger.error(f"Ошибка создания таблицы interactive_notification_logs: {e}")
+        return False
+
+
+async def ensure_interactive_notification_logs_campaign_index() -> bool:
+    table_name = "interactive_notification_logs"
+    index_name = "ix_interactive_notification_logs_slot_key_user_id"
+    if not await check_table_exists(table_name) or await check_index_exists(table_name, index_name):
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    f"CREATE INDEX {index_name} "
+                    "ON interactive_notification_logs(slot_key, user_id)"
+                )
+            )
+        logger.info("✅ Составной индекс логов интерактивных уведомлений создан")
+        return True
+    except Exception as e:
+        logger.error("Ошибка создания составного индекса логов интерактивных уведомлений: %s", e)
         return False
 
 
@@ -8133,6 +8157,9 @@ async def run_universal_migration():
             logger.info("✅ Таблица interactive_notification_logs готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей interactive_notification_logs")
+
+        if not await ensure_interactive_notification_logs_campaign_index():
+            logger.warning("⚠️ Проблемы с составным индексом interactive_notification_logs")
 
         if not await create_platega_unpaid_created_index():
             logger.warning("⚠️ Проблемы с индексом неоплаченных Platega счетов")

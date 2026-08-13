@@ -1815,6 +1815,11 @@ class InteractiveNotificationLog(Base):
     __table_args__ = (
         Index("ix_interactive_notification_logs_slot_key", "slot_key"),
         Index("ix_interactive_notification_logs_user_id", "user_id"),
+        Index(
+            "ix_interactive_notification_logs_slot_key_user_id",
+            "slot_key",
+            "user_id",
+        ),
         Index("ix_interactive_notification_logs_status", "status"),
     )
 
