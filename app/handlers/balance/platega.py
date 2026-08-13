@@ -12,14 +12,193 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database.models import User
-from app.keyboards.inline import get_back_keyboard
+from app.keyboards.inline import (
+    can_use_platega_subscription,
+    get_back_keyboard,
+    get_platega_autopay_keyboard,
+)
 from app.localization.texts import get_texts
 from app.services.payment_service import PaymentService
 from app.states import BalanceStates
 from app.utils.decorators import error_handler
+from app.utils.photo_message import edit_or_answer_photo
 from .vpn_deposit_bonus import build_vpn_deposit_bonus_metadata, merge_vpn_deposit_bonus_metadata, should_bypass_minimum
 
 logger = logging.getLogger(__name__)
+
+PLATEGA_SUBSCRIPTION_MANAGEMENT_ORIGIN = "management"
+
+
+async def show_platega_autopay_menu(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+    *,
+    answer_callback: bool = True,
+) -> None:
+    """Show and manage the user's recurring Platega balance top-up."""
+    from app.services import payment_service as payment_module
+
+    texts = get_texts(db_user.language)
+    subscription = await payment_module.get_active_platega_subscription_for_user(
+        db, db_user.id
+    )
+    amount = (
+        texts.t("PLATEGA_AUTOPAY_CURRENT_AMOUNT", "{amount}/мес").format(
+            amount=settings.format_price(subscription.amount_kopeks)
+        )
+        if subscription
+        else texts.t("PLATEGA_AUTOPAY_NOT_CONFIGURED", "не настроен")
+    )
+    text = texts.t(
+        "PLATEGA_AUTOPAY_MENU_TEXT",
+        "Здесь вы можете настроить автоплатеж чтобы всегда оставаться на связи.\n\n"
+        "Текущий автоплатеж: {amount}",
+    ).format(amount=amount)
+    await edit_or_answer_photo(
+        callback,
+        text,
+        get_platega_autopay_keyboard(
+            db_user.language,
+            has_active_subscription=subscription is not None,
+            can_connect=(
+                settings.is_platega_enabled()
+                and can_use_platega_subscription(db_user.username)
+            ),
+        ),
+        photo_path="images/pay.jpg" if os.path.exists("images/pay.jpg") else None,
+    )
+    if answer_callback:
+        await callback.answer()
+
+
+async def start_platega_autopay_setup(
+    callback: types.CallbackQuery,
+    db_user: User,
+    state: FSMContext,
+) -> None:
+    texts = get_texts(db_user.language)
+    if not (
+        settings.is_platega_enabled()
+        and can_use_platega_subscription(db_user.username)
+    ):
+        await callback.answer(
+            texts.t(
+                "PLATEGA_TEMPORARILY_UNAVAILABLE",
+                "❌ Оплата через Platega временно недоступна",
+            ),
+            show_alert=True,
+        )
+        return
+
+    await edit_or_answer_photo(
+        callback,
+        texts.t(
+            "PLATEGA_AUTOPAY_AMOUNT_PROMPT",
+            "💳 <b>Подключение автоплатежа</b>\n\n"
+            "Введите сумму в рублях для регулярного пополнения:",
+        ),
+        types.InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    types.InlineKeyboardButton(
+                        text=texts.BACK,
+                        callback_data="subscription_platega_autopay",
+                    )
+                ]
+            ]
+        ),
+        photo_path="images/pay.jpg" if os.path.exists("images/pay.jpg") else None,
+    )
+    await state.clear()
+    await state.update_data(
+        payment_method="platega_subscription",
+        platega_subscription_origin=PLATEGA_SUBSCRIPTION_MANAGEMENT_ORIGIN,
+    )
+    await state.set_state(BalanceStates.waiting_for_amount)
+    await callback.answer()
+
+
+async def request_platega_autopay_cancellation(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+) -> None:
+    from app.services import payment_service as payment_module
+
+    subscription = await payment_module.get_active_platega_subscription_for_user(
+        db, db_user.id
+    )
+    texts = get_texts(db_user.language)
+    if not subscription:
+        await callback.answer(
+            texts.t("PLATEGA_SUBSCRIPTION_NOT_FOUND", "Регулярные платежи не найдены."),
+            show_alert=True,
+        )
+        return
+
+    await edit_or_answer_photo(
+        callback,
+        texts.t(
+            "PLATEGA_SUBSCRIPTION_CANCEL_CONFIRM",
+            "Вы уверены, что хотите отменить регулярные платежи?",
+        ),
+        types.InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    types.InlineKeyboardButton(
+                        text=texts.t("CONFIRM", "✅ Подтвердить"),
+                        callback_data=(
+                            "subscription_platega_autopay_confirm_cancel:"
+                            f"{subscription.id}"
+                        ),
+                    )
+                ],
+                [
+                    types.InlineKeyboardButton(
+                        text=texts.BACK,
+                        callback_data="subscription_platega_autopay",
+                    )
+                ],
+            ]
+        ),
+        photo_path="images/pay.jpg" if os.path.exists("images/pay.jpg") else None,
+    )
+    await callback.answer()
+
+
+async def confirm_platega_autopay_cancellation(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+) -> None:
+    try:
+        subscription_id = int(callback.data.rsplit(":", 1)[-1])
+    except (AttributeError, IndexError, ValueError):
+        await callback.answer("Некорректный запрос", show_alert=True)
+        return
+
+    texts = get_texts(db_user.language)
+    result = await PaymentService(callback.bot).cancel_platega_subscription(
+        db, subscription_id=subscription_id, user_id=db_user.id
+    )
+    if not result:
+        await callback.answer(
+            texts.t(
+                "PLATEGA_SUBSCRIPTION_CANCEL_ERROR",
+                "Не удалось отменить регулярные платежи. Попробуйте позже.",
+            ),
+            show_alert=True,
+        )
+        return
+
+    await show_platega_autopay_menu(
+        callback, db_user, db, answer_callback=False
+    )
+    await callback.answer(
+        texts.t("PLATEGA_SUBSCRIPTION_CANCELLED", "Регулярные платежи отменены."),
+        show_alert=True,
+    )
 
 
 def _get_active_methods() -> List[int]:
@@ -445,6 +624,7 @@ async def process_platega_subscription_amount(
         )
         return
 
+    data = await state.get_data()
     payment_service = PaymentService(message.bot)
     try:
         result = await payment_service.create_platega_subscription(
@@ -461,7 +641,7 @@ async def process_platega_subscription_amount(
         await message.answer(
             texts.t(
                 "PLATEGA_SUBSCRIPTION_ALREADY_EXISTS",
-                "Регулярные платежи уже подключены. Отменить их можно в профиле.",
+                "Регулярные платежи уже подключены. Отменить их можно в разделе автоплатежа.",
             )
         )
         await state.clear()
@@ -498,19 +678,31 @@ async def process_platega_subscription_amount(
             [
                 types.InlineKeyboardButton(
                     text=texts.CANCEL,
-                    callback_data=f"cancel_platega_subscription:{result['subscription'].id}",
+                    callback_data=(
+                        f"cancel_platega_subscription:{result['subscription'].id}:"
+                        f"{PLATEGA_SUBSCRIPTION_MANAGEMENT_ORIGIN}"
+                        if data.get("platega_subscription_origin")
+                        == PLATEGA_SUBSCRIPTION_MANAGEMENT_ORIGIN
+                        else f"cancel_platega_subscription:{result['subscription'].id}"
+                    ),
                 )
             ],
         ]
     )
-    await message.answer(
-        texts.t(
-            "PLATEGA_SUBSCRIPTION_INSTRUCTIONS",
-            "Чтобы подключить автоплатеж нажми на кнопку и соверши платеж.\n\n"
-            "Баланс пополняется после каждого успешного ежемесячного списания.",
-        ),
-        reply_markup=keyboard,
+    instructions = texts.t(
+        "PLATEGA_SUBSCRIPTION_INSTRUCTIONS",
+        "Чтобы подключить автоплатеж нажми на кнопку и соверши платеж.\n\n"
+        "Баланс пополняется после каждого успешного ежемесячного списания.",
     )
+    pay_image_path = os.path.join("images", "pay.jpg")
+    if os.path.exists(pay_image_path):
+        await message.answer_photo(
+            FSInputFile(pay_image_path),
+            caption=instructions,
+            reply_markup=keyboard,
+        )
+    else:
+        await message.answer(instructions, reply_markup=keyboard)
     await state.clear()
 
 
@@ -523,8 +715,11 @@ async def cancel_pending_platega_subscription(
 ) -> None:
     """Cancel an unconfirmed recurring-payment setup and return to its payment choices."""
     try:
-        subscription_id = int(callback.data.rsplit(":", 1)[-1])
-    except (AttributeError, ValueError):
+        parts = callback.data.split(":", 2)
+        _, subscription_id_text = parts[:2]
+        origin = parts[2] if len(parts) == 3 else "balance"
+        subscription_id = int(subscription_id_text)
+    except (AttributeError, IndexError, ValueError):
         await callback.answer("❌ Некорректная подписка", show_alert=True)
         return
 
@@ -550,10 +745,7 @@ async def cancel_pending_platega_subscription(
             set_active_user_id=True,
         )
 
-    # The user can immediately choose another method even if Platega is unavailable.
     await state.clear()
-    await state.update_data(topup_amount_kopeks=amount_kopeks)
-
     payment_service = PaymentService(callback.bot)
     try:
         service = getattr(payment_service, "platega_service", None)
@@ -565,6 +757,13 @@ async def cancel_pending_platega_subscription(
             provider_subscription_id,
             error,
         )
+
+    if origin == PLATEGA_SUBSCRIPTION_MANAGEMENT_ORIGIN:
+        await show_platega_autopay_menu(callback, db_user, db)
+        return
+
+    # The user can immediately choose another method even if Platega is unavailable.
+    await state.update_data(topup_amount_kopeks=amount_kopeks)
 
     from .main import _render_payment_methods_with_amount
 
