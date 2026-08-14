@@ -42,6 +42,11 @@ from app.utils.subscription_utils import (
     get_raw_subscription_link,
     is_ios_device_type,
 )
+from app.utils.access_keys import (
+    build_access_key_section,
+    build_leto_access_code_block,
+    format_copyable_code,
+)
 from app.database.crud.referral import get_user_referral_stats
 from app.database.crud.transaction import get_user_transactions
 from app.database.models import TransactionType
@@ -1278,42 +1283,11 @@ def _get_connection_key(user: User) -> str | None:
 
 
 def _format_connection_key(link: str) -> str:
-    escaped_link = html.escape(link, quote=True)
-    # Telegram renders preformatted blocks with a built-in copy control.
-    return f"<pre><code>{escaped_link}</code></pre>"
+    return format_copyable_code(link)
 
 
 async def _build_leto_code_block(db: AsyncSession, user: User) -> str:
-    """Блок с 16-значным кодом привязки — им входят в Leto и личный кабинет.
-
-    Код тот же, что выдаёт кнопка «Привязать устройство»: одноразовый, живёт
-    сутки, повторное открытие меню переиспользует активный. Ошибка генерации
-    не должна ронять экран подключения — тогда блок просто не показываем.
-    """
-    subscription_id = getattr(getattr(user, "subscription", None), "id", None)
-    if not subscription_id:
-        return ""
-
-    from app.database.crud.device_binding_code import get_or_create_binding_code
-
-    try:
-        record = await get_or_create_binding_code(db, subscription_id)
-    except Exception as error:
-        logger.error(
-            "Не удалось создать код привязки для пользователя %s: %s",
-            getattr(user, "telegram_id", None),
-            error,
-        )
-        return ""
-
-    ttl_hours = max(1, int((record.expires_at - datetime.utcnow()).total_seconds() // 3600))
-    texts = get_texts(user.language)
-    label = texts.t(
-        "CONNECT_LETO_CODE_LABEL",
-        "Ключ для входа в Leto VPN (действует {ttl_hours} ч)",
-    ).format(ttl_hours=ttl_hours)
-
-    return "\n\n" + label + "\n" + _format_connection_key(record.code)
+    return await build_leto_access_code_block(db, user, get_texts(user.language))
 
 
 def _get_happ_transfer_url(user: User) -> str | None:
@@ -1377,20 +1351,21 @@ async def _get_connect_menu_user(
 
 async def _build_connect_platform_selection_text(db: AsyncSession, user: User) -> str:
     texts = get_texts(user.language)
-    link = _get_connection_key(user)
     return (
-        texts.t(
-            "CONNECT_PLATFORM_SELECTION_TEXT",
-            "Для подключения основного или дополнительного устройства выбери платформу:",
+        await build_access_key_section(
+            db,
+            user,
+            texts,
+            texts.t(
+                "CONNECT_ACCESS_KEY_LABEL",
+                "<b>Твой ключ доступа</b> (для приложений Leto, Happ, Incy)",
+            ),
         )
         + "\n\n"
         + texts.t(
-            "CONNECT_ACCESS_KEY_LABEL",
-            "Ключ-ссылка доступа (для Happ, Incy)",
+            "CONNECT_PLATFORM_SELECTION_TEXT",
+            "Выбери платформу для подключения:",
         )
-        + "\n"
-        + _format_connection_key(link)
-        + await _build_leto_code_block(db, user)
     )
 
 
@@ -1425,20 +1400,26 @@ async def handle_connect_platform_android(
         return
 
     texts = get_texts(user.language)
-    link = _get_connection_key(user)
     text = (
-        texts.t(
-            "CONNECT_ANDROID_TEXT",
-            "Установи приложение Leto VPN по кнопке ниже и авторизуйся ключом для входа.",
+        await build_access_key_section(
+            db,
+            user,
+            texts,
+            texts.t(
+                "CONNECT_ACCESS_KEY_LABEL",
+                "<b>Твой ключ доступа</b> (для приложений Leto, Happ, Incy)",
+            ),
         )
         + "\n\n"
         + texts.t(
-            "CONNECT_ANDROID_KEY_LABEL",
-            "Ключ-ссылка (подойдет также и для Happ, Incy):",
+            "CONNECT_ANDROID_TEXT",
+            "Скачай Leto VPN по кнопке ниже и авторизуйся через Telegram или с помощью ключа доступа.",
         )
-        + "\n"
-        + _format_connection_key(link)
-        + await _build_leto_code_block(db, user)
+        + "\n\n"
+        + texts.t(
+            "CONNECT_ANDROID_HAPP_HINT",
+            "Если у тебя есть Happ, можешь передать ключ доступа в него по кнопке ниже.",
+        )
     )
     await edit_or_answer_photo(
         callback,
@@ -1464,23 +1445,31 @@ async def handle_connect_platform_apple(
         return
 
     texts = get_texts(user.language)
-    link = _get_connection_key(user)
     text = (
-        texts.t(
-            "CONNECT_APPLE_TEXT",
-            "Для iOS/MacOS Leto работает через Incy (RU стор) и Happ (международный стор).\n\n"
-            "Если выбрал Incy, то после скачивания можешь просто нажать \"Передать ключ в Incy\" "
-            "и все настроится автоматически.",
+        await build_access_key_section(
+            db,
+            user,
+            texts,
+            texts.t(
+                "CONNECT_ACCESS_KEY_LABEL",
+                "<b>Твой ключ доступа</b> (для приложений Leto, Happ, Incy)",
+            ),
         )
-        + "\n"
-        + _format_connection_key(link)
+        + "\n\n"
+        + texts.t(
+            "CONNECT_APPLE_TEXT",
+            "<b>Для iOS/macOS доступны два приложения:</b>\n"
+            "<b>Incy</b> — RU App Store\n"
+            "<b>Happ</b> — международный App Store\n\n"
+            "В любое из приложений (после скачивания) можно передать ключ доступа по кнопке ниже.",
+        )
     )
     await edit_or_answer_photo(
         callback,
         text,
         get_connect_apple_keyboard(
             user.language,
-            incy_transfer_url=get_incy_button_url(link),
+            incy_transfer_url=get_incy_button_url(_get_connection_key(user)),
             happ_transfer_url=_get_happ_transfer_url(user),
         ),
         parse_mode="HTML",

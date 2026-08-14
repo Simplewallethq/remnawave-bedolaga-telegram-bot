@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock
 from urllib.parse import unquote
@@ -13,34 +14,60 @@ from app.services import payment_service as payment_service_module
 
 
 SUBSCRIPTION_LINK = "https://letovpn.com/sub/private-subscription-key"
+LETO_ACCESS_CODE = "A2B3C4D5E6F7G8H9"
+ACCESS_KEY_SECTION = (
+    "<b>Ключ доступа:</b>\n"
+    f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>\n\n"
+    "Ключ для входа в Leto VPN\n"
+    f"<pre><code>{LETO_ACCESS_CODE}</code></pre>"
+)
+FORWARDED_ACCESS_KEY_SECTION = (
+    "Ключ доступа:\n"
+    f"{SUBSCRIPTION_LINK}\n\n"
+    "Ключ для входа в Leto VPN\n"
+    f"{LETO_ACCESS_CODE}"
+)
+APP_LINKS = {
+    "android": "https://play.google.com/store/apps/details?id=com.leto.split",
+    "apple": "https://apps.apple.com/ru/app/incy/id6756943388",
+    "windows": "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
+}
 
 
-def test_share_access_text_uses_a_copyable_direct_link_and_platform_links():
-    text = purchase._build_share_access_text(get_texts("ru"), SUBSCRIPTION_LINK)
+def test_share_access_text_uses_copyable_keys_and_application_links():
+    text = purchase._build_share_access_text(
+        get_texts("ru"), ACCESS_KEY_SECTION, APP_LINKS
+    )
 
     assert f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>" in text
+    assert f"<pre><code>{LETO_ACCESS_CODE}</code></pre>" in text
     assert "<b>🤖 Android</b>" in text
     assert "<b>🍎 iPhone/Mac</b>" in text
     assert "<b>💻 Windows</b>" in text
-    assert "https://play.google.com/store/apps/details?id=com.leto.split" in text
-    assert "https://apps.apple.com/ru/app/incy/id6756943388" in text
-    assert "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe" in text
+    for url in APP_LINKS.values():
+        assert f"<pre><code>{url}</code></pre>" in text
 
 
-def test_share_access_friend_message_uses_direct_link_and_platform_links():
-    text = purchase._build_share_access_friend_message(get_texts("ru"), SUBSCRIPTION_LINK)
+def test_share_access_friend_message_uses_direct_links_and_plain_keys():
+    text = purchase._build_share_access_friend_message(
+        get_texts("ru"), FORWARDED_ACCESS_KEY_SECTION, APP_LINKS
+    )
 
     assert SUBSCRIPTION_LINK in text
-    assert "авторизуйся через ссылку доступа" in text
-    assert "https://play.google.com/store/apps/details?id=com.leto.split" in text
-    assert "https://apps.apple.com/ru/app/incy/id6756943388" in text
-    assert "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe" in text
+    assert "авторизуйся через ключ доступа" in text
+    assert LETO_ACCESS_CODE in text
+    assert "<pre><code>" not in text
+    for url in APP_LINKS.values():
+        assert url in text
+        assert f"<pre><code>{url}</code></pre>" not in text
 
 
 def test_share_access_has_english_text_and_action_button():
     texts = get_texts("en")
-    screen_text = purchase._build_share_access_text(texts, SUBSCRIPTION_LINK)
-    friend_text = purchase._build_share_access_friend_message(texts, SUBSCRIPTION_LINK)
+    screen_text = purchase._build_share_access_text(texts, ACCESS_KEY_SECTION, APP_LINKS)
+    friend_text = purchase._build_share_access_friend_message(
+        texts, ACCESS_KEY_SECTION, APP_LINKS
+    )
 
     assert "To share access with friends" in screen_text
     assert f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>" in screen_text
@@ -329,8 +356,10 @@ def test_tariff_catalog_can_return_to_subscription_management():
 
 
 async def test_handle_share_access_uses_subscription_url_without_share_token(monkeypatch):
+    import app.database.crud.device_binding_code as binding_module
+
     callback = SimpleNamespace(
-        message=SimpleNamespace(edit_caption=AsyncMock()),
+        message=SimpleNamespace(edit_caption=AsyncMock(), answer=AsyncMock()),
         answer=AsyncMock(),
     )
     user = SimpleNamespace(
@@ -339,16 +368,31 @@ async def test_handle_share_access_uses_subscription_url_without_share_token(mon
     )
     get_or_create = AsyncMock()
     monkeypatch.setattr(share_token, "get_or_create_share_token", get_or_create)
+    monkeypatch.setattr(
+        binding_module,
+        "get_or_create_binding_code",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                code=LETO_ACCESS_CODE,
+                expires_at=datetime.utcnow() + timedelta(hours=24),
+            )
+        ),
+    )
 
     await purchase.handle_share_access(callback, user, AsyncMock())
 
     rendered_text = callback.message.edit_caption.await_args.kwargs["caption"]
     keyboard = callback.message.edit_caption.await_args.kwargs["reply_markup"]
-    share_url = keyboard.inline_keyboard[0][0].url
     assert SUBSCRIPTION_LINK in rendered_text
-    assert keyboard.inline_keyboard[0][0].text == "📤 Поделиться доступом"
+    assert LETO_ACCESS_CODE in rendered_text
+    assert keyboard.inline_keyboard[0][0].text == "📤 Переслать друзьям"
+    share_url = keyboard.inline_keyboard[0][0].url
+    assert share_url.startswith("https://t.me/share/url?url=")
     assert keyboard.inline_keyboard[1][0].callback_data == "subscription"
-    assert SUBSCRIPTION_LINK in unquote(share_url)
+    forwarded_text = unquote(share_url)
+    assert SUBSCRIPTION_LINK in forwarded_text
+    assert LETO_ACCESS_CODE in forwarded_text
+    assert "<pre><code>" not in forwarded_text
     get_or_create.assert_not_awaited()
     callback.answer.assert_awaited_once()
 
