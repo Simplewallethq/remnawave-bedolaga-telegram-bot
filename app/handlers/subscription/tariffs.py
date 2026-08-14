@@ -1805,10 +1805,13 @@ async def show_renew_current(
 
     keyboard = get_renew_periods_keyboard(plan.id, period_prices, language=db_user.language)
 
-    try:
-        await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(message_text, reply_markup=keyboard, parse_mode="HTML")
+    image_path = os.path.join("images", "subscription.jpg")
+    await edit_or_answer_photo(
+        callback,
+        message_text,
+        keyboard,
+        photo_path=image_path if os.path.exists(image_path) else None,
+    )
     await callback.answer()
 
 

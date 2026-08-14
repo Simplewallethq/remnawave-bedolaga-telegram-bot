@@ -72,6 +72,37 @@ async def test_expired_tariff_extend_restores_same_plan(monkeypatch):
     legacy_price_calc.assert_not_called()
 
 
+async def test_current_tariff_renewal_uses_subscription_image(monkeypatch):
+    callback = _callback()
+    db = AsyncMock()
+    user = SimpleNamespace(id=42, language="ru", subscription=_tariff_subscription())
+    plan = SimpleNamespace(id=123, code="solo", display_name="Solo", description_md="Solo plan")
+    render = AsyncMock()
+
+    monkeypatch.setattr(
+        tariffs,
+        "_resolve_renewable_subscription",
+        AsyncMock(return_value=user.subscription),
+    )
+    monkeypatch.setattr(tariffs, "get_plan_by_id", AsyncMock(return_value=plan))
+    monkeypatch.setattr(tariffs, "select_prices_for_cohort", lambda *_args: {30: 10_000})
+    monkeypatch.setattr(
+        tariffs.hot_invoice_offer_service,
+        "get_available_offer",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        tariffs.expired_subscription_offer_service,
+        "get_available_offer",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(tariffs, "edit_or_answer_photo", render)
+
+    await tariffs.show_renew_current(callback, user, db)
+
+    assert render.await_args.kwargs["photo_path"] == "images/subscription.jpg"
+
+
 async def test_legacy_extend_keeps_legacy_calculator(monkeypatch):
     callback = _callback()
     db = AsyncMock()

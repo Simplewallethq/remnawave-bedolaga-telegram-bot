@@ -2917,13 +2917,13 @@ async def handle_share_access(
         )],
     ])
 
-    try:
-        await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
-    except TelegramBadRequest:
-        try:
-            await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
-        except TelegramBadRequest:
-            await callback.message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
+    image_path = os.path.join("images", "connection.jpg")
+    await edit_or_answer_photo(
+        callback,
+        text,
+        keyboard,
+        photo_path=image_path if os.path.exists(image_path) else None,
+    )
     await callback.answer()
 
 

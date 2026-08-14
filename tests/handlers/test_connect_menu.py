@@ -33,15 +33,30 @@ async def test_connect_menu_has_english_text_and_buttons():
     keyboard = inline.get_connection_platform_keyboard("en")
     text = await menu._build_connect_platform_selection_text(AsyncMock(), user)
 
-    assert "To connect your primary or additional device" in text
-    assert "Access key link (for Happ, Incy)" in text
+    assert "Choose a platform to connect:" in text
+    assert "Your access key" in text
     assert [(row[0].text, row[0].callback_data) for row in _button_rows(keyboard)] == [
         ("🤖 Android", "connect_platform_android"),
         ("🍎 iPhone/MacOS", "connect_platform_apple"),
         ("💻 Windows", "connect_platform_windows"),
-        ("🔗 Share access", "connect_share_access"),
+        ("🔗 Send to friends", "connect_share_access"),
         ("🏠 Main menu", "main_menu"),
     ]
+
+
+def test_connection_copy_is_available_in_every_supported_locale():
+    expected_happ_hints = {
+        "ru": "Если у тебя есть Happ",
+        "en": "If you use Happ",
+        "ua": "Якщо користуєшся Happ",
+        "zh": "如果您使用 Happ",
+    }
+
+    for language, hint in expected_happ_hints.items():
+        texts = menu.get_texts(language)
+
+        assert hint in texts.t("CONNECT_ANDROID_HAPP_HINT")
+        assert "{ttl_hours}" in texts.t("CONNECT_LETO_CODE_LABEL")
 
 
 def test_connect_android_keyboard_omits_transfer_without_url(monkeypatch):

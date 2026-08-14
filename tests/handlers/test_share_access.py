@@ -62,17 +62,21 @@ def test_share_access_friend_message_uses_direct_links_and_plain_keys():
         assert f"<pre><code>{url}</code></pre>" not in text
 
 
-def test_share_access_has_english_text_and_action_button():
-    texts = get_texts("en")
-    screen_text = purchase._build_share_access_text(texts, ACCESS_KEY_SECTION, APP_LINKS)
-    friend_text = purchase._build_share_access_friend_message(
-        texts, ACCESS_KEY_SECTION, APP_LINKS
-    )
+def test_share_access_uses_dynamic_links_in_every_supported_locale():
+    for language in ("ru", "en", "ua", "zh"):
+        texts = get_texts(language)
+        screen_text = purchase._build_share_access_text(
+            texts, ACCESS_KEY_SECTION, APP_LINKS
+        )
+        friend_text = purchase._build_share_access_friend_message(
+            texts, FORWARDED_ACCESS_KEY_SECTION, APP_LINKS
+        )
 
-    assert "To share access with friends" in screen_text
-    assert f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>" in screen_text
-    assert "I'm sharing access to Leto VPN" in friend_text
-    assert texts.t("SHARE_ACCESS_SEND_BUTTON") == "📤 Share access"
+        assert SUBSCRIPTION_LINK in screen_text
+        assert SUBSCRIPTION_LINK in friend_text
+        for url in APP_LINKS.values():
+            assert f"<pre><code>{url}</code></pre>" in screen_text
+            assert url in friend_text
 
 
 def test_subscription_management_keeps_platega_autopayment_but_hides_autorenewal_and_devices():
@@ -359,7 +363,7 @@ async def test_handle_share_access_uses_subscription_url_without_share_token(mon
     import app.database.crud.device_binding_code as binding_module
 
     callback = SimpleNamespace(
-        message=SimpleNamespace(edit_caption=AsyncMock(), answer=AsyncMock()),
+        message=SimpleNamespace(),
         answer=AsyncMock(),
     )
     user = SimpleNamespace(
@@ -378,13 +382,16 @@ async def test_handle_share_access_uses_subscription_url_without_share_token(mon
             )
         ),
     )
+    render = AsyncMock()
+    monkeypatch.setattr(purchase, "edit_or_answer_photo", render)
 
     await purchase.handle_share_access(callback, user, AsyncMock())
 
-    rendered_text = callback.message.edit_caption.await_args.kwargs["caption"]
-    keyboard = callback.message.edit_caption.await_args.kwargs["reply_markup"]
+    rendered_text = render.await_args.args[1]
+    keyboard = render.await_args.args[2]
     assert SUBSCRIPTION_LINK in rendered_text
     assert LETO_ACCESS_CODE in rendered_text
+    assert render.await_args.kwargs["photo_path"] == "images/connection.jpg"
     assert keyboard.inline_keyboard[0][0].text == "📤 Переслать друзьям"
     share_url = keyboard.inline_keyboard[0][0].url
     assert share_url.startswith("https://t.me/share/url?url=")

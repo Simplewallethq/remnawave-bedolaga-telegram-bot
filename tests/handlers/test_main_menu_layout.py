@@ -34,6 +34,22 @@ def test_inactive_subscriber_main_menu_starts_the_extend_flow():
     ]
 
 
+def test_non_paid_users_do_not_see_device_management():
+    for kwargs in ({}, {"trial_active": True}):
+        keyboard = inline.get_new_main_menu_keyboard(
+            balance_rub=0,
+            language="ru",
+            **kwargs,
+        )
+
+        callbacks = [
+            button.callback_data
+            for row in keyboard.inline_keyboard
+            for button in row
+        ]
+        assert "subscription_manage_devices" not in callbacks
+
+
 def test_russian_tariff_cards_describe_all_bypasses():
     texts = get_texts("ru")
 

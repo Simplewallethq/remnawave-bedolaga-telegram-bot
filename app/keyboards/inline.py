@@ -3180,12 +3180,13 @@ def get_new_main_menu_keyboard(
             style=ButtonStyle.SUCCESS,
         )])
         
-    keyboard.append([
-        InlineKeyboardButton(
-            text=texts.t("PROFILE_DEVICES_BUTTON", "📱 Мои устройства"),
-            callback_data="subscription_manage_devices",
-        )
-    ])
+    if has_active_subscription:
+        keyboard.append([
+            InlineKeyboardButton(
+                text=texts.t("PROFILE_DEVICES_BUTTON", "📱 Мои устройства"),
+                callback_data="subscription_manage_devices",
+            )
+        ])
     if has_active_subscription or trial_active:
         subscription_button = InlineKeyboardButton(
             text=texts.t("MENU_SUBSCRIPTION_BUTTON", "📦 Управление Подпиской"),
