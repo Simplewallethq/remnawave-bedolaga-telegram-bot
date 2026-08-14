@@ -17,7 +17,7 @@ BUILTIN_CALLBACKS: Set[str] = {
     # Основные кнопки меню
     "subscription_connect",
     "subscription_happ_download",
-    "menu_subscription",
+    "subscription",
     "buy_traffic",
     "menu_balance",
     "menu_trial",
@@ -205,4 +205,3 @@ class ButtonStatsMiddleware(BaseMiddleware):
                     logger.debug(f"Ошибка записи клика в БД {button_id}: {e}")
         except Exception as e:
             logger.debug(f"Ошибка создания сессии БД для логирования клика: {e}")
-

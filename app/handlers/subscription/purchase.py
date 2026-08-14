@@ -3912,11 +3912,6 @@ def register_handlers(dp: Dispatcher):
     )
 
     dp.callback_query.register(
-        show_subscription_info,
-        F.data == "menu_subscription"
-    )
-
-    dp.callback_query.register(
         show_trial_offer,
         F.data == "menu_trial"
     )

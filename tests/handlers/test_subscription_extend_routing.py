@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.handlers.subscription import purchase, tariffs
+from app.keyboards.inline import get_extend_subscription_keyboard_with_prices
 from app.services.user_service import UserService
 
 
@@ -24,6 +25,15 @@ def _tariff_subscription(*, expired: bool = False):
         status="expired" if expired else "active",
         end_date=now - timedelta(days=1) if expired else now + timedelta(days=5),
     )
+
+
+def test_legacy_extend_back_returns_subscription_management():
+    keyboard = get_extend_subscription_keyboard_with_prices(
+        language="ru",
+        prices={30: 10000},
+    )
+
+    assert keyboard.inline_keyboard[-1][0].callback_data == "subscription"
 
 
 async def test_active_tariff_extend_routes_to_current_plan_renewal(monkeypatch):

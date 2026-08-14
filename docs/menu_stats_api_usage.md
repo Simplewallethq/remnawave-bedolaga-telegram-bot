@@ -243,7 +243,7 @@ sequences = await MenuLayoutService.get_user_click_sequences(db, user_id=1234567
 # Возвращает:
 # [
 #     {"button_id": "menu_balance", "button_text": "💰 Баланс", "clicked_at": datetime(...)},
-#     {"button_id": "menu_subscription", "button_text": "📊 Подписка", "clicked_at": datetime(...)},
+#     {"button_id": "subscription", "button_text": "📊 Подписка", "clicked_at": datetime(...)},
 #     ...
 # ]
 ```
@@ -256,4 +256,3 @@ sequences = await MenuLayoutService.get_user_click_sequences(db, user_id=1234567
 4. **Производительность**: Логирование выполняется асинхронно в фоне и не блокирует обработку запросов
 5. **Активация**: Middleware работает только если `MENU_LAYOUT_ENABLED=True` в настройках
 6. **Временные зоны**: Все временные метрики используют локальное время сервера
-

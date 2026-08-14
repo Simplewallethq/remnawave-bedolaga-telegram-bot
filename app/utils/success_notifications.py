@@ -21,7 +21,7 @@ def build_success_management_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(
                     text="📦 Управление подпиской",
-                    callback_data="menu_subscription",
+                    callback_data="subscription",
                 )
             ],
             [

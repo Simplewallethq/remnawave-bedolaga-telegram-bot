@@ -109,7 +109,7 @@ async def handle_connect_subscription(
                 )
             ],
             [
-                InlineKeyboardButton(text=texts.BACK, callback_data="menu_subscription")
+                InlineKeyboardButton(text=texts.BACK, callback_data="subscription")
             ]
         ])
 
@@ -143,7 +143,7 @@ async def handle_connect_subscription(
                 )
             ],
             [
-                InlineKeyboardButton(text=texts.BACK, callback_data="menu_subscription")
+                InlineKeyboardButton(text=texts.BACK, callback_data="subscription")
             ]
         ])
 
@@ -171,7 +171,7 @@ async def handle_connect_subscription(
         if happ_row:
             rows.append(happ_row)
         rows.append([
-            InlineKeyboardButton(text=texts.BACK, callback_data="menu_subscription")
+            InlineKeyboardButton(text=texts.BACK, callback_data="subscription")
         ])
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
@@ -199,7 +199,7 @@ async def handle_connect_subscription(
         if happ_row:
             rows.append(happ_row)
         rows.append([
-            InlineKeyboardButton(text=texts.BACK, callback_data="menu_subscription")
+            InlineKeyboardButton(text=texts.BACK, callback_data="subscription")
         ])
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
@@ -250,7 +250,7 @@ async def handle_connect_subscription(
         if happ_row:
             rows.append(happ_row)
         rows.append([
-            InlineKeyboardButton(text=texts.BACK, callback_data="menu_subscription")
+            InlineKeyboardButton(text=texts.BACK, callback_data="subscription")
         ])
 
         await callback.message.edit_text(
@@ -364,7 +364,7 @@ async def handle_open_subscription_link(
                                      callback_data="subscription_connect")
             ],
             [
-                InlineKeyboardButton(text=texts.BACK, callback_data="menu_subscription")
+                InlineKeyboardButton(text=texts.BACK, callback_data="subscription")
             ]
         ]),
         parse_mode="HTML"

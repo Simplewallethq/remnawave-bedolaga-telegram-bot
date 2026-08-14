@@ -284,7 +284,7 @@ async def show_tariffs_page(
     db_user: User,
     db: AsyncSession,
     *,
-    back_callback: str = "menu_subscription",
+    back_callback: str = "subscription",
 ):
     """Lists all active plans with description cards and price-from buttons."""
     texts = get_texts(db_user.language)
@@ -912,10 +912,9 @@ async def confirm_tier_upgrade(
         texts.t("TARIFF_UPGRADE_DONE", "Тариф изменён ✅"),
         show_alert=False,
     )
-    # Refresh the subscription page so the user sees the new tier
-    from app.handlers.subscription.purchase import show_subscription_info
-    callback.data = "menu_subscription"
-    await show_subscription_info(callback, db_user, db)
+    # Refresh the current subscription-management screen so the user sees the new tier.
+    from app.handlers.subscription.purchase import handle_subscription_menu
+    await handle_subscription_menu(callback, db_user, db)
 
 
 async def _resolve_tariff_purchase_price(

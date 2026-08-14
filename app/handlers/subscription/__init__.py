@@ -101,7 +101,6 @@ from .purchase import (
     save_cart_and_redirect_to_topup,
     select_devices,
     select_period,
-    show_subscription_info,
     show_trial_offer,
     start_subscription_purchase,
 )
@@ -217,7 +216,6 @@ __all__ = [
     'show_autopay_days',
     'show_device_connection_help',
     'show_devices_page',
-    'show_subscription_info',
     'show_trial_offer',
     'start_subscription_purchase',
     'toggle_autopay',
