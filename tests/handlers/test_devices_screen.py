@@ -56,10 +56,13 @@ async def test_empty_devices_screen_uses_devices_image(monkeypatch):
 
     assert "нет подключенных устройств" in render.await_args.args[1]
     assert render.await_args.kwargs["photo_path"] == "images/devices.jpg"
-    assert render.await_args.args[2].inline_keyboard[0][0].callback_data == "subscription"
+    keyboard = render.await_args.args[2]
+    assert keyboard.inline_keyboard[0][0].text == "📲 Привязать устройство"
+    assert keyboard.inline_keyboard[0][0].callback_data == "howto"
+    assert keyboard.inline_keyboard[-1][0].callback_data == "main_menu"
 
 
-def test_devices_management_back_returns_to_subscription_management():
+def test_devices_management_has_bind_action_and_returns_to_main_menu():
     pagination = SimpleNamespace(
         total_pages=1,
         has_prev=False,
@@ -68,4 +71,6 @@ def test_devices_management_back_returns_to_subscription_management():
     )
     keyboard = inline.get_devices_management_keyboard([], pagination, "ru")
 
-    assert keyboard.inline_keyboard[-1][0].callback_data == "subscription"
+    assert keyboard.inline_keyboard[0][0].text == "📲 Привязать устройство"
+    assert keyboard.inline_keyboard[0][0].callback_data == "howto"
+    assert keyboard.inline_keyboard[-1][0].callback_data == "main_menu"

@@ -530,7 +530,16 @@ async def handle_device_management(
                     await edit_or_answer_photo(
                         callback,
                         texts.t("DEVICE_NONE_CONNECTED", "ℹ️ У вас нет подключенных устройств"),
-                        get_back_keyboard(db_user.language, callback_data="subscription"),
+                        InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(
+                                text="📲 Привязать устройство",
+                                callback_data="howto",
+                            )],
+                            [InlineKeyboardButton(
+                                text=texts.BACK,
+                                callback_data="main_menu",
+                            )],
+                        ]),
                         photo_path=os.path.join("images", "devices.jpg"),
                     )
                     await callback.answer()

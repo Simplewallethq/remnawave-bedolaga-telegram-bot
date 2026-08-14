@@ -48,18 +48,17 @@ def test_share_access_has_english_text_and_action_button():
     assert texts.t("SHARE_ACCESS_SEND_BUTTON") == "📤 Share access"
 
 
-def test_subscription_management_has_autopayment_devices_and_tariff_change_but_no_share_button():
+def test_subscription_management_keeps_platega_autopayment_but_hides_autorenewal_and_devices():
     keyboard = inline.get_subscription_menu_keyboard("ru", username="fake_me_x")
     callbacks = [button.callback_data for row in keyboard.inline_keyboard for button in row]
 
-    assert keyboard.inline_keyboard[2][0].callback_data == "subscription_platega_autopay"
-    assert [button.callback_data for button in keyboard.inline_keyboard[3]] == [
-        "sub_add_days",
-        "subscription_manage_devices",
-    ]
-    assert keyboard.inline_keyboard[4][0].callback_data == "subscription_change_tariff"
+    assert keyboard.inline_keyboard[1][0].callback_data == "subscription_platega_autopay"
+    assert keyboard.inline_keyboard[2][0].callback_data == "sub_add_days"
+    assert keyboard.inline_keyboard[3][0].callback_data == "subscription_change_tariff"
     assert keyboard.inline_keyboard[-1][0].callback_data == "main_menu"
     assert "share_access" not in callbacks
+    assert "subscription_autopay" not in callbacks
+    assert "subscription_manage_devices" not in callbacks
 
 
 def test_subscription_management_hides_platega_autopayment_for_non_test_user():

@@ -1,0 +1,28 @@
+from app.keyboards import inline
+from app.localization.texts import get_texts
+
+
+def test_active_subscriber_main_menu_places_devices_between_connect_and_subscription():
+    keyboard = inline.get_new_main_menu_keyboard(
+        balance_rub=0,
+        has_active_subscription=True,
+        language="ru",
+    )
+
+    assert [
+        (row[0].text, row[0].callback_data)
+        for row in keyboard.inline_keyboard[:4]
+    ] == [
+        ("⚙️ Подключить устройство", "howto"),
+        ("📱 Мои устройства", "subscription_manage_devices"),
+        ("📦 Управление Подпиской", "subscription"),
+        ("💰 Приглашай и зарабатывай", "referral"),
+    ]
+
+
+def test_russian_tariff_cards_describe_all_bypasses():
+    texts = get_texts("ru")
+
+    for tariff_key in ("TARIFF_CARD_SOLO", "TARIFF_CARD_PLUS", "TARIFF_CARD_PRO"):
+        assert "полный VPN, все обходы" in texts.t(tariff_key)
+        assert "доступ ко всем сервисам" not in texts.t(tariff_key)
