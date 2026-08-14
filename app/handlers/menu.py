@@ -1523,7 +1523,7 @@ async def handle_onboarding_connect_free(
 
     caption = _build_onboarding_device_selection_view(user)
 
-    image_path = os.path.join("images", "devices.jpg")
+    image_path = os.path.join("images", "connection.jpg")
     if not os.path.exists(image_path):
         image_path = None
 
