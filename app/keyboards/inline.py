@@ -581,8 +581,8 @@ def get_main_menu_keyboard(
     if show_buy:
         subscription_buttons.append(
             InlineKeyboardButton(
-                text=texts.t("MENU_SUBSCRIPTION_INACTIVE", "🎟 Активировать подписку"),
-                callback_data="subscription_tariffs",
+                text=texts.t("MAIN_MENU_ACTIVATE_SUBSCRIPTION_BUTTON", "✅ Активировать подписку"),
+                callback_data="sub_add_days",
             )
         )
     
@@ -3186,9 +3186,17 @@ def get_new_main_menu_keyboard(
             callback_data="subscription_manage_devices",
         )
     ])
-    keyboard.append([
-        InlineKeyboardButton(text=texts.t("MENU_SUBSCRIPTION_BUTTON", "📦 Управление Подпиской"), callback_data="subscription")
-    ])
+    if has_active_subscription or trial_active:
+        subscription_button = InlineKeyboardButton(
+            text=texts.t("MENU_SUBSCRIPTION_BUTTON", "📦 Управление Подпиской"),
+            callback_data="subscription",
+        )
+    else:
+        subscription_button = InlineKeyboardButton(
+            text=texts.t("MAIN_MENU_ACTIVATE_SUBSCRIPTION_BUTTON", "✅ Активировать подписку"),
+            callback_data="sub_add_days",
+        )
+    keyboard.append([subscription_button])
     keyboard.append([
         InlineKeyboardButton(text=texts.t("MENU_REFERRAL_BUTTON", "🤝 Пригласить друзей"), callback_data="referral")
     ])

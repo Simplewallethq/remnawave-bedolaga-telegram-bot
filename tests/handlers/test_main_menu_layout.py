@@ -20,6 +20,20 @@ def test_active_subscriber_main_menu_places_devices_between_connect_and_subscrip
     ]
 
 
+def test_inactive_subscriber_main_menu_starts_the_extend_flow():
+    keyboard = inline.get_new_main_menu_keyboard(
+        balance_rub=0,
+        has_active_subscription=False,
+        language="ru",
+    )
+
+    assert ("✅ Активировать подписку", "sub_add_days") in [
+        (button.text, button.callback_data)
+        for row in keyboard.inline_keyboard
+        for button in row
+    ]
+
+
 def test_russian_tariff_cards_describe_all_bypasses():
     texts = get_texts("ru")
 
