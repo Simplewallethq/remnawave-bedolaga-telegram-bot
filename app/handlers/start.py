@@ -1186,7 +1186,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             language=user.language,
         )
 
-        image_path = os.path.join("images", "main_menu.png")
+        image_path = os.path.join("images", "main_menu.jpg")
         force_text = settings.is_text_main_menu_mode()
 
         if not force_text and (settings.ENABLE_LOGO_MODE or os.path.exists(image_path)):
