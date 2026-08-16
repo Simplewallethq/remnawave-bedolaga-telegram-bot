@@ -1009,7 +1009,7 @@
   "MAIN_MENU_TEST_ACCESS_TIMER": "⏳ Доступ діє ще: {time_left}\n<code>{bar}</code>",
   "MANAGE_DEVICES_BUTTON": "🔧 Керування пристроями",
   "MARK_AS_ANSWERED": "✅ Позначити як такий, що отримав відповідь",
-  "MENU_ADMIN": "⚙️ Адмін-панель",
+  "MENU_ADMIN": "🔧 Адмін-панель",
   "MENU_BALANCE": "💰 Баланс",
   "MENU_BUY_SUBSCRIPTION": "💎 Купити підписку",
   "MENU_EXTEND_SUBSCRIPTION": "⏰ Продовжити підписку",
