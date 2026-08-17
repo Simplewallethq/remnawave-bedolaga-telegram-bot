@@ -139,7 +139,7 @@ async def test_selecting_device_shows_confirmation_without_unlinking(monkeypatch
     assert render.await_args.args[1] == "Вы точно хотите отвязать Android - Pixel?"
 
 
-async def test_confirming_device_unlink_deletes_and_refreshes_list(monkeypatch):
+async def test_confirming_device_unlink_shows_success_and_returns_to_devices(monkeypatch):
     callback = SimpleNamespace(data="confirm_reset_device_0_1", answer=AsyncMock())
     user = SimpleNamespace(language="ru", remnawave_uuid="user-uuid", telegram_id=42)
     api = _DeviceApiContext([
@@ -149,7 +149,6 @@ async def test_confirming_device_unlink_deletes_and_refreshes_list(monkeypatch):
             }
         },
         {"response": {}},
-        {"response": {"devices": []}},
     ])
     render = AsyncMock()
     monkeypatch.setattr(devices, "edit_or_answer_photo", render)
@@ -168,9 +167,9 @@ async def test_confirming_device_unlink_deletes_and_refreshes_list(monkeypatch):
             "/api/hwid/devices/delete",
             {"userUuid": "user-uuid", "hwid": "device-1"},
         ),
-        ("GET", "/api/hwid/devices/user-uuid", None),
     ]
-    assert render.await_args.args[1] == "ℹ️ У вас нет подключенных устройств"
+    assert render.await_args.args[1] == "✅ Устройство Android - Pixel успешно отвязано!"
+    assert render.await_args.args[2].inline_keyboard[0][0].callback_data == "subscription_manage_devices"
 
 
 async def test_reset_all_devices_shows_confirmation_without_deleting(monkeypatch):
@@ -223,3 +222,4 @@ async def test_confirming_reset_all_devices_deletes_every_hwid(monkeypatch):
         ),
     ]
     assert "Все устройства успешно сброшены" in render.await_args.args[1]
+    assert render.await_args.args[2].inline_keyboard[0][0].callback_data == "subscription_manage_devices"

@@ -807,35 +807,19 @@ async def confirm_single_device_reset(
             platform = device.get('platform', 'Unknown')
             device_model = device.get('deviceModel', 'Unknown')
             device_info = f"{platform} - {device_model}"
-            await callback.answer(
+            await edit_or_answer_photo(
+                callback,
                 texts.t(
                     "DEVICE_UNLINK_SUCCESS",
                     "✅ Устройство {device} успешно отвязано!",
                 ).format(device=device_info),
-                show_alert=True,
+                get_back_keyboard(
+                    db_user.language,
+                    callback_data="subscription_manage_devices",
+                ),
+                photo_path=os.path.join("images", "devices.jpg"),
             )
-
-            updated_response = await api._make_request(
-                'GET', f'/api/hwid/devices/{db_user.remnawave_uuid}'
-            )
-            if not updated_response or 'response' not in updated_response:
-                return
-
-            updated_devices = updated_response['response'].get('devices', [])
-            if updated_devices:
-                updated_pagination = paginate_list(
-                    updated_devices, page=page, per_page=devices_per_page
-                )
-                if not updated_pagination.items and page > 1:
-                    page -= 1
-                await show_devices_page(callback, db_user, updated_devices, page=page)
-            else:
-                await edit_or_answer_photo(
-                    callback,
-                    texts.t("DEVICE_NONE_CONNECTED", "ℹ️ У вас нет подключенных устройств"),
-                    get_back_keyboard(db_user.language, callback_data="subscription"),
-                    photo_path=os.path.join("images", "devices.jpg"),
-                )
+            await callback.answer()
 
             logger.info(
                 "✅ Пользователь %s отвязал устройство %s",
@@ -946,7 +930,7 @@ async def handle_all_devices_reset_from_management(
                         ).format(count=success_count),
                         get_back_keyboard(
                             db_user.language,
-                            callback_data="subscription",
+                            callback_data="subscription_manage_devices",
                         ),
                         photo_path=os.path.join("images", "devices.jpg"),
                     )
@@ -965,7 +949,7 @@ async def handle_all_devices_reset_from_management(
                         ).format(success=success_count, failed=failed_count),
                         get_back_keyboard(
                             db_user.language,
-                            callback_data="subscription",
+                            callback_data="subscription_manage_devices",
                         ),
                         photo_path=os.path.join("images", "devices.jpg"),
                     )
@@ -984,7 +968,7 @@ async def handle_all_devices_reset_from_management(
                     ).format(total=len(devices_list)),
                     get_back_keyboard(
                         db_user.language,
-                        callback_data="subscription",
+                        callback_data="subscription_manage_devices",
                     ),
                     photo_path=os.path.join("images", "devices.jpg"),
                 )
@@ -997,7 +981,7 @@ async def handle_all_devices_reset_from_management(
             texts.ERROR,
             get_back_keyboard(
                 db_user.language,
-                callback_data="subscription",
+                callback_data="subscription_manage_devices",
             ),
             photo_path=os.path.join("images", "devices.jpg"),
         )
