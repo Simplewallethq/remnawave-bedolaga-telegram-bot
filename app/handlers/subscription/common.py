@@ -391,7 +391,7 @@ def get_reset_devices_confirm_keyboard(language: str = "ru") -> InlineKeyboardMa
             )
         ],
         [
-            InlineKeyboardButton(text="❌ Отмена", callback_data="menu_subscription")
+            InlineKeyboardButton(text="❌ Отмена", callback_data="subscription")
         ]
     ])
 

@@ -1397,7 +1397,7 @@ class MonitoringService:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [build_miniapp_or_callback_button(text="⏰ Продлить подписку", callback_data="subscription_extend")],
                 [build_miniapp_or_callback_button(text="💳 Пополнить баланс", callback_data="balance_topup")],
-                [build_miniapp_or_callback_button(text="📱 Моя подписка", callback_data="menu_subscription")],
+                [build_miniapp_or_callback_button(text="📱 Моя подписка", callback_data="subscription")],
             ])
 
             await self._send_message_with_logo(
@@ -1743,7 +1743,7 @@ class MonitoringService:
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [build_miniapp_or_callback_button(text="💳 Пополнить баланс", callback_data="balance_topup")],
-                [build_miniapp_or_callback_button(text="📱 Моя подписка", callback_data="menu_subscription")],
+                [build_miniapp_or_callback_button(text="📱 Моя подписка", callback_data="subscription")],
             ])
             
             await self._send_message_with_logo(

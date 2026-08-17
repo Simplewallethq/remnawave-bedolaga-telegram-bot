@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
 from aiogram import Bot, Dispatcher, F, types
+from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,7 +29,6 @@ from app.handlers.subscription.notifications import (
 )
 from app.keyboards.inline import (
     get_payment_methods_keyboard,
-    get_insufficient_balance_keyboard,
     get_renew_periods_keyboard,
     get_tariff_periods_keyboard,
     get_tariff_upgrade_keyboard,
@@ -167,6 +167,50 @@ async def _save_tariff_intent_cart(
         )
 
 
+async def _delete_tariff_intent_cart(db_user: User) -> None:
+    from app.services.user_cart_service import user_cart_service
+
+    await user_cart_service.delete_user_cart(db_user.id)
+
+
+async def _start_tariff_platega_checkout(
+    callback: types.CallbackQuery,
+    db_user: User,
+    state: FSMContext,
+    *,
+    total_kopeks: int,
+    back_callback: str,
+    balance_callback: str | None = None,
+) -> None:
+    """Create a Platega invoice for a tariff operation with an optional balance-payment action."""
+    texts = get_texts(db_user.language)
+    missing_kopeks = max(0, total_kopeks - db_user.balance_kopeks)
+    invoice_kopeks = missing_kopeks or total_kopeks
+    if not settings.is_platega_universal_enabled():
+        await callback.answer(
+            texts.t(
+                "PLATEGA_UNIVERSAL_TEMPORARILY_UNAVAILABLE",
+                "❌ Универсальная оплата через Platega временно недоступна",
+            ),
+            show_alert=True,
+        )
+        return
+
+    await state.update_data(
+        platega_pending_amount=invoice_kopeks,
+        platega_back_callback=back_callback,
+        tariff_checkout_summary={
+            "total_kopeks": total_kopeks,
+            "balance_kopeks": db_user.balance_kopeks,
+            "missing_kopeks": missing_kopeks,
+            "balance_callback": balance_callback if missing_kopeks == 0 else None,
+        },
+    )
+    from app.handlers.balance.platega import start_platega_universal_payment
+
+    await start_platega_universal_payment(callback, db_user, state)
+
+
 async def _get_fixed_price_tariff_offer(
     db: AsyncSession,
     db_user: User,
@@ -284,7 +328,7 @@ async def show_tariffs_page(
     db_user: User,
     db: AsyncSession,
     *,
-    back_callback: str = "menu_subscription",
+    back_callback: str = "subscription",
 ):
     """Lists all active plans with description cards and price-from buttons."""
     texts = get_texts(db_user.language)
@@ -811,6 +855,9 @@ async def confirm_tier_upgrade(
     callback: types.CallbackQuery,
     db_user: User,
     db: AsyncSession,
+    state: FSMContext,
+    *,
+    pay_from_balance: bool = False,
 ):
     """Execute the prorated tier switch: charge delta, swap plan_id + plan_period_days + limits."""
     texts = get_texts(db_user.language)
@@ -865,8 +912,7 @@ async def confirm_tier_upgrade(
 
     delta = calculate_upgrade_delta(active_sub, plan, new_price, current_price)
 
-    if delta > 0 and db_user.balance_kopeks < delta:
-        missing = delta - db_user.balance_kopeks
+    if delta > 0 and not pay_from_balance:
         await _save_tariff_intent_cart(
             db_user,
             tariff_op="upgrade",
@@ -877,27 +923,19 @@ async def confirm_tier_upgrade(
             price_override_kopeks=hot_price,
             offer_type=hot_offer_type,
         )
-        await edit_or_answer_photo(
+        await _start_tariff_platega_checkout(
             callback,
-            texts.t(
-                "ADDON_INSUFFICIENT_FUNDS_MESSAGE",
-                "⚠️ <b>Недостаточно средств</b>\n\nСтоимость услуги: {required}\nНа балансе: {balance}\nНе хватает: {missing}\n\nВыберите способ пополнения. Сумма подставится автоматически.",
-            ).format(
-                required=_format_rub_short(delta),
-                balance=_format_rub_short(db_user.balance_kopeks),
-                missing=_format_rub_short(missing),
-            ),
-            get_insufficient_balance_keyboard(
-                language=db_user.language,
-                amount_kopeks=missing,
-                has_saved_cart=True,
-            ),
-            photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
+            db_user,
+            state,
+            total_kopeks=delta,
+            back_callback="subscription_change_tariff",
+            balance_callback=f"tariff_balance:upgrade:{plan.code}",
         )
-        await callback.answer()
         return
 
     await finalize_tier_switch(db, db_user, active_sub, plan, delta)
+    if pay_from_balance:
+        await _delete_tariff_intent_cart(db_user)
     if hot_offer is not None:
         await hot_invoice_offer_service.mark_claimed_after_purchase(
             db,
@@ -908,14 +946,16 @@ async def confirm_tier_upgrade(
             price_kopeks=new_price,
         )
 
-    await callback.answer(
-        texts.t("TARIFF_UPGRADE_DONE", "Тариф изменён ✅"),
-        show_alert=False,
+    await callback.answer()
+    await callback.message.edit_text(
+        format_subscription_purchase_success(
+            plan=subscription_plan_name(active_sub, plan),
+            period=period_days,
+            end_date=active_sub.end_date,
+        ),
+        reply_markup=build_success_management_keyboard(),
+        parse_mode="HTML",
     )
-    # Refresh the subscription page so the user sees the new tier
-    from app.handlers.subscription.purchase import show_subscription_info
-    callback.data = "menu_subscription"
-    await show_subscription_info(callback, db_user, db)
 
 
 async def _resolve_tariff_purchase_price(
@@ -972,6 +1012,9 @@ async def start_tariff_purchase(
     callback: types.CallbackQuery,
     db_user: User,
     db: AsyncSession,
+    state: FSMContext,
+    *,
+    pay_from_balance: bool = False,
 ):
     """Step 3 — user picked plan+period; create subscription for users without one."""
     texts = get_texts(db_user.language)
@@ -1009,14 +1052,23 @@ async def start_tariff_purchase(
     active_sub = await _resolve_active_subscription(db_user)
     if active_sub and active_sub.plan_id == plan.id:
         # Buying current tier from the tariffs page == renewal at current tier.
-        await _execute_renewal(callback, db_user, db, active_sub, plan, period_days)
+        await _execute_renewal(
+            callback,
+            db_user,
+            db,
+            state,
+            active_sub,
+            plan,
+            period_days,
+            pay_from_balance=pay_from_balance,
+        )
         return
     if active_sub:
         # Different active tier — route to tier-switch path instead of purchase.
         await _show_tier_switch(callback, db_user, db, active_sub, plan)
         return
 
-    if db_user.balance_kopeks < price_kopeks:
+    if not pay_from_balance:
         await _save_tariff_intent_cart(
             db_user,
             tariff_op="purchase",
@@ -1028,34 +1080,14 @@ async def start_tariff_purchase(
             offer_type=offer_type,
             base_price_kopeks=base_price_kopeks,
         )
-        if db_user.balance_kopeks > 0:
-            # Частичная оплата: скидка уже применена к цене, баланс зачитывается
-            # к сниженной цене, счёт выставляется на разницу.
-            await _render_tariff_partial_breakdown(
-                callback, db_user, plan, period_days,
-                base_price_kopeks=base_price_kopeks,
-                price_kopeks=price_kopeks,
-            )
-            return
-        missing = price_kopeks - db_user.balance_kopeks
-        await edit_or_answer_photo(
+        await _start_tariff_platega_checkout(
             callback,
-            texts.t(
-                "ADDON_INSUFFICIENT_FUNDS_MESSAGE",
-                "⚠️ <b>Недостаточно средств</b>\n\nСтоимость услуги: {required}\nНа балансе: {balance}\nНе хватает: {missing}\n\nВыберите способ пополнения. Сумма подставится автоматически.",
-            ).format(
-                required=_format_rub_short(price_kopeks),
-                balance=_format_rub_short(db_user.balance_kopeks),
-                missing=_format_rub_short(missing),
-            ),
-            get_insufficient_balance_keyboard(
-                language=db_user.language,
-                amount_kopeks=missing,
-                has_saved_cart=True,
-            ),
-            photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
+            db_user,
+            state,
+            total_kopeks=price_kopeks,
+            back_callback=f"tariff_select:{plan.code}",
+            balance_callback=f"tariff_balance:purchase:{plan.code}:{period_days}",
         )
-        await callback.answer()
         return
 
     result = await finalize_tariff_purchase(
@@ -1068,6 +1100,8 @@ async def start_tariff_purchase(
         )
         return
     new_sub, transaction, was_trial_conversion = result
+    if pay_from_balance:
+        await _delete_tariff_intent_cart(db_user)
     await _mark_tariff_offer_claimed(
         db,
         offer,
@@ -1179,6 +1213,7 @@ async def show_tariff_partial_payment_methods(
     callback: types.CallbackQuery,
     db_user: User,
     db: AsyncSession,
+    state: FSMContext,
 ):
     """Кнопка «Оплатить X₽» на экране разбивки: выбор способа доплаты.
 
@@ -1218,8 +1253,10 @@ async def show_tariff_partial_payment_methods(
     # Баланса уже хватает или он обнулился — маршрутизируем через обычный
     # покупочный обработчик (полная оплата с баланса / старый экран пополнения).
     if db_user.balance_kopeks <= 0 or db_user.balance_kopeks >= price_kopeks:
-        callback.data = f"tariff_buy:{plan.code}:{period_days}"
-        await start_tariff_purchase(callback, db_user, db)
+        purchase_callback = callback.model_copy(
+            update={"data": f"tariff_buy:{plan.code}:{period_days}"}
+        )
+        await start_tariff_purchase(purchase_callback, db_user, db, state)
         return
 
     await _save_tariff_intent_cart(
@@ -1355,8 +1392,8 @@ async def claim_hot_invoice_offer(
         await callback.answer("Предложение недоступно или истекло", show_alert=True)
         return
 
-    callback.data = f"tariff_select:{plan_code}"
-    await show_tariff_periods(callback, db_user, db)
+    tariff_callback = callback.model_copy(update={"data": f"tariff_select:{plan_code}"})
+    await show_tariff_periods(tariff_callback, db_user, db)
 
 
 async def claim_expired_subscription_offer(
@@ -1386,8 +1423,8 @@ async def claim_expired_subscription_offer(
         await callback.answer("Предложение недоступно или истекло", show_alert=True)
         return
 
-    callback.data = f"tariff_select:{plan_code}"
-    await show_tariff_periods(callback, db_user, db)
+    tariff_callback = callback.model_copy(update={"data": f"tariff_select:{plan_code}"})
+    await show_tariff_periods(tariff_callback, db_user, db)
 
 
 async def claim_cold_solo_offer(
@@ -1768,10 +1805,13 @@ async def show_renew_current(
 
     keyboard = get_renew_periods_keyboard(plan.id, period_prices, language=db_user.language)
 
-    try:
-        await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
-        await callback.message.answer(message_text, reply_markup=keyboard, parse_mode="HTML")
+    image_path = os.path.join("images", "subscription.jpg")
+    await edit_or_answer_photo(
+        callback,
+        message_text,
+        keyboard,
+        photo_path=image_path if os.path.exists(image_path) else None,
+    )
     await callback.answer()
 
 
@@ -1779,6 +1819,9 @@ async def apply_renewal(
     callback: types.CallbackQuery,
     db_user: User,
     db: AsyncSession,
+    state: FSMContext,
+    *,
+    pay_from_balance: bool = False,
 ):
     """Renew at current tier: pay full period price and extend end_date by period_days."""
     texts = get_texts(db_user.language)
@@ -1810,16 +1853,28 @@ async def apply_renewal(
             show_alert=True,
         )
         return
-    await _execute_renewal(callback, db_user, db, active_sub, plan, period_days)
+    await _execute_renewal(
+        callback,
+        db_user,
+        db,
+        state,
+        active_sub,
+        plan,
+        period_days,
+        pay_from_balance=pay_from_balance,
+    )
 
 
 async def _execute_renewal(
     callback: types.CallbackQuery,
     db_user: User,
     db: AsyncSession,
+    state: FSMContext,
     subscription: Subscription,
     plan: SubscriptionPlan,
     period_days: int,
+    *,
+    pay_from_balance: bool = False,
 ):
     texts = get_texts(db_user.language)
     base_price_kopeks = await get_plan_price(
@@ -1855,8 +1910,7 @@ async def _execute_renewal(
         if hot_price is not None:
             price_kopeks = hot_price
 
-    if db_user.balance_kopeks < price_kopeks:
-        missing = price_kopeks - db_user.balance_kopeks
+    if not pay_from_balance:
         await _save_tariff_intent_cart(
             db_user,
             tariff_op="renew",
@@ -1867,24 +1921,14 @@ async def _execute_renewal(
             price_override_kopeks=hot_price,
             offer_type=hot_offer_type,
         )
-        await edit_or_answer_photo(
+        await _start_tariff_platega_checkout(
             callback,
-            texts.t(
-                "ADDON_INSUFFICIENT_FUNDS_MESSAGE",
-                "⚠️ <b>Недостаточно средств</b>\n\nСтоимость услуги: {required}\nНа балансе: {balance}\nНе хватает: {missing}\n\nВыберите способ пополнения. Сумма подставится автоматически.",
-            ).format(
-                required=_format_rub_short(price_kopeks),
-                balance=_format_rub_short(db_user.balance_kopeks),
-                missing=_format_rub_short(missing),
-            ),
-            get_insufficient_balance_keyboard(
-                language=db_user.language,
-                amount_kopeks=missing,
-                has_saved_cart=True,
-            ),
-            photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
+            db_user,
+            state,
+            total_kopeks=price_kopeks,
+            back_callback="subscription_renew_current",
+            balance_callback=f"tariff_balance:renew:{plan.id}:{period_days}",
         )
-        await callback.answer()
         return
 
     result = await finalize_tariff_renewal(db, db_user, subscription, plan, period_days, price_kopeks)
@@ -1895,6 +1939,8 @@ async def _execute_renewal(
         )
         return
     subscription, transaction, old_end_date = result
+    if pay_from_balance:
+        await _delete_tariff_intent_cart(db_user)
     await _mark_tariff_offer_claimed(
         db,
         hot_offer,
@@ -1921,6 +1967,46 @@ async def _execute_renewal(
         reply_markup=build_success_management_keyboard(),
         parse_mode="HTML",
     )
+
+
+async def pay_tariff_from_balance(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+    state: FSMContext,
+):
+    parts = (callback.data or "").split(":")
+    if len(parts) < 3:
+        await callback.answer("bad_callback", show_alert=False)
+        return
+
+    operation = parts[1]
+    if operation == "purchase" and len(parts) == 4:
+        purchase_callback = callback.model_copy(
+            update={"data": f"tariff_buy:{parts[2]}:{parts[3]}"}
+        )
+        await start_tariff_purchase(
+            purchase_callback, db_user, db, state, pay_from_balance=True
+        )
+        return
+    if operation == "renew" and len(parts) == 4:
+        renewal_callback = callback.model_copy(
+            update={"data": f"tariff_renew:{parts[2]}:{parts[3]}"}
+        )
+        await apply_renewal(
+            renewal_callback, db_user, db, state, pay_from_balance=True
+        )
+        return
+    if operation == "upgrade" and len(parts) == 3:
+        upgrade_callback = callback.model_copy(
+            update={"data": f"tariff_upgrade_confirm:{parts[2]}"}
+        )
+        await confirm_tier_upgrade(
+            upgrade_callback, db_user, db, state, pay_from_balance=True
+        )
+        return
+
+    await callback.answer("bad_callback", show_alert=False)
 
 
 async def _all_active_server_uuids(db: AsyncSession) -> list:
@@ -1968,6 +2054,10 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         start_tariff_purchase,
         F.data.startswith("tariff_buy:"),
+    )
+    dp.callback_query.register(
+        pay_tariff_from_balance,
+        F.data.startswith("tariff_balance:"),
     )
     dp.callback_query.register(
         show_tariff_partial_payment_methods,

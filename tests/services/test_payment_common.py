@@ -119,6 +119,6 @@ def test_subscription_success_keyboard_leads_to_connection_first() -> None:
     buttons = [row[0] for row in keyboard.inline_keyboard]
     assert [(button.text, button.callback_data) for button in buttons] == [
         ("🔗 Подключиться", "howto"),
-        ("📦 Управление подпиской", "menu_subscription"),
+        ("📦 Управление подпиской", "subscription"),
         ("🏠 Главное меню", "back_to_menu"),
     ]

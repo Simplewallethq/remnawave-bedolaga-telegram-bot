@@ -2184,7 +2184,7 @@ BROADCAST_BUTTONS = {
     "subscription": {
         "default_text": "📱 Подписка",
         "text_key": "ADMIN_BROADCAST_BUTTON_SUBSCRIPTION",
-        "callback": "menu_subscription",
+        "callback": "subscription",
     },
     "support": {
         "default_text": "🛠️ Техподдержка",

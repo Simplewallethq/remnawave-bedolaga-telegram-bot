@@ -952,17 +952,38 @@ async def process_platega_universal_payment_amount(
         "💳 Оплатить – {amount}",
     ).format(amount=amount_label)
 
-    data = await state.get_data()
-    back_callback = data.get("platega_back_callback", "balance_topup_reset")
+    state_data = await state.get_data()
+    back_callback = state_data.get("platega_back_callback", "balance_topup_reset")
+    tariff_summary = state_data.get("tariff_checkout_summary")
 
-    keyboard = types.InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
+    rows = [[types.InlineKeyboardButton(text=pay_button_text, url=redirect_url)]]
+    if isinstance(tariff_summary, dict):
+        balance_callback = tariff_summary.get("balance_callback")
+        if isinstance(balance_callback, str) and balance_callback:
+            rows.append([
                 types.InlineKeyboardButton(
-                    text=pay_button_text,
-                    url=redirect_url,
+                    text=texts.t("TARIFF_BALANCE_PAY_BUTTON", "💰 Оплатить с баланса"),
+                    callback_data=balance_callback,
                 )
-            ],
+            ])
+        rows.append([types.InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)])
+        instructions_template = texts.t(
+            "TARIFF_PLATEGA_PAYMENT_INSTRUCTIONS",
+            (
+                "Стоимость услуги: {total}\n"
+                "На балансе: {balance}\n"
+                "Не хватает: {missing}\n\n"
+                "🔒 Защищённый платеж (Карта / СБП / Крипто)\n"
+                "Обычно занимает до 10 секунд"
+            ),
+        )
+        instructions = instructions_template.format(
+            total=settings.format_price(int(tariff_summary.get("total_kopeks") or 0)),
+            balance=settings.format_price(int(tariff_summary.get("balance_kopeks") or 0)),
+            missing=settings.format_price(int(tariff_summary.get("missing_kopeks") or amount_kopeks)),
+        )
+    else:
+        rows.extend([
             [
                 types.InlineKeyboardButton(
                     text=texts.t("CHECK_STATUS_BUTTON", "📊 Проверить статус"),
@@ -971,20 +992,18 @@ async def process_platega_universal_payment_amount(
             ],
             [types.InlineKeyboardButton(text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"), callback_data="menu_support")],
             [types.InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)],
-        ]
-    )
+        ])
+        instructions = texts.t(
+            "PLATEGA_UNIVERSAL_PAYMENT_INSTRUCTIONS",
+            (
+                "<b>Оплата подписки — {amount}</b>\n"
+                "Карта / СБП / Крипто\n\n"
+                "🔒 Защищённый платеж\n"
+                "Обычно занимает до 10 секунд"
+            ),
+        ).format(title=payment_title, amount=amount_label)
 
-    instructions_template = texts.t(
-        "PLATEGA_UNIVERSAL_PAYMENT_INSTRUCTIONS",
-        (
-            "<b>Оплата подписки — {amount}</b>\n"
-            "Карта / СБП / Крипто\n\n"
-            "🔒 Защищённый платеж\n"
-            "Обычно занимает до 10 секунд"
-        ),
-    )
-
-    state_data = await state.get_data()
+    keyboard = types.InlineKeyboardMarkup(inline_keyboard=rows)
     prompt_message_id = state_data.get("platega_prompt_message_id")
     prompt_chat_id = state_data.get("platega_prompt_chat_id", message.chat.id)
 
@@ -1002,10 +1021,6 @@ async def process_platega_universal_payment_amount(
                 delete_error,
             )
 
-    instructions = instructions_template.format(
-        title=payment_title,
-        amount=amount_label,
-    )
     pay_image_path = os.path.join("images", "pay.jpg")
     if os.path.exists(pay_image_path):
         invoice_message = await message.answer_photo(

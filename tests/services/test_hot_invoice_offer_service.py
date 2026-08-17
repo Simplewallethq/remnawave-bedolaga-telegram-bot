@@ -258,8 +258,9 @@ async def test_hot_offer_precedes_fixed_offer_when_starting_purchase(monkeypatch
     monkeypatch.setattr(tariffs_module, "_get_hot_invoice_tariff_offer", hot_lookup)
     monkeypatch.setattr(tariffs_module, "_get_fixed_price_tariff_offer", fixed_lookup)
     monkeypatch.setattr(tariffs_module, "_save_tariff_intent_cart", save_cart)
+    monkeypatch.setattr(tariffs_module, "_start_tariff_platega_checkout", AsyncMock())
 
-    await tariffs_module.start_tariff_purchase(callback, db_user, AsyncMock())
+    await tariffs_module.start_tariff_purchase(callback, db_user, AsyncMock(), AsyncMock())
 
     hot_lookup.assert_awaited_once()
     fixed_lookup.assert_not_awaited()

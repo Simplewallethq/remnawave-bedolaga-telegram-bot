@@ -20,7 +20,7 @@ def test_connect_platform_keyboard_has_requested_order():
         ("🤖 Android", "connect_platform_android"),
         ("🍎 iPhone/MacOS", "connect_platform_apple"),
         ("💻 Windows", "connect_platform_windows"),
-        ("🔗 Поделиться доступом", "connect_share_access"),
+        ("🔗 Переслать друзьям", "connect_share_access"),
         ("🏠 Основное меню", "main_menu"),
     ]
 
@@ -33,15 +33,30 @@ async def test_connect_menu_has_english_text_and_buttons():
     keyboard = inline.get_connection_platform_keyboard("en")
     text = await menu._build_connect_platform_selection_text(AsyncMock(), user)
 
-    assert "To connect your primary or additional device" in text
-    assert "Access key link (for Happ, Incy)" in text
+    assert "Choose a platform to connect:" in text
+    assert "Your access key" in text
     assert [(row[0].text, row[0].callback_data) for row in _button_rows(keyboard)] == [
         ("🤖 Android", "connect_platform_android"),
         ("🍎 iPhone/MacOS", "connect_platform_apple"),
         ("💻 Windows", "connect_platform_windows"),
-        ("🔗 Share access", "connect_share_access"),
+        ("🔗 Send to friends", "connect_share_access"),
         ("🏠 Main menu", "main_menu"),
     ]
+
+
+def test_connection_copy_is_available_in_every_supported_locale():
+    expected_happ_hints = {
+        "ru": "Если у тебя есть Happ",
+        "en": "If you use Happ",
+        "ua": "Якщо користуєшся Happ",
+        "zh": "如果您使用 Happ",
+    }
+
+    for language, hint in expected_happ_hints.items():
+        texts = menu.get_texts(language)
+
+        assert hint in texts.t("CONNECT_ANDROID_HAPP_HINT")
+        assert "{ttl_hours}" in texts.t("CONNECT_LETO_CODE_LABEL")
 
 
 def test_connect_android_keyboard_omits_transfer_without_url(monkeypatch):
@@ -67,8 +82,8 @@ def test_connect_apple_and_windows_keyboards_omit_transfers_without_urls(monkeyp
     windows_rows = _button_rows(inline.get_connect_windows_keyboard("ru"))
 
     assert [(row[0].text, row[0].callback_data) for row in apple_rows] == [
-        ("🍏 Скачать Incy (RU App Store)", None),
-        ("🍎 Скачать Happ (Int. App Store)", None),
+        ("🍏 Скачать Incy", None),
+        ("🍎 Скачать Happ", None),
         ("⬅️ Назад", "howto"),
     ]
     assert apple_rows[1][0].url == "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"
@@ -106,19 +121,23 @@ def test_connect_platform_keyboards_include_transfer_buttons(monkeypatch):
 
     assert [(row[0].text, row[0].url) for row in android_rows] == [
         ("☀️ Скачать Leto VPN", "https://play.google.com/store/apps/details?id=leto"),
-        ("🛠 Передать ключ в Happ", happ_url),
+        ("➡️ Ключ в Happ", happ_url),
         ("⬅️ Назад", None),
     ]
-    assert [(row[0].text, row[0].url) for row in apple_rows] == [
-        ("🍏 Скачать Incy (RU App Store)", inline.settings.get_incy_download_link()),
-        ("🛠 Передать ключ в Incy", incy_url),
-        ("🍎 Скачать Happ (Int. App Store)", "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"),
-        ("🛠 Передать ключ в Happ", happ_url),
-        ("⬅️ Назад", None),
+    assert [[(button.text, button.url) for button in row] for row in apple_rows] == [
+        [
+            ("🍏 Скачать Incy", inline.settings.get_incy_download_link()),
+            ("➡️ Ключ в Incy", incy_url),
+        ],
+        [
+            ("🍎 Скачать Happ", "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"),
+            ("➡️ Ключ в Happ", happ_url),
+        ],
+        [("⬅️ Назад", None)],
     ]
     assert [(row[0].text, row[0].url) for row in windows_rows] == [
         ("💻 Скачать Happ", "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"),
-        ("🛠 Передать ключ в Happ", happ_url),
+        ("➡️ Ключ в Happ", happ_url),
         ("⬅️ Назад", None),
     ]
 
@@ -198,7 +217,7 @@ async def test_connect_platform_handler_shows_raw_subscription_link(monkeypatch)
 
     rendered_text = render.await_args.args[1]
     rendered_keyboard = render.await_args.args[2]
-    assert "авторизуйся ключом для входа" in rendered_text
+    assert "авторизуйся через Telegram или с помощью ключа доступа" in rendered_text
     assert SUBSCRIPTION_LINK in rendered_text
     assert rendered_keyboard.inline_keyboard[0][0].text == "☀️ Скачать Leto VPN"
     assert render.await_args.kwargs["photo_path"] == "images/connection.jpg"
@@ -223,7 +242,8 @@ async def test_connect_menu_main_screen_shows_universal_raw_key(monkeypatch):
 
     rendered_text = render.await_args.args[1]
     rendered_keyboard = render.await_args.args[2]
-    assert "Для подключения основного или дополнительного устройства" in rendered_text
+    assert "<b>Твой ключ доступа</b> (для приложений Leto, Happ, Incy)" in rendered_text
+    assert "Выбери платформу для подключения:" in rendered_text
     assert SUBSCRIPTION_LINK in rendered_text
     assert rendered_keyboard.inline_keyboard[0][0].callback_data == "connect_platform_android"
     assert render.await_args.kwargs["photo_path"] == "images/connection.jpg"
@@ -263,7 +283,8 @@ async def test_connect_platform_submenus_use_connection_image(monkeypatch):
         assert call.kwargs["photo_path"] == "images/connection.jpg"
 
     assert render.await_args_list[0].args[2].inline_keyboard[1][0].url == "https://redirect.example/happ"
-    assert render.await_args_list[1].args[2].inline_keyboard[1][0].url == "https://redirect.example/incy"
+    assert render.await_args_list[1].args[2].inline_keyboard[0][1].url == "https://redirect.example/incy"
+    assert render.await_args_list[1].args[2].inline_keyboard[1][1].url == "https://redirect.example/happ"
     assert render.await_args_list[2].args[2].inline_keyboard[1][0].url == "https://redirect.example/happ"
 
 

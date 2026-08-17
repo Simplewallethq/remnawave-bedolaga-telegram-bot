@@ -9,11 +9,13 @@ from decimal import Decimal, InvalidOperation
 from importlib import import_module
 from typing import Any, Dict, Optional
 
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database.models import PaymentMethod, TransactionType
+from app.localization.texts import get_texts
 from app.services.platega_service import PlategaService
 from app.services.subscription_auto_purchase_service import (
     auto_purchase_saved_cart_after_topup,
@@ -1007,6 +1009,39 @@ class PlategaPaymentMixin:
             try:
                 if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
                     await vpn_deposit_bonus_service.send_success_message(self.bot, user)
+                elif has_saved_cart:
+                    texts = get_texts(user.language)
+                    keyboard = InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [
+                                InlineKeyboardButton(
+                                    text=texts.RETURN_TO_SUBSCRIPTION_CHECKOUT,
+                                    callback_data="return_to_saved_cart",
+                                )
+                            ],
+                            [
+                                InlineKeyboardButton(
+                                    text=texts.t("MY_BALANCE_BUTTON", "💰 Мой баланс"),
+                                    callback_data="menu_balance",
+                                )
+                            ],
+                            [
+                                InlineKeyboardButton(
+                                    text=texts.t("MAIN_MENU_BUTTON", "🏠 Главное меню"),
+                                    callback_data="back_to_menu",
+                                )
+                            ],
+                        ]
+                    )
+                    await self.bot.send_message(
+                        user.telegram_id,
+                        texts.t(
+                            "PLATEGA_TOPUP_SUCCESS_WITH_CART",
+                            "✅ Платёж прошёл\n\nБаланс пополнен на {amount}. Продолжите оформление подписки.",
+                        ).format(amount=settings.format_price(credit_amount_kopeks)),
+                        parse_mode="HTML",
+                        reply_markup=keyboard,
+                    )
                 else:
                     keyboard = await self.build_topup_success_keyboard(user)
                     await self.bot.send_message(

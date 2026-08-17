@@ -161,6 +161,7 @@ from app.utils.subscription_utils import (
     get_raw_subscription_link,
     resolve_simple_subscription_device_limit,
 )
+from app.utils.access_keys import build_access_key_section, format_copyable_code
 from app.utils.timezone import format_local_datetime
 from app.utils.promo_offer import (
     build_promo_offer_hint,
@@ -2784,39 +2785,96 @@ async def handle_bind_device(
     await callback.answer()
 
 
-def _build_share_access_text(texts, link: str) -> str:
-    link_block = f"<pre><code>{html.escape(link, quote=True)}</code></pre>"
+def _get_share_app_links() -> dict[str, str]:
+    return {
+        "android": (
+            (settings.LETO_APP_DOWNLOAD_LINK_ANDROID or "").strip()
+            or "https://play.google.com/store/apps/details?id=com.leto.split"
+        ),
+        "apple": settings.get_incy_download_link(),
+        "windows": (
+            settings.get_happ_download_link("windows")
+            or "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"
+        ),
+    }
+
+
+def _build_share_access_text(texts, access_key_section: str, app_links: dict[str, str]) -> str:
     return texts.t(
         "SHARE_ACCESS_MESSAGE",
         (
-            "Чтобы поделиться доступом с друзьями передай им ссылку доступа ниже "
-            "и ссылку на приложение в зависимости от их платформы.\n\n"
-            "{link_block}\n\n"
+            "Передай другу <b>ключ доступа</b> и ссылку на приложение для его устройства.\n\n"
+            "{access_key_section}\n\n"
             "<b>🤖 Android</b>\n"
-            "https://play.google.com/store/apps/details?id=com.leto.split\n\n"
+            "{android_link_block}\n\n"
             "<b>🍎 iPhone/Mac</b>\n"
-            "https://apps.apple.com/ru/app/incy/id6756943388\n\n"
+            "{apple_link_block}\n\n"
             "<b>💻 Windows</b>\n"
-            "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"
+            "{windows_link_block}"
         ),
-    ).format(link=link, link_block=link_block)
+    ).format(
+        access_key_section=access_key_section,
+        android_link_block=format_copyable_code(app_links["android"]),
+        apple_link_block=format_copyable_code(app_links["apple"]),
+        windows_link_block=format_copyable_code(app_links["windows"]),
+        link=access_key_section,
+        link_block=access_key_section,
+    )
 
 
-def _build_share_access_friend_message(texts, link: str) -> str:
+def _build_share_access_friend_message(
+    texts,
+    access_key_section: str,
+    app_links: dict[str, str],
+) -> str:
     return texts.t(
         "SHARE_ACCESS_FRIEND_MESSAGE",
         (
             "Привет! Делюсь с тобой доступом к Leto VPN. Скачай приложение и "
-            "авторизуйся через ссылку доступа\n\n"
-            "{link}\n\n"
+            "авторизуйся через ключ доступа.\n\n"
             "🤖 Android\n"
-            "https://play.google.com/store/apps/details?id=com.leto.split\n\n"
+            "{android_link}\n\n"
             "🍎 iPhone/Mac\n"
-            "https://apps.apple.com/ru/app/incy/id6756943388\n\n"
+            "{apple_link}\n\n"
             "💻 Windows\n"
-            "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"
+            "{windows_link}\n\n"
+            "{access_key_section}"
         ),
-    ).format(link=link)
+    ).format(
+        access_key_section=access_key_section,
+        link=access_key_section,
+        link_block=access_key_section,
+        **app_links,
+    )
+
+
+async def _build_share_access_messages(
+    db: AsyncSession,
+    db_user: User,
+    texts,
+) -> tuple[str, str]:
+    access_key_section = await build_access_key_section(
+        db,
+        db_user,
+        texts,
+        "<b>Ключ доступа:</b>",
+    )
+    forwarded_access_key_section = await build_access_key_section(
+        db,
+        db_user,
+        texts,
+        "Ключ доступа:",
+        copyable=False,
+    )
+    app_links = _get_share_app_links()
+    return (
+        _build_share_access_text(texts, access_key_section, app_links),
+        _build_share_access_friend_message(
+            texts,
+            forwarded_access_key_section,
+            app_links,
+        ),
+    )
 
 
 async def handle_share_access(
@@ -2845,16 +2903,12 @@ async def handle_share_access(
         )
         return
 
-    text = _build_share_access_text(texts, link)
-
-    # Клиенты Telegram всегда ставят url перед text, поэтому всё сообщение
-    # (с ссылкой посередине) передаём одним параметром url.
-    friend_message = _build_share_access_friend_message(texts, link)
+    text, friend_message = await _build_share_access_messages(db, db_user, texts)
     share_url = f"https://t.me/share/url?url={quote(friend_message, safe='')}"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text=texts.t("SHARE_ACCESS_SEND_BUTTON", "📤 Поделиться доступом"),
+            text=texts.t("SHARE_ACCESS_SEND_BUTTON", "📤 Переслать друзьям"),
             url=share_url,
         )],
         [InlineKeyboardButton(
@@ -2863,13 +2917,13 @@ async def handle_share_access(
         )],
     ])
 
-    try:
-        await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
-    except TelegramBadRequest:
-        try:
-            await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
-        except TelegramBadRequest:
-            await callback.message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
+    image_path = os.path.join("images", "connection.jpg")
+    await edit_or_answer_photo(
+        callback,
+        text,
+        keyboard,
+        photo_path=image_path if os.path.exists(image_path) else None,
+    )
     await callback.answer()
 
 
@@ -3855,11 +3909,6 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         handle_sub_reset_devices,
         F.data == "sub_reset_devices"
-    )
-
-    dp.callback_query.register(
-        show_subscription_info,
-        F.data == "menu_subscription"
     )
 
     dp.callback_query.register(

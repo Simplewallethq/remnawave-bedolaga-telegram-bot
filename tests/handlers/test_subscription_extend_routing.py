@@ -2,9 +2,11 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, User
 
 from app.handlers.subscription import purchase, tariffs
+from app.handlers.balance import platega as balance_platega
+from app.keyboards.inline import get_extend_subscription_keyboard_with_prices
 from app.services.user_service import UserService
 
 
@@ -24,6 +26,15 @@ def _tariff_subscription(*, expired: bool = False):
         status="expired" if expired else "active",
         end_date=now - timedelta(days=1) if expired else now + timedelta(days=5),
     )
+
+
+def test_legacy_extend_back_returns_subscription_management():
+    keyboard = get_extend_subscription_keyboard_with_prices(
+        language="ru",
+        prices={30: 10000},
+    )
+
+    assert keyboard.inline_keyboard[-1][0].callback_data == "subscription"
 
 
 async def test_active_tariff_extend_routes_to_current_plan_renewal(monkeypatch):
@@ -59,6 +70,37 @@ async def test_expired_tariff_extend_restores_same_plan(monkeypatch):
     show_renew_current.assert_awaited_once_with(callback, user, db)
     show_tariffs_page.assert_not_called()
     legacy_price_calc.assert_not_called()
+
+
+async def test_current_tariff_renewal_uses_subscription_image(monkeypatch):
+    callback = _callback()
+    db = AsyncMock()
+    user = SimpleNamespace(id=42, language="ru", subscription=_tariff_subscription())
+    plan = SimpleNamespace(id=123, code="solo", display_name="Solo", description_md="Solo plan")
+    render = AsyncMock()
+
+    monkeypatch.setattr(
+        tariffs,
+        "_resolve_renewable_subscription",
+        AsyncMock(return_value=user.subscription),
+    )
+    monkeypatch.setattr(tariffs, "get_plan_by_id", AsyncMock(return_value=plan))
+    monkeypatch.setattr(tariffs, "select_prices_for_cohort", lambda *_args: {30: 10_000})
+    monkeypatch.setattr(
+        tariffs.hot_invoice_offer_service,
+        "get_available_offer",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        tariffs.expired_subscription_offer_service,
+        "get_available_offer",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(tariffs, "edit_or_answer_photo", render)
+
+    await tariffs.show_renew_current(callback, user, db)
+
+    assert render.await_args.kwargs["photo_path"] == "images/subscription.jpg"
 
 
 async def test_legacy_extend_keeps_legacy_calculator(monkeypatch):
@@ -183,6 +225,154 @@ async def test_tariff_user_without_subscription_extend_routes_to_catalog(monkeyp
     show_tariffs_page.assert_awaited_once_with(callback, user, db)
     show_renew_current.assert_not_called()
     callback.answer.assert_not_called()
+
+
+async def test_insufficient_tariff_purchase_starts_direct_platega_checkout(monkeypatch):
+    callback = _callback()
+    callback.data = "tariff_buy:solo:30"
+    state = AsyncMock()
+    db = AsyncMock()
+    user = SimpleNamespace(language="ru", balance_kopeks=200, subscription=None)
+    plan = SimpleNamespace(id=1, code="solo", is_active=True)
+    checkout = AsyncMock()
+
+    monkeypatch.setattr(tariffs, "get_plan_by_code", AsyncMock(return_value=plan))
+    monkeypatch.setattr(
+        tariffs,
+        "_resolve_tariff_purchase_price",
+        AsyncMock(return_value=(39000, 39000, None, None, None)),
+    )
+    monkeypatch.setattr(tariffs, "_save_tariff_intent_cart", AsyncMock())
+    monkeypatch.setattr(tariffs, "_start_tariff_platega_checkout", checkout)
+
+    await tariffs.start_tariff_purchase(callback, user, db, state)
+
+    checkout.assert_awaited_once_with(
+        callback,
+        user,
+        state,
+        total_kopeks=39000,
+        back_callback="tariff_select:solo",
+        balance_callback="tariff_balance:purchase:solo:30",
+    )
+
+
+async def test_covered_tariff_purchase_shows_platega_and_balance_payment(monkeypatch):
+    callback = _callback()
+    callback.data = "tariff_buy:solo:30"
+    state = AsyncMock()
+    db = AsyncMock()
+    user = SimpleNamespace(language="ru", balance_kopeks=39000, subscription=None)
+    plan = SimpleNamespace(id=1, code="solo", is_active=True)
+    checkout = AsyncMock()
+    finalize = AsyncMock()
+
+    monkeypatch.setattr(tariffs, "get_plan_by_code", AsyncMock(return_value=plan))
+    monkeypatch.setattr(
+        tariffs,
+        "_resolve_tariff_purchase_price",
+        AsyncMock(return_value=(39000, 39000, None, None, None)),
+    )
+    monkeypatch.setattr(tariffs, "_save_tariff_intent_cart", AsyncMock())
+    monkeypatch.setattr(tariffs, "_start_tariff_platega_checkout", checkout)
+    monkeypatch.setattr(tariffs, "finalize_tariff_purchase", finalize)
+
+    await tariffs.start_tariff_purchase(callback, user, db, state)
+
+    checkout.assert_awaited_once_with(
+        callback,
+        user,
+        state,
+        total_kopeks=39000,
+        back_callback="tariff_select:solo",
+        balance_callback="tariff_balance:purchase:solo:30",
+    )
+    finalize.assert_not_awaited()
+
+
+async def test_tariff_platega_checkout_preserves_purchase_context(monkeypatch):
+    callback = _callback()
+    state = AsyncMock()
+    user = SimpleNamespace(language="ru", balance_kopeks=200)
+    start_payment = AsyncMock()
+
+    monkeypatch.setattr(type(tariffs.settings), "is_platega_universal_enabled", lambda self: True)
+    monkeypatch.setattr(balance_platega, "start_platega_universal_payment", start_payment)
+
+    await tariffs._start_tariff_platega_checkout(
+        callback,
+        user,
+        state,
+        total_kopeks=39000,
+        back_callback="tariff_select:solo",
+    )
+
+    state.update_data.assert_awaited_once_with(
+        platega_pending_amount=38800,
+        platega_back_callback="tariff_select:solo",
+        tariff_checkout_summary={
+            "total_kopeks": 39000,
+            "balance_kopeks": 200,
+            "missing_kopeks": 38800,
+            "balance_callback": None,
+        },
+    )
+    start_payment.assert_awaited_once_with(callback, user, state)
+
+
+async def test_balance_renewal_uses_copied_callback_data(monkeypatch):
+    callback = CallbackQuery(
+        id="callback-id",
+        from_user=User(id=42, is_bot=False, first_name="Test"),
+        chat_instance="chat-instance",
+        data="tariff_balance:renew:3:30",
+    )
+    renewal = AsyncMock()
+    monkeypatch.setattr(tariffs, "apply_renewal", renewal)
+
+    await tariffs.pay_tariff_from_balance(
+        callback,
+        SimpleNamespace(),
+        AsyncMock(),
+        AsyncMock(),
+    )
+
+    forwarded_callback = renewal.await_args.args[0]
+    assert callback.data == "tariff_balance:renew:3:30"
+    assert forwarded_callback.data == "tariff_renew:3:30"
+    assert forwarded_callback is not callback
+    assert renewal.await_args.kwargs["pay_from_balance"] is True
+
+
+async def test_balance_upgrade_renders_common_success_card(monkeypatch):
+    callback = _callback()
+    callback.data = "tariff_upgrade_confirm:pro"
+    state = AsyncMock()
+    db = AsyncMock()
+    active_sub = SimpleNamespace(
+        id=1,
+        plan_id=1,
+        plan_period_days=30,
+        end_date=datetime.now() + timedelta(days=20),
+    )
+    user = SimpleNamespace(language="ru", balance_kopeks=50000)
+    plan = SimpleNamespace(id=3, code="pro", display_name="Pro", is_active=True)
+
+    monkeypatch.setattr(tariffs, "get_plan_by_code", AsyncMock(return_value=plan))
+    monkeypatch.setattr(tariffs, "_resolve_active_subscription", AsyncMock(return_value=active_sub))
+    monkeypatch.setattr(tariffs, "get_plan_price", AsyncMock(return_value=50000))
+    monkeypatch.setattr(tariffs, "get_current_plan_price_for_period", AsyncMock(return_value=0))
+    monkeypatch.setattr(tariffs, "_get_hot_invoice_tariff_offer", AsyncMock(return_value=(None, None, None)))
+    monkeypatch.setattr(tariffs, "calculate_upgrade_delta", lambda *args: 50000)
+    monkeypatch.setattr(tariffs, "finalize_tier_switch", AsyncMock(return_value=active_sub))
+    monkeypatch.setattr(tariffs, "_delete_tariff_intent_cart", AsyncMock())
+
+    await tariffs.confirm_tier_upgrade(callback, user, db, state, pay_from_balance=True)
+
+    message_text = callback.message.edit_text.await_args.args[0]
+    assert "✅ <b>Подписка активирована</b>" in message_text
+    assert "Тариф Pro" in message_text
+    callback.answer.assert_awaited_once_with()
 
 
 async def test_user_service_balance_notification_uses_subscription_extend_callback():
