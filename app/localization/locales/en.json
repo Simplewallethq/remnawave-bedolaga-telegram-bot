@@ -204,6 +204,8 @@
   "ADMIN_MAIN_TRIALS": "🧪 Trials",
   "ADMIN_MAIN_PAYMENTS": "💳 Top-ups",
   "ADMIN_MAIN_USERS_SUBSCRIPTIONS": "👥 Users / Subscriptions",
+  "ADMIN_ROOT_USER_SEARCH": "🔍 User search",
+  "ADMIN_ROOT_REST": "🗂 Everything else",
   "ADMIN_MESSAGES": "📨 Broadcasts",
   "ADMIN_MESSAGES_ALL_USERS": "📨 All users",
   "ADMIN_MESSAGES_BY_CRITERIA": "🔍 By criteria",

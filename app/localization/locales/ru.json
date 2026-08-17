@@ -207,6 +207,8 @@
   "ADMIN_MAIN_TRIALS": "🧪 Триалы",
   "ADMIN_MAIN_PAYMENTS": "💳 Пополнения",
   "ADMIN_MAIN_USERS_SUBSCRIPTIONS": "👥 Юзеры/Подписки",
+  "ADMIN_ROOT_USER_SEARCH": "🔍 Поиск пользователей",
+  "ADMIN_ROOT_REST": "🗂 Остальное",
   "ADMIN_MESSAGES": "📨 Рассылки",
   "ADMIN_MESSAGES_ALL_USERS": "📨 Всем пользователям",
   "ADMIN_MESSAGES_BY_CRITERIA": "🔍 По критериям",

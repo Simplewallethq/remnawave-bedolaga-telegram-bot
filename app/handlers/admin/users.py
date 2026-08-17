@@ -1051,7 +1051,16 @@ async def start_user_search(
     db_user: User,
     state: FSMContext
 ):
-    
+    texts = get_texts(db_user.language)
+
+    # «Назад» ведёт туда, откуда открыли поиск: из корня админки — в корень,
+    # из списка юзеров (кнопка 🔍 Поиск) — обратно в список.
+    back_callback = (
+        "admin_panel"
+        if callback.data == "admin_users_search_root"
+        else "admin_users"
+    )
+
     await callback.message.edit_text(
         "🔍 <b>Поиск пользователя</b>\n\n"
         "Введите для поиска:\n"
@@ -1061,10 +1070,10 @@ async def start_user_search(
         "• Email\n\n"
         "Или нажмите /cancel для отмены",
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_users")]
+            [types.InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)]
         ])
     )
-    
+
     await state.set_state(AdminStates.waiting_for_user_search)
     await callback.answer()
 
@@ -5611,7 +5620,7 @@ def register_handlers(dp: Dispatcher):
     
     dp.callback_query.register(
         start_user_search,
-        F.data == "admin_users_search"
+        F.data.in_({"admin_users_search", "admin_users_search_root"})
     )
     
     dp.message.register(

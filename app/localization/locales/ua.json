@@ -134,6 +134,8 @@
   "ADMIN_MAIN_TRIALS": "🧪 Тріали",
   "ADMIN_MAIN_PAYMENTS": "💳 Поповнення",
   "ADMIN_MAIN_USERS_SUBSCRIPTIONS": "👥 Юзери/Підписки",
+  "ADMIN_ROOT_USER_SEARCH": "🔍 Пошук користувачів",
+  "ADMIN_ROOT_REST": "🗂 Інше",
   "ADMIN_MESSAGES": "📨 Розсилки",
   "ADMIN_MESSAGES_ALL_USERS": "📨 Всім користувачам",
   "ADMIN_MESSAGES_BY_CRITERIA": "🔍 За критеріями",

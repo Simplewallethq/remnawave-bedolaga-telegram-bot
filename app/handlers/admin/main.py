@@ -7,6 +7,7 @@ from app.config import settings
 from app.database.models import User
 from app.keyboards.admin import (
     get_admin_main_keyboard,
+    get_admin_root_keyboard,
     get_admin_users_submenu_keyboard,
     get_admin_promo_submenu_keyboard,
     get_admin_communications_submenu_keyboard,
@@ -26,15 +27,10 @@ from app.database.crud.ticket import TicketCRUD
 logger = logging.getLogger(__name__)
 
 
-@admin_required
-@error_handler
-async def show_admin_panel(
-    callback: types.CallbackQuery,
-    db_user: User,
-    db: AsyncSession
-):
+async def _build_admin_panel_text(db_user: User) -> str:
+    """Текст админ-панели с онлайн-статистикой Remnawave (если доступна)."""
     texts = get_texts(db_user.language)
-    
+
     admin_text = texts.ADMIN_PANEL
     try:
         from app.services.remnawave_service import RemnaWaveService
@@ -55,9 +51,42 @@ async def show_admin_panel(
         )
     except Exception as e:
         logger.error(f"Не удалось получить статистику Remnawave для админ-панели: {e}")
-    
+
+    return admin_text
+
+
+@admin_required
+@error_handler
+async def show_admin_panel(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    admin_text = await _build_admin_panel_text(db_user)
+
     await callback.message.edit_text(
         admin_text,
+        reply_markup=get_admin_root_keyboard(db_user.language)
+    )
+    await callback.answer()
+
+
+@admin_required
+@error_handler
+async def show_admin_rest(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession
+):
+    """Экран «Остальное» — полное меню админки (как было до разделения).
+
+    Статистику Remnawave здесь не тянем: она уже показана на корневом экране,
+    второй запрос к панели на один заход в админку не нужен.
+    """
+    texts = get_texts(db_user.language)
+
+    await callback.message.edit_text(
+        texts.ADMIN_PANEL,
         reply_markup=get_admin_main_keyboard(db_user.language)
     )
     await callback.answer()
@@ -395,7 +424,12 @@ def register_handlers(dp: Dispatcher):
         show_admin_panel,
         F.data == "admin_panel"
     )
-    
+
+    dp.callback_query.register(
+        show_admin_rest,
+        F.data == "admin_panel_rest"
+    )
+
     dp.callback_query.register(
         show_users_submenu,
         F.data == "admin_submenu_users"

@@ -133,6 +133,8 @@
     "ADMIN_MAIN_TRIALS": "🧪试用",
     "ADMIN_MAIN_PAYMENTS": "💳充值",
     "ADMIN_MAIN_USERS_SUBSCRIPTIONS": "👥用户/订阅",
+    "ADMIN_ROOT_USER_SEARCH": "🔍搜索用户",
+    "ADMIN_ROOT_REST": "🗂其他",
     "ADMIN_MESSAGES": "📨广播",
     "ADMIN_MESSAGES_ALL_USERS": "📨所有用户",
     "ADMIN_MESSAGES_BY_CRITERIA": "🔍按条件",

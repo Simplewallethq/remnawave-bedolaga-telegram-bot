@@ -9,6 +9,32 @@ def _t(texts, key: str, default: str) -> str:
     return texts.t(key, default)
 
 
+def get_admin_root_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
+    """Корневой экран админки: поиск юзеров и всё остальное.
+
+    Поиск ведёт в тот же start_user_search, но через _root-вариант callback —
+    чтобы «Назад» на экране поиска возвращал в корень, а не в список юзеров.
+    «Остальное» — полное меню get_admin_main_keyboard.
+    """
+    texts = get_texts(language)
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text=_t(texts, "ADMIN_ROOT_USER_SEARCH", "🔍 Поиск пользователей"),
+                callback_data="admin_users_search_root",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=_t(texts, "ADMIN_ROOT_REST", "🗂 Остальное"),
+                callback_data="admin_panel_rest",
+            )
+        ],
+        [InlineKeyboardButton(text=texts.BACK, callback_data="back_to_menu")]
+    ])
+
+
 def get_admin_main_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
     texts = get_texts(language)
 
@@ -63,7 +89,7 @@ def get_admin_main_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
                 callback_data="admin_payments",
             )
         ],
-        [InlineKeyboardButton(text=texts.BACK, callback_data="back_to_menu")]
+        [InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel")]
     ])
 
 
@@ -79,7 +105,7 @@ def get_admin_users_submenu_keyboard(language: str = "ru") -> InlineKeyboardMark
             InlineKeyboardButton(text=texts.ADMIN_SUBSCRIPTIONS, callback_data="admin_subscriptions")
         ],
         [
-            InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel")
+            InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel_rest")
         ]
     ])
 
@@ -105,7 +131,7 @@ def get_admin_promo_submenu_keyboard(language: str = "ru") -> InlineKeyboardMark
             InlineKeyboardButton(text=texts.ADMIN_PROMO_GROUPS, callback_data="admin_promo_groups")
         ],
         [
-            InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel")
+            InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel_rest")
         ]
     ])
 
@@ -140,7 +166,7 @@ def get_admin_communications_submenu_keyboard(language: str = "ru") -> InlineKey
             )
         ],
         [
-            InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel")
+            InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel_rest")
         ]
     ])
 
@@ -168,7 +194,7 @@ def get_admin_support_submenu_keyboard(language: str = "ru") -> InlineKeyboardMa
             )
         ],
         [
-            InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel")
+            InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel_rest")
         ]
     ])
 
@@ -219,7 +245,7 @@ def get_admin_settings_submenu_keyboard(language: str = "ru") -> InlineKeyboardM
             )
         ],
         [
-            InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel")
+            InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel_rest")
         ]
     ])
 
@@ -246,7 +272,7 @@ def get_admin_system_submenu_keyboard(language: str = "ru") -> InlineKeyboardMar
         ],
         [InlineKeyboardButton(text=texts.t("ADMIN_REPORTS", "📊 Отчеты"), callback_data="admin_reports")],
         [
-            InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel")
+            InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel_rest")
         ]
     ])
 
@@ -261,7 +287,7 @@ def get_admin_trials_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
                 callback_data="admin_trials_reset",
             )
         ],
-        [InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel")],
+        [InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel_rest")],
     ])
 
 
@@ -293,7 +319,7 @@ def get_admin_reports_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
                 callback_data="admin_reports_registrations"
             )
         ],
-        [InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel")]
+        [InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel_rest")]
     ])
 
 
