@@ -1172,7 +1172,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
         
         trial_active = bool(is_active and is_trial)
         has_active_sub = bool(is_active and not is_trial)
-        trial_used = (subscription is not None)
+        trial_used = subscription is not None or getattr(user, "has_had_paid_subscription", False)
         
         # Проверяем, является ли пользователь администратором
         is_admin = settings.is_admin(user.telegram_id)
@@ -2148,7 +2148,11 @@ async def complete_registration(
         
         trial_active = bool(is_active and is_trial)
         has_active_sub = bool(is_active and not is_trial)
-        trial_used = (subscription is not None)
+        trial_used = subscription is not None or getattr(
+            existing_user,
+            "has_had_paid_subscription",
+            False,
+        )
         
         # Проверяем, является ли пользователь администратором
         is_admin = settings.is_admin(existing_user.telegram_id)

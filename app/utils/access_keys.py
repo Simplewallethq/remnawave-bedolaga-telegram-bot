@@ -41,8 +41,12 @@ async def build_leto_access_code_block(
 
     ttl_hours = max(1, int((record.expires_at - datetime.utcnow()).total_seconds() // 3600))
     label = texts.t(
-        "CONNECT_LETO_CODE_LABEL",
-        "Ключ для входа в Leto VPN (действует {ttl_hours} ч)",
+        "CONNECT_LETO_CODE_LABEL" if copyable else "CONNECT_LETO_CODE_LABEL_PLAIN",
+        (
+            "<b>Ключ для входа в Leto VPN</b> (действует {ttl_hours} ч):"
+            if copyable
+            else "Ключ для входа в Leto VPN (действует {ttl_hours} ч):"
+        ),
     ).format(ttl_hours=ttl_hours)
     value = format_copyable_code(record.code) if copyable else record.code
     return f"\n\n{label}\n{value}"

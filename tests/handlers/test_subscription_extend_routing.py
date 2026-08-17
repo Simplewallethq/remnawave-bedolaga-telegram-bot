@@ -200,7 +200,12 @@ async def test_trial_extend_routes_to_tariff_catalog_without_state(monkeypatch):
 
     await purchase.handle_extend_subscription(callback, user, db)
 
-    show_tariffs_page.assert_awaited_once_with(callback, user, db)
+    show_tariffs_page.assert_awaited_once_with(
+        callback,
+        user,
+        db,
+        back_callback="subscription",
+    )
     start_subscription_purchase.assert_not_called()
 
 
@@ -222,9 +227,69 @@ async def test_tariff_user_without_subscription_extend_routes_to_catalog(monkeyp
 
     await purchase.handle_extend_subscription(callback, user, db)
 
-    show_tariffs_page.assert_awaited_once_with(callback, user, db)
+    show_tariffs_page.assert_awaited_once_with(
+        callback,
+        user,
+        db,
+        back_callback="main_menu",
+    )
     show_renew_current.assert_not_called()
     callback.answer.assert_not_called()
+
+
+async def test_subscription_menu_without_subscription_returns_from_catalog_to_main_menu(monkeypatch):
+    callback = _callback()
+    db = AsyncMock()
+    user = SimpleNamespace(language="ru", subscription=None)
+    show_tariffs_page = AsyncMock()
+    monkeypatch.setattr(purchase, "user_uses_tariffs", lambda _user: True)
+    monkeypatch.setattr(tariffs, "show_tariffs_page", show_tariffs_page)
+
+    await purchase.handle_subscription_menu(callback, user, db)
+
+    show_tariffs_page.assert_awaited_once_with(
+        callback,
+        user,
+        db,
+        back_callback="main_menu",
+    )
+
+
+async def test_new_purchase_without_subscription_returns_from_catalog_to_main_menu(monkeypatch):
+    callback = _callback()
+    db = AsyncMock()
+    state = AsyncMock()
+    user = SimpleNamespace(language="ru", subscription=None)
+    show_tariffs_page = AsyncMock()
+    monkeypatch.setattr(purchase, "user_uses_tariffs", lambda _user: True)
+    monkeypatch.setattr(tariffs, "show_tariffs_page", show_tariffs_page)
+
+    await purchase.start_subscription_purchase(callback, state, user, db)
+
+    show_tariffs_page.assert_awaited_once_with(
+        callback,
+        user,
+        db,
+        back_callback="main_menu",
+    )
+
+
+async def test_add_days_without_subscription_returns_from_catalog_to_main_menu(monkeypatch):
+    callback = _callback()
+    db = AsyncMock()
+    user = SimpleNamespace(language="ru", subscription=None)
+    show_tariffs_page = AsyncMock()
+    monkeypatch.setattr(purchase, "user_uses_tariffs", lambda _user: True)
+    monkeypatch.setattr(tariffs, "show_tariffs_page", show_tariffs_page)
+
+    await purchase.handle_sub_add_days(callback, user, db)
+
+    show_tariffs_page.assert_awaited_once_with(
+        callback,
+        user,
+        db,
+        back_callback="main_menu",
+    )
 
 
 async def test_insufficient_tariff_purchase_starts_direct_platega_checkout(monkeypatch):

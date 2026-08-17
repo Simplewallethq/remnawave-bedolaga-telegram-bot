@@ -40,6 +40,8 @@ from app.keyboards.inline import (
     get_updated_subscription_settings_keyboard, get_insufficient_balance_keyboard,
     get_extend_subscription_keyboard_with_prices, get_confirm_change_devices_keyboard,
     get_devices_management_keyboard, get_device_management_help_keyboard,
+    get_all_devices_reset_confirm_keyboard,
+    get_device_unlink_confirm_keyboard,
     get_happ_cryptolink_keyboard,
     get_happ_download_platform_keyboard, get_happ_download_link_keyboard,
     get_happ_download_button_row,
@@ -515,7 +517,6 @@ async def handle_device_management(
         return
 
     try:
-        from app.services.remnawave_service import RemnaWaveService
         service = RemnaWaveService()
 
         async with service.get_api_client() as api:
@@ -635,7 +636,6 @@ async def handle_devices_page(
     texts = get_texts(db_user.language)
 
     try:
-        from app.services.remnawave_service import RemnaWaveService
         service = RemnaWaveService()
 
         async with service.get_api_client() as api:
@@ -662,9 +662,11 @@ async def handle_single_device_reset(
         db_user: User,
         db: AsyncSession
 ):
+    texts = get_texts(db_user.language)
+
     try:
         callback_parts = callback.data.split('_')
-        if len(callback_parts) < 4:
+        if len(callback_parts) != 4:
             logger.error(f"Некорректный формат callback_data: {callback.data}")
             await callback.answer(
                 texts.t("DEVICE_RESET_INVALID_REQUEST", "❌ Ошибка: некорректный запрос"),
@@ -675,7 +677,10 @@ async def handle_single_device_reset(
         device_index = int(callback_parts[2])
         page = int(callback_parts[3])
 
-        logger.info(f"🔧 Сброс устройства: index={device_index}, page={page}")
+        if device_index < 0 or page < 1:
+            raise ValueError("device index and page must be positive")
+
+        logger.info(f"🔧 Подтверждение отвязки устройства: index={device_index}, page={page}")
 
     except (ValueError, IndexError) as e:
         logger.error(f"❌ Ошибка парсинга callback_data {callback.data}: {e}")
@@ -685,10 +690,7 @@ async def handle_single_device_reset(
         )
         return
 
-    texts = get_texts(db_user.language)
-
     try:
-        from app.services.remnawave_service import RemnaWaveService
         service = RemnaWaveService()
 
         async with service.get_api_client() as api:
@@ -702,60 +704,24 @@ async def handle_single_device_reset(
 
                 if device_index < len(pagination.items):
                     device = pagination.items[device_index]
-                    device_hwid = device.get('hwid')
+                    platform = device.get('platform', 'Unknown')
+                    device_model = device.get('deviceModel', 'Unknown')
+                    device_info = f"{platform} - {device_model}"
 
-                    if device_hwid:
-                        delete_data = {
-                            "userUuid": db_user.remnawave_uuid,
-                            "hwid": device_hwid
-                        }
-
-                        await api._make_request('POST', '/api/hwid/devices/delete', data=delete_data)
-
-                        platform = device.get('platform', 'Unknown')
-                        device_model = device.get('deviceModel', 'Unknown')
-                        device_info = f"{platform} - {device_model}"
-
-                        await callback.answer(
-                            texts.t(
-                                "DEVICE_RESET_SUCCESS",
-                                "✅ Устройство {device} успешно сброшено!",
-                            ).format(device=device_info),
-                            show_alert=True,
-                        )
-
-                        updated_response = await api._make_request('GET', f'/api/hwid/devices/{db_user.remnawave_uuid}')
-                        if updated_response and 'response' in updated_response:
-                            updated_devices = updated_response['response'].get('devices', [])
-
-                            if updated_devices:
-                                updated_pagination = paginate_list(updated_devices, page=page,
-                                                                   per_page=devices_per_page)
-                                if not updated_pagination.items and page > 1:
-                                    page = page - 1
-
-                                await show_devices_page(callback, db_user, updated_devices, page=page)
-                            else:
-                                await callback.message.edit_text(
-                                    texts.t(
-                                        "DEVICE_RESET_ALL_DONE",
-                                        "ℹ️ Все устройства сброшены",
-                                    ),
-                                    reply_markup=get_back_keyboard(
-                                        db_user.language,
-                                        callback_data="subscription",
-                                    )
-                                )
-
-                        logger.info(f"✅ Пользователь {db_user.telegram_id} сбросил устройство {device_info}")
-                    else:
-                        await callback.answer(
-                            texts.t(
-                                "DEVICE_RESET_ID_FAILED",
-                                "❌ Не удалось получить ID устройства",
-                            ),
-                            show_alert=True,
-                        )
+                    await edit_or_answer_photo(
+                        callback,
+                        texts.t(
+                            "DEVICE_UNLINK_CONFIRMATION",
+                            "Вы точно хотите отвязать {device}?",
+                        ).format(device=device_info),
+                        get_device_unlink_confirm_keyboard(
+                            device_index,
+                            page,
+                            db_user.language,
+                        ),
+                        photo_path=os.path.join("images", "devices.jpg"),
+                    )
+                    await callback.answer()
                 else:
                     await callback.answer(
                         texts.t("DEVICE_RESET_NOT_FOUND", "❌ Устройство не найдено"),
@@ -768,11 +734,138 @@ async def handle_single_device_reset(
                 )
 
     except Exception as e:
-        logger.error(f"Ошибка сброса устройства: {e}")
+        logger.error(f"Ошибка загрузки устройства для отвязки: {e}")
         await callback.answer(
             texts.t("DEVICE_RESET_ERROR", "❌ Ошибка сброса устройства"),
             show_alert=True,
         )
+
+
+async def confirm_single_device_reset(
+        callback: types.CallbackQuery,
+        db_user: User,
+        db: AsyncSession,
+):
+    texts = get_texts(db_user.language)
+
+    try:
+        callback_parts = callback.data.split('_')
+        if len(callback_parts) != 5:
+            raise ValueError("invalid callback format")
+
+        device_index = int(callback_parts[3])
+        page = int(callback_parts[4])
+        if device_index < 0 or page < 1:
+            raise ValueError("device index and page must be positive")
+    except (ValueError, IndexError) as e:
+        logger.error(f"❌ Ошибка парсинга callback_data {callback.data}: {e}")
+        await callback.answer(
+            texts.t("DEVICE_RESET_PARSE_ERROR", "❌ Ошибка обработки запроса"),
+            show_alert=True,
+        )
+        return
+
+    try:
+        service = RemnaWaveService()
+
+        async with service.get_api_client() as api:
+            response = await api._make_request(
+                'GET', f'/api/hwid/devices/{db_user.remnawave_uuid}'
+            )
+            if not response or 'response' not in response:
+                await callback.answer(
+                    texts.t("DEVICE_FETCH_ERROR", "❌ Ошибка получения устройств"),
+                    show_alert=True,
+                )
+                return
+
+            devices_list = response['response'].get('devices', [])
+            devices_per_page = 5
+            pagination = paginate_list(devices_list, page=page, per_page=devices_per_page)
+            if device_index >= len(pagination.items):
+                await callback.answer(
+                    texts.t("DEVICE_RESET_NOT_FOUND", "❌ Устройство не найдено"),
+                    show_alert=True,
+                )
+                return
+
+            device = pagination.items[device_index]
+            device_hwid = device.get('hwid')
+            if not device_hwid:
+                await callback.answer(
+                    texts.t("DEVICE_RESET_ID_FAILED", "❌ Не удалось получить ID устройства"),
+                    show_alert=True,
+                )
+                return
+
+            await api._make_request(
+                'POST',
+                '/api/hwid/devices/delete',
+                data={"userUuid": db_user.remnawave_uuid, "hwid": device_hwid},
+            )
+
+            platform = device.get('platform', 'Unknown')
+            device_model = device.get('deviceModel', 'Unknown')
+            device_info = f"{platform} - {device_model}"
+            await callback.answer(
+                texts.t(
+                    "DEVICE_UNLINK_SUCCESS",
+                    "✅ Устройство {device} успешно отвязано!",
+                ).format(device=device_info),
+                show_alert=True,
+            )
+
+            updated_response = await api._make_request(
+                'GET', f'/api/hwid/devices/{db_user.remnawave_uuid}'
+            )
+            if not updated_response or 'response' not in updated_response:
+                return
+
+            updated_devices = updated_response['response'].get('devices', [])
+            if updated_devices:
+                updated_pagination = paginate_list(
+                    updated_devices, page=page, per_page=devices_per_page
+                )
+                if not updated_pagination.items and page > 1:
+                    page -= 1
+                await show_devices_page(callback, db_user, updated_devices, page=page)
+            else:
+                await edit_or_answer_photo(
+                    callback,
+                    texts.t("DEVICE_NONE_CONNECTED", "ℹ️ У вас нет подключенных устройств"),
+                    get_back_keyboard(db_user.language, callback_data="subscription"),
+                    photo_path=os.path.join("images", "devices.jpg"),
+                )
+
+            logger.info(
+                "✅ Пользователь %s отвязал устройство %s",
+                db_user.telegram_id,
+                device_info,
+            )
+    except Exception as e:
+        logger.error(f"Ошибка отвязки устройства: {e}")
+        await callback.answer(
+            texts.t("DEVICE_RESET_ERROR", "❌ Ошибка сброса устройства"),
+            show_alert=True,
+        )
+
+async def show_all_devices_reset_confirmation(
+        callback: types.CallbackQuery,
+        db_user: User,
+        db: AsyncSession,
+):
+    texts = get_texts(db_user.language)
+    await edit_or_answer_photo(
+        callback,
+        texts.t(
+            "DEVICE_RESET_ALL_CONFIRMATION",
+            "Вы точно хотите сбросить все устройства?",
+        ),
+        get_all_devices_reset_confirm_keyboard(db_user.language),
+        photo_path=os.path.join("images", "devices.jpg"),
+    )
+    await callback.answer()
+
 
 async def handle_all_devices_reset_from_management(
         callback: types.CallbackQuery,
@@ -789,7 +882,6 @@ async def handle_all_devices_reset_from_management(
         return
 
     try:
-        from app.services.remnawave_service import RemnaWaveService
         service = RemnaWaveService()
 
         async with service.get_api_client() as api:
@@ -841,7 +933,8 @@ async def handle_all_devices_reset_from_management(
 
             if success_count > 0:
                 if failed_count == 0:
-                    await callback.message.edit_text(
+                    await edit_or_answer_photo(
+                        callback,
                         texts.t(
                             "DEVICE_RESET_ALL_SUCCESS_MESSAGE",
                             (
@@ -851,15 +944,16 @@ async def handle_all_devices_reset_from_management(
                                 "💡 Используйте ссылку из раздела 'Моя подписка' для повторного подключения"
                             ),
                         ).format(count=success_count),
-                        reply_markup=get_back_keyboard(
+                        get_back_keyboard(
                             db_user.language,
                             callback_data="subscription",
                         ),
-                        parse_mode="HTML"
+                        photo_path=os.path.join("images", "devices.jpg"),
                     )
                     logger.info(f"✅ Пользователь {db_user.telegram_id} успешно сбросил {success_count} устройств")
                 else:
-                    await callback.message.edit_text(
+                    await edit_or_answer_photo(
+                        callback,
                         texts.t(
                             "DEVICE_RESET_PARTIAL_MESSAGE",
                             (
@@ -869,16 +963,17 @@ async def handle_all_devices_reset_from_management(
                                 "Попробуйте еще раз или обратитесь в поддержку."
                             ),
                         ).format(success=success_count, failed=failed_count),
-                        reply_markup=get_back_keyboard(
+                        get_back_keyboard(
                             db_user.language,
                             callback_data="subscription",
                         ),
-                        parse_mode="HTML"
+                        photo_path=os.path.join("images", "devices.jpg"),
                     )
                     logger.warning(
                         f"⚠️ Частичный сброс у пользователя {db_user.telegram_id}: {success_count}/{len(devices_list)}")
             else:
-                await callback.message.edit_text(
+                await edit_or_answer_photo(
+                    callback,
                     texts.t(
                         "DEVICE_RESET_ALL_FAILED_MESSAGE",
                         (
@@ -887,22 +982,24 @@ async def handle_all_devices_reset_from_management(
                             "Всего устройств: {total}"
                         ),
                     ).format(total=len(devices_list)),
-                    reply_markup=get_back_keyboard(
+                    get_back_keyboard(
                         db_user.language,
                         callback_data="subscription",
                     ),
-                    parse_mode="HTML"
+                    photo_path=os.path.join("images", "devices.jpg"),
                 )
                 logger.error(f"❌ Не удалось сбросить ни одного устройства у пользователя {db_user.telegram_id}")
 
     except Exception as e:
         logger.error(f"Ошибка сброса всех устройств: {e}")
-        await callback.message.edit_text(
+        await edit_or_answer_photo(
+            callback,
             texts.ERROR,
-            reply_markup=get_back_keyboard(
+            get_back_keyboard(
                 db_user.language,
                 callback_data="subscription",
-            )
+            ),
+            photo_path=os.path.join("images", "devices.jpg"),
         )
 
     await callback.answer()

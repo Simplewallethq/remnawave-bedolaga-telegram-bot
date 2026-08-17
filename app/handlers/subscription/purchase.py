@@ -190,6 +190,7 @@ from .devices import (
     confirm_add_devices,
     confirm_change_devices,
     confirm_reset_devices,
+    confirm_single_device_reset,
     execute_change_devices,
     get_current_devices_count,
     handle_all_devices_reset_from_management,
@@ -199,6 +200,7 @@ from .devices import (
     handle_device_management,
     handle_devices_page,
     handle_reset_devices,
+    show_all_devices_reset_confirmation,
     handle_single_device_reset,
     handle_specific_app_guide,
     show_device_connection_help,
@@ -242,7 +244,12 @@ async def show_subscription_info(
         if user_uses_tariffs(db_user):
             # No subscription — route to the new tiered tariffs page.
             from app.handlers.subscription.tariffs import show_tariffs_page
-            await show_tariffs_page(callback, db_user, db)
+            await show_tariffs_page(
+                callback,
+                db_user,
+                db,
+                back_callback="main_menu",
+            )
             return
         await callback.message.edit_text(
             texts.SUBSCRIPTION_NONE,
@@ -828,7 +835,12 @@ async def start_subscription_purchase(
         # menu_buy still arrives from custom menu layouts, monitoring notifications
         # and post-topup keyboards — route all of them to the tariffs page.
         from app.handlers.subscription.tariffs import show_tariffs_page
-        await show_tariffs_page(callback, db_user, db)
+        await show_tariffs_page(
+            callback,
+            db_user,
+            db,
+            back_callback="subscription" if db_user.subscription else "main_menu",
+        )
         return
 
     texts = get_texts(db_user.language)
@@ -1080,7 +1092,12 @@ async def handle_extend_subscription(
         if subscription and subscription.plan_id is not None and not subscription.is_trial:
             await show_renew_current(callback, db_user, db)
         else:
-            await show_tariffs_page(callback, db_user, db)
+            await show_tariffs_page(
+                callback,
+                db_user,
+                db,
+                back_callback="subscription" if subscription else "main_menu",
+            )
         return
 
     if not subscription:
@@ -2633,7 +2650,12 @@ async def handle_subscription_menu(
         if user_uses_tariffs(db_user):
             # No subscription yet — drop straight into the tiered catalog.
             from app.handlers.subscription.tariffs import show_tariffs_page
-            await show_tariffs_page(callback, db_user, db)
+            await show_tariffs_page(
+                callback,
+                db_user,
+                db,
+                back_callback="main_menu",
+            )
             return
         await callback.answer(texts.t("SUBSCRIPTION_NONE", "Нет активной подписки"), show_alert=True)
         return
@@ -2853,17 +2875,21 @@ async def _build_share_access_messages(
     db_user: User,
     texts,
 ) -> tuple[str, str]:
+    access_key_label = texts.t(
+        "SHARE_ACCESS_KEY_LABEL",
+        "Ключ доступа (для Happ, Incy):",
+    )
     access_key_section = await build_access_key_section(
         db,
         db_user,
         texts,
-        "<b>Ключ доступа:</b>",
+        f"<b>{access_key_label}</b>",
     )
     forwarded_access_key_section = await build_access_key_section(
         db,
         db_user,
         texts,
-        "Ключ доступа:",
+        access_key_label,
         copyable=False,
     )
     app_links = _get_share_app_links()
@@ -2961,7 +2987,7 @@ async def handle_sub_add_days(
             callback,
             db_user,
             db,
-            back_callback="subscription",
+            back_callback="subscription" if subscription else "main_menu",
         )
         return
 
@@ -4180,8 +4206,18 @@ def register_handlers(dp: Dispatcher):
     )
 
     dp.callback_query.register(
-        handle_all_devices_reset_from_management,
+        confirm_single_device_reset,
+        F.data.regexp(r"^confirm_reset_device_\d+_\d+$")
+    )
+
+    dp.callback_query.register(
+        show_all_devices_reset_confirmation,
         F.data == "reset_all_devices"
+    )
+
+    dp.callback_query.register(
+        handle_all_devices_reset_from_management,
+        F.data == "confirm_reset_all_devices"
     )
 
     dp.callback_query.register(

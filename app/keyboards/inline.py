@@ -2819,22 +2819,47 @@ def get_updated_subscription_settings_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_device_reset_confirm_keyboard(device_info: str, device_index: int, page: int, language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
+def get_device_unlink_confirm_keyboard(
+    device_index: int,
+    page: int,
+    language: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
     texts = get_texts(language)
 
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
-                text=texts.t("RESET_DEVICE_CONFIRM_BUTTON", "✅ Да, сбросить это устройство"), 
+                text=texts.t("DEVICE_UNLINK_CONFIRM_BUTTON", "✅ Да"),
                 callback_data=f"confirm_reset_device_{device_index}_{page}"
             )
         ],
         [
             InlineKeyboardButton(
-                text=texts.CANCEL, 
+                text=texts.t("DEVICE_UNLINK_CANCEL_BUTTON", "❌ Нет"),
                 callback_data=f"devices_page_{page}"
             )
         ]
+    ])
+
+
+def get_all_devices_reset_confirm_keyboard(
+    language: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    texts = get_texts(language)
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text=texts.t("DEVICE_RESET_ALL_CONFIRM_BUTTON", "✅ Да"),
+                callback_data="confirm_reset_all_devices",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=texts.t("DEVICE_RESET_ALL_CANCEL_BUTTON", "❌ Нет"),
+                callback_data="subscription_manage_devices",
+            )
+        ],
     ])
 
 
