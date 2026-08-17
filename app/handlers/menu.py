@@ -225,7 +225,7 @@ async def show_main_menu(
         language=db_user.language,
     )
 
-    image_path = os.path.join("images", "leto-main.png")
+    image_path = os.path.join("images", "main_menu.jpg")
     if not os.path.exists(image_path):
         image_path = None
 

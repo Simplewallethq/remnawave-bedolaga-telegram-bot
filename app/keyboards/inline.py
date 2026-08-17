@@ -3169,13 +3169,13 @@ def get_new_main_menu_keyboard(
             callback_data="trial_activate"
         )])
         keyboard.append([InlineKeyboardButton(
-            text=texts.t("MENU_CONNECT_BUTTON", "⚙️ Подключить устройство"),
+            text=texts.t("MENU_CONNECT_BUTTON", "🚀 Подключиться"),
             callback_data="howto",
             style=ButtonStyle.SUCCESS,
         )])
     elif trial_active or has_active_subscription:
         keyboard.append([InlineKeyboardButton(
-            text=texts.t("MENU_CONNECT_BUTTON", "⚙️ Подключить устройство"),
+            text=texts.t("MENU_CONNECT_BUTTON", "🚀 Подключиться"),
             callback_data="howto",
             style=ButtonStyle.SUCCESS,
         )])
@@ -3189,7 +3189,7 @@ def get_new_main_menu_keyboard(
         ])
     if has_active_subscription or trial_active:
         subscription_button = InlineKeyboardButton(
-            text=texts.t("MENU_SUBSCRIPTION_BUTTON", "📦 Управление Подпиской"),
+            text=texts.t("MENU_SUBSCRIPTION_BUTTON", "⚙️ Управление Подпиской"),
             callback_data="subscription",
         )
     else:
@@ -3199,11 +3199,11 @@ def get_new_main_menu_keyboard(
         )
     keyboard.append([subscription_button])
     keyboard.append([
-        InlineKeyboardButton(text=texts.t("MENU_REFERRAL_BUTTON", "🤝 Пригласить друзей"), callback_data="referral")
+        InlineKeyboardButton(text=texts.t("MENU_REFERRAL_BUTTON", "🤝💲 Пригласить друзей"), callback_data="referral")
     ])
     keyboard.append([
-        InlineKeyboardButton(text=texts.t("MENU_SUPPORT_BUTTON", "🛠 Поддержка"), callback_data="support"),
-        InlineKeyboardButton(text=texts.t("MENU_PROFILE_BUTTON", "👤 Профиль"), callback_data="profile")
+        InlineKeyboardButton(text=texts.t("MENU_SUPPORT_BUTTON", "💬 Поддержка"), callback_data="support"),
+        InlineKeyboardButton(text=texts.t("MENU_PROFILE_BUTTON", "🪪 Профиль"), callback_data="profile")
     ])
     
     if is_admin:

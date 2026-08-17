@@ -41,8 +41,8 @@ def test_message_and_google_play_button_match_campaign() -> None:
     button = service._keyboard().inline_keyboard[0][0]
 
     assert service.TEXT.startswith("<b>💡 +30 дней VPN — просто за отзыв!</b>\n\n")
-    assert "теплых слов\n2. Отправь" in service.TEXT
-    assert "@letosupportbot\n3. Получи" in service.TEXT
+    assert "теплых слов\n\n2. Отправь" in service.TEXT
+    assert "@letosupportbot\n\n3. Получи" in service.TEXT
     assert "@letosupportbot" in service.TEXT
     assert button.text == "Жми и забирай подарок 👇"
     assert button.url == "https://play.google.com/store/apps/details?id=com.leto.split"
@@ -50,6 +50,7 @@ def test_message_and_google_play_button_match_campaign() -> None:
 
 async def test_disabled_campaign_does_not_claim_recipients(monkeypatch) -> None:
     service = LegacyReviewBonusService()
+    monkeypatch.setattr(service, "IS_ENABLED", False)
     claim_recipients = AsyncMock()
     monkeypatch.setattr(service, "_claim_recipients", claim_recipients)
 
