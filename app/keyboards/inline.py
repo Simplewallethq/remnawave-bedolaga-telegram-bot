@@ -29,7 +29,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-PLATEGA_SUBSCRIPTION_LIMIT_TO_USERNAMES = True
+PLATEGA_SUBSCRIPTION_LIMIT_TO_USERNAMES = False
 PLATEGA_SUBSCRIPTION_TEST_USERNAMES = frozenset(
     {"fake_me_x", "cheechgodx", "shakestars"}
 )
