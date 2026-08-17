@@ -391,6 +391,8 @@ async def test_handle_share_access_uses_subscription_url_without_share_token(mon
     keyboard = render.await_args.args[2]
     assert SUBSCRIPTION_LINK in rendered_text
     assert LETO_ACCESS_CODE in rendered_text
+    assert "<b>Ключ доступа (для Happ, Incy):</b>" in rendered_text
+    assert "<b>Ключ для входа в Leto VPN</b> (действует 23 ч):" in rendered_text
     assert render.await_args.kwargs["photo_path"] == "images/connection.jpg"
     assert keyboard.inline_keyboard[0][0].text == "📤 Переслать друзьям"
     share_url = keyboard.inline_keyboard[0][0].url
@@ -399,6 +401,9 @@ async def test_handle_share_access_uses_subscription_url_without_share_token(mon
     forwarded_text = unquote(share_url)
     assert SUBSCRIPTION_LINK in forwarded_text
     assert LETO_ACCESS_CODE in forwarded_text
+    assert "Ключ доступа (для Happ, Incy):" in forwarded_text
+    assert "Ключ для входа в Leto VPN (действует 23 ч):" in forwarded_text
+    assert "<b>Ключ для входа в Leto VPN</b>" not in forwarded_text
     assert "<pre><code>" not in forwarded_text
     get_or_create.assert_not_awaited()
     callback.answer.assert_awaited_once()

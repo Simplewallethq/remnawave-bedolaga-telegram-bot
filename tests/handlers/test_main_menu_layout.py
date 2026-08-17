@@ -56,3 +56,19 @@ def test_russian_tariff_cards_describe_all_bypasses():
     for tariff_key in ("TARIFF_CARD_SOLO", "TARIFF_CARD_PLUS", "TARIFF_CARD_PRO"):
         assert "полный VPN, все обходы" in texts.t(tariff_key)
         assert "доступ ко всем сервисам" not in texts.t(tariff_key)
+
+
+def test_main_menu_labels_are_localized_for_every_supported_language():
+    expected_labels = {
+        "ru": ("⚙️ Подключить устройство", "💰 Приглашай и зарабатывай"),
+        "en": ("⚙️ Connect device", "💰 Invite and earn"),
+        "ua": ("⚙️ Підключити пристрій", "💰 Запрошуй і заробляй"),
+        "zh": ("⚙️ 连接设备", "💰邀请好友赚奖励"),
+    }
+
+    for language, (connect_label, referral_label) in expected_labels.items():
+        texts = get_texts(language)
+
+        assert texts.t("MENU_CONNECT_BUTTON") == connect_label
+        assert texts.t("MENU_REFERRAL_BUTTON") == referral_label
+        assert texts.t("MENU_REFERRALS") == referral_label

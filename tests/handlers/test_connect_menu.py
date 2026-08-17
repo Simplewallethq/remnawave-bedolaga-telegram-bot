@@ -161,7 +161,7 @@ async def test_connect_menu_shows_16_char_binding_code(monkeypatch):
 
     text = await menu._build_connect_platform_selection_text(AsyncMock(), user)
 
-    assert "Ключ для входа в Leto VPN (действует 23 ч)" in text
+    assert "<b>Ключ для входа в Leto VPN</b> (действует 23 ч):" in text
     assert "<pre><code>A2B3C4D5E6F7G8H9</code></pre>" in text
     assert create.await_args.args[1] == 7
 

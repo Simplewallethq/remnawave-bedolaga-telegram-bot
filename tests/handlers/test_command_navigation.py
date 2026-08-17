@@ -131,7 +131,7 @@ def test_register_handlers_registers_all_botfather_commands():
     ]
 
 
-async def test_plain_start_clears_state_before_showing_main_menu(monkeypatch):
+async def test_plain_start_uses_paid_history_when_building_main_menu(monkeypatch):
     events = []
     message = _message()
     message.text = "/start"
@@ -163,6 +163,7 @@ async def test_plain_start_clears_state_before_showing_main_menu(monkeypatch):
         last_activity=None,
         balance_kopeks=0,
         subscription=None,
+        has_had_paid_subscription=True,
         language="ru",
     )
 
@@ -178,4 +179,5 @@ async def test_plain_start_clears_state_before_showing_main_menu(monkeypatch):
     await start.cmd_start(message, state, db, user)
 
     assert events[0] == "state_cleared"
+    assert start.get_new_main_menu_keyboard.call_args.kwargs["trial_used"] is True
     assert "menu_sent" in events
