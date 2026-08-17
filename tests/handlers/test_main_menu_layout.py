@@ -13,10 +13,10 @@ def test_active_subscriber_main_menu_places_devices_between_connect_and_subscrip
         (row[0].text, row[0].callback_data)
         for row in keyboard.inline_keyboard[:4]
     ] == [
-        ("⚙️ Подключить устройство", "howto"),
+        ("🚀 Подключить устройство", "howto"),
         ("📱 Мои устройства", "subscription_manage_devices"),
-        ("📦 Управление Подпиской", "subscription"),
-        ("💰 Приглашай и зарабатывай", "referral"),
+        ("⚙️ Управление Подпиской", "subscription"),
+        ("💲 Приглашай и зарабатывай", "referral"),
     ]
 
 
@@ -60,10 +60,10 @@ def test_russian_tariff_cards_describe_all_bypasses():
 
 def test_main_menu_labels_are_localized_for_every_supported_language():
     expected_labels = {
-        "ru": ("⚙️ Подключить устройство", "💰 Приглашай и зарабатывай"),
-        "en": ("⚙️ Connect device", "💰 Invite and earn"),
-        "ua": ("⚙️ Підключити пристрій", "💰 Запрошуй і заробляй"),
-        "zh": ("⚙️ 连接设备", "💰邀请好友赚奖励"),
+        "ru": ("🚀 Подключить устройство", "💲 Приглашай и зарабатывай"),
+        "en": ("🚀 Connect device", "💲 Invite and earn"),
+        "ua": ("🚀 Підключити пристрій", "💲 Запрошуй і заробляй"),
+        "zh": ("🚀 连接设备", "💲邀请好友赚奖励"),
     }
 
     for language, (connect_label, referral_label) in expected_labels.items():
