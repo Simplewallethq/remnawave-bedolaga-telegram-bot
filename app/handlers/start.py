@@ -81,6 +81,20 @@ from app.utils.subscription_utils import get_raw_subscription_link
 
 logger = logging.getLogger(__name__)
 
+DEVICE_LINK_SUCCESS_TEXT = (
+    "Устройство подключено к вашей подписке, вернитесь обратно."
+)
+DEVICE_LINK_SUCCESS_PHOTO = os.path.join("images", "connection.jpg")
+
+
+async def _send_device_link_success(target) -> None:
+    """Confirm a device link with the connection image."""
+    recipient = target.message if isinstance(target, types.CallbackQuery) else target
+    await recipient.answer_photo(
+        types.FSInputFile(DEVICE_LINK_SUCCESS_PHOTO),
+        caption=DEVICE_LINK_SUCCESS_TEXT,
+    )
+
 
 async def _link_device_to_subscription(
     db: AsyncSession,
@@ -94,17 +108,17 @@ async def _link_device_to_subscription(
         if existing and existing.subscription_id == subscription.id:
             existing.revoked_at = None
             await db.commit()
-            await target.answer("Device already linked to your subscription.")
+            await _send_device_link_success(target)
             return
         if existing:
             existing.subscription_id = subscription.id
             existing.revoked_at = None
             await db.commit()
-            await target.answer("Device re-linked to your subscription.")
+            await _send_device_link_success(target)
             return
 
         await create_device_link(db, subscription.id, device_id)
-        await target.answer("Device linked to your subscription.")
+        await _send_device_link_success(target)
     except Exception as e:
         logger.error("Error linking device %s to subscription %s: %s", device_id, subscription.id, e)
         # Per RESEARCH anti-pattern: don't block registration on device linking failure

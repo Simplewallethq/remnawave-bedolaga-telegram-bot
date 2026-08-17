@@ -117,3 +117,24 @@ async def test_onboarding_welcome_sends_connection_image_for_new_registration():
     assert success is True
     assert message.answer_photo.await_args.kwargs["caption"].startswith("Привет, тебе")
     assert message.answer_photo.await_args.args[0].path == "images/connection.jpg"
+
+
+async def test_existing_device_link_sends_russian_confirmation_with_connection_image(
+    monkeypatch,
+):
+    subscription = SimpleNamespace(id=7)
+    existing_link = SimpleNamespace(subscription_id=7, revoked_at=SimpleNamespace())
+    db = AsyncMock()
+    message = AsyncMock()
+    monkeypatch.setattr(start, "get_device_link", AsyncMock(return_value=existing_link))
+
+    await start._link_device_to_subscription(db, subscription, "device-42", message)
+
+    assert existing_link.revoked_at is None
+    db.commit.assert_awaited_once()
+    message.answer.assert_not_awaited()
+    message.answer_photo.assert_awaited_once()
+    assert message.answer_photo.await_args.args[0].path == "images/connection.jpg"
+    assert message.answer_photo.await_args.kwargs["caption"] == (
+        "Устройство подключено к вашей подписке, вернитесь обратно."
+    )
