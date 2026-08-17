@@ -23,7 +23,7 @@ class _CampaignClaim:
 
 
 class LegacyReviewBonusService:
-    IS_ENABLED = False
+    IS_ENABLED = True
     SLOT_KEY = "legacy_review_bonus"
     DAILY_LIMIT = 10_000
     SEND_DELAY_SECONDS = 0.04
@@ -31,8 +31,8 @@ class LegacyReviewBonusService:
     TEXT = (
         "<b>💡 +30 дней VPN — просто за отзыв!</b>\n\n"
         "1. Оцени приложение Leto VPN в Google Play на ⭐️⭐️⭐️⭐️⭐️ "
-        "и напиши пару теплых слов\n"
-        "2. Отправь скрин отзыва в бота @letosupportbot\n"
+        "и напиши пару теплых слов\n\n"
+        "2. Отправь скрин отзыва в бота @letosupportbot\n\n"
         "3. Получи +30 дней бесплатно"
     )
     BUTTON_TEXT = "Жми и забирай подарок 👇"
