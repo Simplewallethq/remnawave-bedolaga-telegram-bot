@@ -27,6 +27,12 @@ def get_admin_root_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(
+                text=_t(texts, "ADMIN_ROOT_STARS_TOPUP", "⭐ Пополнить Stars"),
+                callback_data="admin_stars_topup",
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 text=_t(texts, "ADMIN_ROOT_REST", "🗂 Остальное"),
                 callback_data="admin_panel_rest",
             )

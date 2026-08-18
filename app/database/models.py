@@ -1312,6 +1312,29 @@ class Transaction(Base):
         return self.amount_kopeks / 100
 
 
+class BotStarsTopup(Base):
+    """Audit log for administrative Telegram Stars deposits to a bot."""
+
+    __tablename__ = "bot_stars_topups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    admin_user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    admin_telegram_id = Column(BigInteger, nullable=False, index=True)
+    bot_id = Column(BigInteger, nullable=False, index=True)
+    stars_amount = Column(Integer, nullable=False)
+    invoice_payload = Column(String(128), nullable=False, unique=True)
+    telegram_payment_charge_id = Column(String(255), nullable=False, unique=True)
+    provider_payment_charge_id = Column(String(255), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+
+    admin_user = relationship("User", foreign_keys=[admin_user_id])
+
+
 class RayTransaction(Base):
     """Append-only журнал лучей. Источник правды; User.rays_* — кэш баланса."""
     __tablename__ = "ray_transactions"

@@ -26,6 +26,7 @@ from . import (
     rules,
     servers,
     statistics,
+    stars_topup,
     subscriptions,
     support_settings,
     system_logs,

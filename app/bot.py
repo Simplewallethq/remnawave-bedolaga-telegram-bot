@@ -50,6 +50,7 @@ from app.handlers.admin import (
     rules as admin_rules,
     remnawave as admin_remnawave,
     statistics as admin_statistics,
+    stars_topup as admin_stars_topup,
     polls as admin_polls,
     servers as admin_servers,
     maintenance as admin_maintenance,
@@ -192,6 +193,7 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     server_status.register_handlers(dp)
     tickets.register_handlers(dp)
     admin_main.register_handlers(dp)
+    admin_stars_topup.register_handlers(dp)
     admin_users.register_handlers(dp)
     admin_subscriptions.register_handlers(dp)
     admin_servers.register_handlers(dp)  
