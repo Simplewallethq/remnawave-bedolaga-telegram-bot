@@ -454,6 +454,14 @@ async def get_plans(
     return {"plans": await cabinet_service.build_plans(db, cohort=resolve_pricing_cohort(user), user=user)}
 
 
+@router.get("/plans/public")
+async def get_public_plans(
+    db: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    """Public read-only tariff catalogue for the marketing site."""
+    return {"plans": await cabinet_service.build_plans(db, cohort="new")}
+
+
 @router.post("/subscription/autorenew")
 async def set_autorenew(
     payload: AutoRenewRequest,
