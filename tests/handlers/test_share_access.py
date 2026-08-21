@@ -1,4 +1,3 @@
-from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock
 from urllib.parse import unquote
@@ -14,18 +13,13 @@ from app.services import payment_service as payment_service_module
 
 
 SUBSCRIPTION_LINK = "https://letovpn.com/sub/private-subscription-key"
-LETO_ACCESS_CODE = "A2B3C4D5E6F7G8H9"
 ACCESS_KEY_SECTION = (
     "<b>Ключ доступа:</b>\n"
-    f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>\n\n"
-    "Ключ для входа в Leto VPN\n"
-    f"<pre><code>{LETO_ACCESS_CODE}</code></pre>"
+    f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>"
 )
 FORWARDED_ACCESS_KEY_SECTION = (
     "Ключ доступа:\n"
-    f"{SUBSCRIPTION_LINK}\n\n"
-    "Ключ для входа в Leto VPN\n"
-    f"{LETO_ACCESS_CODE}"
+    f"{SUBSCRIPTION_LINK}"
 )
 APP_LINKS = {
     "android": "https://play.google.com/store/apps/details?id=com.leto.split",
@@ -40,7 +34,6 @@ def test_share_access_text_uses_copyable_keys_and_application_links():
     )
 
     assert f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>" in text
-    assert f"<pre><code>{LETO_ACCESS_CODE}</code></pre>" in text
     assert "<b>🤖 Android</b>" in text
     assert "<b>🍎 iPhone/Mac</b>" in text
     assert "<b>💻 Windows</b>" in text
@@ -55,7 +48,6 @@ def test_share_access_friend_message_uses_direct_links_and_plain_keys():
 
     assert SUBSCRIPTION_LINK in text
     assert "авторизуйся через ключ доступа" in text
-    assert LETO_ACCESS_CODE in text
     assert "<pre><code>" not in text
     for url in APP_LINKS.values():
         assert url in text
@@ -360,8 +352,6 @@ def test_tariff_catalog_can_return_to_subscription_management():
 
 
 async def test_handle_share_access_uses_subscription_url_without_share_token(monkeypatch):
-    import app.database.crud.device_binding_code as binding_module
-
     callback = SimpleNamespace(
         message=SimpleNamespace(),
         answer=AsyncMock(),
@@ -372,16 +362,6 @@ async def test_handle_share_access_uses_subscription_url_without_share_token(mon
     )
     get_or_create = AsyncMock()
     monkeypatch.setattr(share_token, "get_or_create_share_token", get_or_create)
-    monkeypatch.setattr(
-        binding_module,
-        "get_or_create_binding_code",
-        AsyncMock(
-            return_value=SimpleNamespace(
-                code=LETO_ACCESS_CODE,
-                expires_at=datetime.utcnow() + timedelta(hours=24),
-            )
-        ),
-    )
     render = AsyncMock()
     monkeypatch.setattr(purchase, "edit_or_answer_photo", render)
 
@@ -390,9 +370,8 @@ async def test_handle_share_access_uses_subscription_url_without_share_token(mon
     rendered_text = render.await_args.args[1]
     keyboard = render.await_args.args[2]
     assert SUBSCRIPTION_LINK in rendered_text
-    assert LETO_ACCESS_CODE in rendered_text
     assert "<b>Ключ доступа (для Happ, Incy):</b>" in rendered_text
-    assert "<b>Ключ для входа в Leto VPN</b> (действует 23 ч):" in rendered_text
+    assert "Ключ для входа в Leto VPN" not in rendered_text
     assert render.await_args.kwargs["photo_path"] == "images/connection.jpg"
     assert keyboard.inline_keyboard[0][0].text == "📤 Переслать друзьям"
     share_url = keyboard.inline_keyboard[0][0].url
@@ -400,10 +379,8 @@ async def test_handle_share_access_uses_subscription_url_without_share_token(mon
     assert keyboard.inline_keyboard[1][0].callback_data == "subscription"
     forwarded_text = unquote(share_url)
     assert SUBSCRIPTION_LINK in forwarded_text
-    assert LETO_ACCESS_CODE in forwarded_text
     assert "Ключ доступа (для Happ, Incy):" in forwarded_text
-    assert "Ключ для входа в Leto VPN (действует 23 ч):" in forwarded_text
-    assert "<b>Ключ для входа в Leto VPN</b>" not in forwarded_text
+    assert "Ключ для входа в Leto VPN" not in forwarded_text
     assert "<pre><code>" not in forwarded_text
     get_or_create.assert_not_awaited()
     callback.answer.assert_awaited_once()

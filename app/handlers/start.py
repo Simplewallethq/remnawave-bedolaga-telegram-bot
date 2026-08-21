@@ -390,32 +390,7 @@ async def _build_onboarding_welcome_text(
         + "\n"
         + f"<pre><code>{html.escape(link, quote=True)}</code></pre>"
     )
-    subscription_id = getattr(getattr(user, "subscription", None), "id", None)
-    if not subscription_id:
-        return text
-
-    from app.database.crud.device_binding_code import get_or_create_binding_code
-
-    try:
-        binding_code = await get_or_create_binding_code(db, subscription_id)
-    except Exception as error:
-        logger.warning(
-            "Could not create Leto onboarding code for user %s: %s",
-            getattr(user, "telegram_id", None),
-            error,
-        )
-        return text
-
-    return (
-        text
-        + "\n\n"
-        + texts.t(
-            "ONBOARDING_LETO_ACCESS_CODE_LABEL",
-            "Ключ доступа для Leto VPN на Android:",
-        )
-        + "\n"
-        + f"<pre><code>{html.escape(binding_code.code, quote=True)}</code></pre>"
-    )
+    return text
 
 
 async def _show_onboarding_welcome(

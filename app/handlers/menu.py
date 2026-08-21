@@ -44,7 +44,6 @@ from app.utils.subscription_utils import (
 )
 from app.utils.access_keys import (
     build_access_key_section,
-    build_leto_access_code_block,
     format_copyable_code,
 )
 from app.database.crud.referral import get_user_referral_stats
@@ -1284,10 +1283,6 @@ def _get_connection_key(user: User) -> str | None:
 
 def _format_connection_key(link: str) -> str:
     return format_copyable_code(link)
-
-
-async def _build_leto_code_block(db: AsyncSession, user: User) -> str:
-    return await build_leto_access_code_block(db, user, get_texts(user.language))
 
 
 def _get_happ_transfer_url(user: User) -> str | None:

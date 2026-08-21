@@ -1,4 +1,3 @@
-from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -56,7 +55,6 @@ def test_connection_copy_is_available_in_every_supported_locale():
         texts = menu.get_texts(language)
 
         assert hint in texts.t("CONNECT_ANDROID_HAPP_HINT")
-        assert "{ttl_hours}" in texts.t("CONNECT_LETO_CODE_LABEL")
 
 
 def test_connect_android_keyboard_omits_transfer_without_url(monkeypatch):
@@ -142,39 +140,7 @@ def test_connect_platform_keyboards_include_transfer_buttons(monkeypatch):
     ]
 
 
-async def test_connect_menu_shows_16_char_binding_code(monkeypatch):
-    """В меню подключения показываем тот же 16-значный код, что и «Привязать
-    устройство»: им авторизуются в Leto и в личном кабинете."""
-    import app.database.crud.device_binding_code as binding_module
-
-    record = SimpleNamespace(
-        code="A2B3C4D5E6F7G8H9",
-        expires_at=datetime.utcnow() + timedelta(hours=24),
-    )
-    create = AsyncMock(return_value=record)
-    monkeypatch.setattr(binding_module, "get_or_create_binding_code", create)
-    user = SimpleNamespace(
-        language="ru",
-        telegram_id=42,
-        subscription=SimpleNamespace(id=7, subscription_url=SUBSCRIPTION_LINK),
-    )
-
-    text = await menu._build_connect_platform_selection_text(AsyncMock(), user)
-
-    assert "<b>Ключ для входа в Leto VPN</b> (действует 23 ч):" in text
-    assert "<pre><code>A2B3C4D5E6F7G8H9</code></pre>" in text
-    assert create.await_args.args[1] == 7
-
-
-async def test_connect_menu_hides_code_block_when_generation_fails(monkeypatch):
-    """Код не выдался — экран подключения всё равно открывается с ключом-ссылкой."""
-    import app.database.crud.device_binding_code as binding_module
-
-    monkeypatch.setattr(
-        binding_module,
-        "get_or_create_binding_code",
-        AsyncMock(side_effect=RuntimeError("db down")),
-    )
+async def test_connect_menu_shows_only_subscription_link(monkeypatch):
     user = SimpleNamespace(
         language="ru",
         telegram_id=42,
@@ -184,7 +150,7 @@ async def test_connect_menu_hides_code_block_when_generation_fails(monkeypatch):
     text = await menu._build_connect_platform_selection_text(AsyncMock(), user)
 
     assert "Ключ для входа в Leto" not in text
-    assert SUBSCRIPTION_LINK in text
+    assert f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>" in text
 
 
 def test_connection_key_is_a_copyable_code_block():

@@ -2741,7 +2741,6 @@ async def handle_bind_device(
     db_user: User,
     db: AsyncSession
 ):
-    from app.database.crud.device_binding_code import get_or_create_binding_code
     from app.handlers.start import activate_trial_for_user
 
     texts = get_texts(db_user.language)
@@ -2769,26 +2768,22 @@ async def handle_bind_device(
         )
         return
 
-    try:
-        record = await get_or_create_binding_code(db, subscription.id)
-    except Exception as e:
-        logger.error("Failed to generate binding code: %s", e)
+    link = get_raw_subscription_link(subscription)
+    if not link:
         await callback.answer(
-            texts.t("BIND_DEVICE_ERROR", "Не удалось создать код. Попробуйте позже."),
+            texts.t("SUBSCRIPTION_LINK_UNAVAILABLE", "❌ Ссылка подписки недоступна"),
             show_alert=True,
         )
         return
 
-    ttl_hours = max(1, int((record.expires_at - datetime.utcnow()).total_seconds() // 3600))
-    text = texts.t(
-        "BIND_DEVICE_MESSAGE",
-        (
-            "🔗 <b>Код для привязки устройства</b>\n\n"
-            "Откройте приложение и введите этот код:\n\n"
-            "<code>{code}</code>\n\n"
-            "Код действует {ttl_hours} ч. Никому его не передавайте."
-        ),
-    ).format(code=record.code, ttl_hours=ttl_hours)
+    text = (
+        texts.t(
+            "CONNECT_ACCESS_KEY_LABEL",
+            "<b>Твой ключ доступа</b> (для приложений Leto, Happ, Incy)",
+        )
+        + "\n"
+        + format_copyable_code(link)
+    )
 
     back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
