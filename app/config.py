@@ -336,7 +336,11 @@ class Settings(BaseSettings):
     CRYPTOBOT_MIN_AMOUNT: int = 100
     CRYPTOBOT_MIN_AMOUNT_USD: float = 1.0
 
+    # HELEKET_ENABLED controls Telegram-bot payment surfaces.  The cabinet has
+    # its own switch so the provider can be rolled out there without changing
+    # the bot's keyboards or handlers.
     HELEKET_ENABLED: bool = False
+    HELEKET_CABINET_ENABLED: bool = False
     HELEKET_MERCHANT_ID: Optional[str] = None
     HELEKET_API_KEY: Optional[str] = None
     HELEKET_BASE_URL: str = "https://api.heleket.com/v1"
@@ -1263,11 +1267,29 @@ class Settings(BaseSettings):
                 self.CRYPTOBOT_API_TOKEN is not None)
 
     def is_heleket_enabled(self) -> bool:
+        """Whether Heleket is enabled on Telegram-bot payment surfaces."""
         return (
             self.HELEKET_ENABLED
             and self.HELEKET_MERCHANT_ID is not None
             and self.HELEKET_API_KEY is not None
         )
+
+    def is_heleket_cabinet_enabled(self) -> bool:
+        """Whether Heleket can be offered by the personal cabinet.
+
+        HELEKET_ENABLED is kept as a backwards-compatible global switch: an
+        existing installation that enabled Heleket before the scoped flag was
+        introduced continues to expose it in the cabinet as well.
+        """
+        return (
+            (self.HELEKET_CABINET_ENABLED or self.HELEKET_ENABLED)
+            and self.HELEKET_MERCHANT_ID is not None
+            and self.HELEKET_API_KEY is not None
+        )
+
+    def is_heleket_service_enabled(self) -> bool:
+        """Whether shared Heleket API/webhook infrastructure must run."""
+        return self.is_heleket_enabled() or self.is_heleket_cabinet_enabled()
 
     def is_mulenpay_enabled(self) -> bool:
         return (

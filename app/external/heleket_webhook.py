@@ -19,7 +19,7 @@ class HeleketWebhookHandler:
         self.service = HeleketService()
 
     async def handle(self, request: web.Request) -> web.Response:
-        if not settings.is_heleket_enabled():
+        if not settings.is_heleket_service_enabled():
             logger.warning("Получен Heleket webhook, но сервис отключен")
             return web.json_response({"status": "error", "reason": "disabled"}, status=503)
 
@@ -46,7 +46,7 @@ class HeleketWebhookHandler:
             {
                 "status": "ok",
                 "service": "heleket_webhook",
-                "enabled": settings.is_heleket_enabled(),
+                "enabled": settings.is_heleket_service_enabled(),
                 "path": settings.HELEKET_WEBHOOK_PATH,
             }
         )
@@ -73,7 +73,7 @@ def create_heleket_app(payment_service: PaymentService) -> web.Application:
 
 
 async def start_heleket_webhook_server(payment_service: PaymentService) -> None:
-    if not settings.is_heleket_enabled():
+    if not settings.is_heleket_service_enabled():
         logger.info("Heleket отключен, webhook сервер не запускается")
         return
 

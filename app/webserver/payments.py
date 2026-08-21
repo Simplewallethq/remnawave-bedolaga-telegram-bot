@@ -484,7 +484,7 @@ def create_payment_router(bot: Bot, payment_service: PaymentService) -> APIRoute
 
         routes_registered = True
 
-    if settings.is_heleket_enabled():
+    if settings.is_heleket_service_enabled():
         heleket_handler = HeleketWebhookHandler(payment_service)
 
         @router.options(settings.HELEKET_WEBHOOK_PATH)
@@ -504,7 +504,7 @@ def create_payment_router(bot: Bot, payment_service: PaymentService) -> APIRoute
                 {
                     "status": "ok",
                     "service": "heleket_webhook",
-                    "enabled": settings.is_heleket_enabled(),
+                    "enabled": settings.is_heleket_service_enabled(),
                 }
             )
 
@@ -809,7 +809,7 @@ def create_payment_router(bot: Bot, payment_service: PaymentService) -> APIRoute
                     "cryptobot_enabled": settings.is_cryptobot_enabled(),
                     "yookassa_enabled": settings.is_yookassa_enabled(),
                     "wata_enabled": settings.is_wata_enabled(),
-                    "heleket_enabled": settings.is_heleket_enabled(),
+                    "heleket_enabled": settings.is_heleket_service_enabled(),
                     "pal24_enabled": settings.is_pal24_enabled(),
                     "platega_enabled": settings.is_platega_enabled(),
                     "cloudpayments_enabled": settings.is_cloudpayments_enabled(),

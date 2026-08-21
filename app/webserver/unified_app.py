@@ -124,7 +124,7 @@ def create_unified_app(
         "yookassa": settings.is_yookassa_enabled(),
         "pal24": settings.is_pal24_enabled(),
         "wata": settings.is_wata_enabled(),
-        "heleket": settings.is_heleket_enabled(),
+        "heleket": settings.is_heleket_service_enabled(),
     }
 
     if enable_telegram_webhook:

@@ -119,7 +119,7 @@ def _method_is_enabled(method: PaymentMethod) -> bool:
     if method == PaymentMethod.CRYPTOBOT:
         return settings.is_cryptobot_enabled()
     if method == PaymentMethod.HELEKET:
-        return settings.is_heleket_enabled()
+        return settings.is_heleket_service_enabled()
     if method == PaymentMethod.CLOUDPAYMENTS:
         return settings.is_cloudpayments_enabled()
     return False

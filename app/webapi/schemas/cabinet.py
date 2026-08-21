@@ -59,6 +59,10 @@ class TopupRequest(BaseModel):
 class PurchaseRequest(BaseModel):
     plan_id: str = Field(..., description="Код тарифа (plan.code)")
     months: int = Field(default=1, ge=1, le=12)
+    method: Optional[str] = Field(
+        default=None,
+        description="Способ доплаты при нехватке баланса: card | sbp | crypto",
+    )
 
 
 class AutoRenewRequest(BaseModel):

@@ -54,6 +54,8 @@ from app.services.cabinet_auth_service import cabinet_auth_service
 from app.services.cabinet_notification_service import cabinet_notification_hub
 from app.services.payment_service import PaymentService
 from app.services.plan_pricing_service import (
+    calculate_upgrade_delta,
+    get_current_plan_price_for_period,
     get_plan_by_code,
     get_plan_price,
     resolve_pricing_cohort,
@@ -510,12 +512,26 @@ async def purchase(
             price_kopeks = offer_price
             is_legacy_pro_fixed_offer = True
 
-    if user.balance_kopeks < price_kopeks:
-        raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient balance")
-
     subscription = user.subscription
     if not subscription:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="No subscription to upgrade")
+
+    if user.balance_kopeks < price_kopeks:
+        method = (payload.method or "").strip().lower()
+        if method != "crypto" or not settings.is_heleket_cabinet_enabled():
+            raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient balance")
+
+        return await _create_cabinet_tariff_payment(
+            db=db,
+            user=user,
+            plan=plan,
+            period_days=period_days,
+            price_kopeks=price_kopeks,
+            base_price_kopeks=await get_plan_price(
+                db, plan.id, period_days, cohort=resolve_pricing_cohort(user)
+            ),
+            fixed_offer=fixed_offer,
+        )
 
     old_end_date = subscription.end_date
 
@@ -611,6 +627,134 @@ async def _usd_to_rub_rate() -> float:
     return float(rate)
 
 
+async def _create_cabinet_tariff_payment(
+    *,
+    db: AsyncSession,
+    user: User,
+    plan: Any,
+    period_days: int,
+    price_kopeks: int,
+    base_price_kopeks: Optional[int],
+    fixed_offer: Any = None,
+) -> Dict[str, Any]:
+    """Create a cabinet-only Heleket checkout that completes the tariff intent.
+
+    The shared top-up webhook already knows how to consume tariff intent carts.
+    Keeping the intent server-side makes the redirect safe: the browser never
+    decides which plan to activate or how much balance to deduct.
+    """
+    from app.services.subscription_auto_purchase_service import (
+        auto_purchase_saved_cart_after_topup,
+    )
+    from app.services.tariff_partial_payment_service import (
+        build_partial_breakdown,
+        clamp_invoice_amount,
+    )
+    from app.services.user_cart_service import user_cart_service
+
+    subscription = user.subscription
+    now = datetime.utcnow()
+    is_active_paid = bool(
+        subscription
+        and not subscription.is_trial
+        and subscription.plan_id is not None
+        and subscription.end_date > now
+        and subscription.status == SubscriptionStatus.ACTIVE.value
+    )
+
+    checkout_period_days = period_days
+    checkout_price_kopeks = int(price_kopeks)
+    tariff_op = "purchase"
+
+    if is_active_paid and subscription.plan_id == plan.id:
+        tariff_op = "renew"
+    elif is_active_paid:
+        tariff_op = "upgrade"
+        checkout_period_days = subscription.plan_period_days or period_days
+        new_price = await get_plan_price(
+            db,
+            plan.id,
+            checkout_period_days,
+            cohort=resolve_pricing_cohort(user),
+        )
+        current_price = await get_current_plan_price_for_period(db, subscription, user)
+        if new_price is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Price for target plan is not configured",
+            )
+        checkout_price_kopeks = calculate_upgrade_delta(
+            subscription,
+            plan,
+            new_price,
+            current_price,
+        )
+
+    offer_id = getattr(fixed_offer, "id", None)
+    offer_type = getattr(fixed_offer, "notification_type", None)
+    cart_data: Dict[str, Any] = {
+        "cart_mode": "tariff",
+        "tariff_op": tariff_op,
+        "plan_id": plan.id,
+        "plan_code": plan.code,
+        "period_days": checkout_period_days,
+        "total_price": checkout_price_kopeks,
+        "intent": True,
+        "source": "cabinet",
+    }
+    if offer_id is not None:
+        cart_data.update(
+            {
+                "offer_id": offer_id,
+                "offer_type": offer_type,
+                "price_override_kopeks": int(price_kopeks),
+            }
+        )
+
+    if tariff_op == "purchase":
+        partial = build_partial_breakdown(
+            user.balance_kopeks,
+            checkout_price_kopeks,
+            base_price_kopeks,
+        )
+        if partial:
+            cart_data["partial_payment"] = partial
+
+    ttl = max(3600, settings.get_heleket_lifetime() + 300)
+    if not await user_cart_service.save_user_cart(user.id, cart_data, ttl=ttl):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to prepare subscription checkout",
+        )
+
+    # A prorated downgrade/switch can already be covered by the existing
+    # balance even though the full target-plan price is higher. Complete it
+    # immediately instead of creating a zero-value invoice.
+    shortfall_kopeks = max(0, checkout_price_kopeks - user.balance_kopeks)
+    if shortfall_kopeks == 0:
+        completed = await auto_purchase_saved_cart_after_topup(db, user)
+        if not completed:
+            await user_cart_service.delete_user_cart(user.id)
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="Unable to apply subscription change",
+            )
+        refreshed = await get_user_by_id(db, user.id) or user
+        return {"subscription": cabinet_service.build_subscription(refreshed)}
+
+    invoice_amount_kopeks = clamp_invoice_amount("heleket", shortfall_kopeks)
+    try:
+        return await _create_topup_payment(
+            db,
+            user,
+            "crypto",
+            invoice_amount_kopeks,
+        )
+    except Exception:
+        await user_cart_service.delete_user_cart(user.id)
+        raise
+
+
 def _platega_method_code(kind: str) -> Optional[int]:
     """Код метода Platega под наш kind: sbp → 2 (СБП QR), card → 11/10/12."""
     active = settings.get_platega_active_methods()
@@ -687,7 +831,7 @@ async def _create_topup_payment(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="SBP payments unavailable")
 
     elif kind == "crypto":
-        if settings.is_heleket_enabled():
+        if settings.is_heleket_cabinet_enabled():
             result = await ps.create_heleket_payment(
                 db=db, user_id=user.id, amount_kopeks=amount_kopeks,
                 description=description, language=user.language or settings.DEFAULT_LANGUAGE,

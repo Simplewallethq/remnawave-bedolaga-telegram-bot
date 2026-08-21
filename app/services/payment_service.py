@@ -352,7 +352,7 @@ class PaymentService(
             CryptoBotService() if settings.is_cryptobot_enabled() else None
         )
         self.heleket_service = (
-            HeleketService() if settings.is_heleket_enabled() else None
+            HeleketService() if settings.is_heleket_service_enabled() else None
         )
         self.mulenpay_service = (
             MulenPayService() if settings.is_mulenpay_enabled() else None
