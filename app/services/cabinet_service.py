@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func, select
@@ -145,6 +146,50 @@ def build_subscription(user: User) -> Optional[Dict[str, Any]]:
         "subscriptionUrl": sub.subscription_url,
         "happLink": _happ_connect_link(sub),
         "incyLink": _incy_connect_link(sub),
+    }
+
+
+def build_support_context(user: User) -> Dict[str, Any]:
+    """Safe server-to-server context for the Tendi operator dashboard.
+
+    Unlike the public cabinet subscription response, this payload deliberately
+    excludes subscription/deep links: they grant VPN access and must never be
+    copied into a support CRM. The response contains only facts an operator
+    needs to identify the customer and understand the current subscription.
+    """
+    profile = build_user_profile(user)
+    sub: Optional[Subscription] = user.subscription
+    subscription: Optional[Dict[str, Any]] = None
+
+    if sub:
+        plan = getattr(sub, "plan", None)
+        subscription = {
+            "planCode": plan.code if plan else None,
+            "planName": plan.display_name if plan else ("Trial" if sub.is_trial else "VPN"),
+            "status": sub.actual_status,
+            "isTrial": bool(sub.is_trial),
+            "startedAt": sub.start_date.isoformat() if sub.start_date else None,
+            "expiresAt": sub.end_date.isoformat() if sub.end_date else None,
+            "daysLeft": sub.days_left,
+            "deviceLimit": sub.device_limit,
+            "trafficLimitGb": sub.traffic_limit_gb or None,
+            "trafficUsedGb": round(sub.traffic_used_gb or 0.0, 2),
+            "autoRenew": bool(sub.autopay_enabled),
+        }
+
+    return {
+        "user": {
+            "accountId": profile["id"],
+            "internalUserId": user.id,
+            "status": user.status,
+            "email": profile["email"],
+            "firstName": profile["firstName"],
+            "telegramUsername": profile["tgUsername"],
+            "telegramId": profile["tgId"],
+            "balanceRub": profile["balanceRub"],
+        },
+        "subscription": subscription,
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
     }
 
 

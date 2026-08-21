@@ -185,6 +185,45 @@ async def get_user_by_remnawave_uuid(db: AsyncSession, remnawave_uuid: str) -> O
     return user
 
 
+async def get_user_by_support_account_id(
+    db: AsyncSession, account_id: str
+) -> Optional[User]:
+    """Resolve the stable account id exposed by ``/cabinet/me``.
+
+    Depending on the user's history that id is a Remnawave subscription short
+    UUID, a Remnawave user UUID, or the ``user-<internal id>`` fallback.
+    """
+    normalized = (account_id or "").strip()
+    if not normalized:
+        return None
+
+    if normalized.startswith("user-") and normalized[5:].isdigit():
+        return await get_user_by_id(db, int(normalized[5:]))
+
+    result = await db.execute(
+        select(User)
+        .outerjoin(Subscription, Subscription.user_id == User.id)
+        .options(
+            selectinload(User.subscription),
+            selectinload(User.user_promo_groups).selectinload(UserPromoGroup.promo_group),
+            selectinload(User.referrer),
+            selectinload(User.promo_group),
+        )
+        .where(
+            or_(
+                User.remnawave_uuid == normalized,
+                Subscription.remnawave_short_uuid == normalized,
+            )
+        )
+        .order_by(Subscription.created_at.desc().nullslast())
+        .limit(1)
+    )
+    user = result.scalar_one_or_none()
+    if user and user.subscription:
+        _ = user.subscription.is_active
+    return user
+
+
 async def create_unique_referral_code(db: AsyncSession) -> str:
     max_attempts = 10
     
