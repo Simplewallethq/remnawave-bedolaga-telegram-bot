@@ -22,5 +22,19 @@ def get_primary_logo() -> Path:
     return next(iter(_registry.values()))
 
 
+def is_primary_bot(bot_id: int | None) -> bool:
+    """Return whether the bot ID belongs to the configured primary bot."""
+    if bot_id is None:
+        return False
+
+    from app.config import settings
+
+    try:
+        primary_bot_id = int(settings.BOT_TOKEN.split(":", 1)[0])
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return bot_id == primary_bot_id
+
+
 def clear() -> None:
     _registry.clear()

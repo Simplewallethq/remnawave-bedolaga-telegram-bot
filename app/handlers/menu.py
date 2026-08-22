@@ -46,6 +46,7 @@ from app.utils.access_keys import (
     build_access_key_section,
     format_copyable_code,
 )
+from app.utils.bot_registry import is_primary_bot
 from app.database.crud.referral import get_user_referral_stats
 from app.database.crud.transaction import get_user_transactions
 from app.database.models import TransactionType
@@ -222,6 +223,7 @@ async def show_main_menu(
         has_active_subscription=has_active_subscription,
         is_admin=is_admin,
         language=db_user.language,
+        use_premium_emoji=is_primary_bot(callback.bot.id if callback.bot else None),
     )
 
     image_path = os.path.join("images", "main_menu.webp")

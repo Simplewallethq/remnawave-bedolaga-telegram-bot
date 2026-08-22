@@ -34,6 +34,30 @@ PLATEGA_SUBSCRIPTION_TEST_USERNAMES = frozenset(
     {"fake_me_x", "cheechgodx", "shakestars"}
 )
 
+MAIN_MENU_CUSTOM_EMOJI_IDS = {
+    "connect": "6030597532030081221",
+    "devices": "6021859429656304791",
+    "subscription": "6021582331251268218",
+    "referral": "6030462253445160459",
+    "support": "6023911174188308145",
+    "profile": "6021659919835469581",
+    "admin": "6024048192234985393",
+}
+
+
+def _premium_button_label(
+    text: str,
+    use_premium_emoji: bool,
+    *fallback_prefixes: str,
+) -> str:
+    if not use_premium_emoji:
+        return text
+    stripped = text.lstrip()
+    for prefix in fallback_prefixes:
+        if stripped.startswith(prefix):
+            return stripped[len(prefix):].lstrip()
+    return text
+
 
 def can_use_platega_subscription(username: Optional[str]) -> bool:
     if not PLATEGA_SUBSCRIPTION_LIMIT_TO_USERNAMES:
@@ -3227,6 +3251,7 @@ def get_new_main_menu_keyboard(
     has_active_subscription: bool = False,
     is_admin: bool = False,
     language: str = DEFAULT_LANGUAGE,
+    use_premium_emoji: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     Экран 2: Главное меню
@@ -3240,46 +3265,122 @@ def get_new_main_menu_keyboard(
             callback_data="trial_activate"
         )])
         keyboard.append([InlineKeyboardButton(
-            text=texts.t("MENU_CONNECT_BUTTON", "🚀 Подключить устройство"),
+            text=_premium_button_label(
+                texts.t("MENU_CONNECT_BUTTON", "🚀 Подключить устройство"),
+                use_premium_emoji,
+                "🚀",
+            ),
             callback_data="howto",
+            icon_custom_emoji_id=(
+                MAIN_MENU_CUSTOM_EMOJI_IDS["connect"] if use_premium_emoji else None
+            ),
             style=ButtonStyle.SUCCESS,
         )])
     elif trial_active or has_active_subscription:
         keyboard.append([InlineKeyboardButton(
-            text=texts.t("MENU_CONNECT_BUTTON", "🚀 Подключить устройство"),
+            text=_premium_button_label(
+                texts.t("MENU_CONNECT_BUTTON", "🚀 Подключить устройство"),
+                use_premium_emoji,
+                "🚀",
+            ),
             callback_data="howto",
+            icon_custom_emoji_id=(
+                MAIN_MENU_CUSTOM_EMOJI_IDS["connect"] if use_premium_emoji else None
+            ),
             style=ButtonStyle.SUCCESS,
         )])
         
     if has_active_subscription:
         keyboard.append([
             InlineKeyboardButton(
-                text=texts.t("PROFILE_DEVICES_BUTTON", "📱 Мои устройства"),
+                text=_premium_button_label(
+                    texts.t("PROFILE_DEVICES_BUTTON", "📱 Мои устройства"),
+                    use_premium_emoji,
+                    "📱",
+                ),
                 callback_data="subscription_manage_devices",
+                icon_custom_emoji_id=(
+                    MAIN_MENU_CUSTOM_EMOJI_IDS["devices"] if use_premium_emoji else None
+                ),
             )
         ])
     if has_active_subscription or trial_active:
         subscription_button = InlineKeyboardButton(
-            text=texts.t("MENU_SUBSCRIPTION_BUTTON", "⚙️ Управление Подпиской"),
+            text=_premium_button_label(
+                texts.t("MENU_SUBSCRIPTION_BUTTON", "⚙️ Управление Подпиской"),
+                use_premium_emoji,
+                "⚙️",
+                "⚙",
+            ),
             callback_data="subscription",
+            icon_custom_emoji_id=(
+                MAIN_MENU_CUSTOM_EMOJI_IDS["subscription"] if use_premium_emoji else None
+            ),
         )
     else:
         subscription_button = InlineKeyboardButton(
-            text=texts.t("MAIN_MENU_ACTIVATE_SUBSCRIPTION_BUTTON", "✅ Активировать подписку"),
+            text=_premium_button_label(
+                texts.t("MAIN_MENU_ACTIVATE_SUBSCRIPTION_BUTTON", "✅ Активировать подписку"),
+                use_premium_emoji,
+                "✅",
+            ),
             callback_data="sub_add_days",
+            icon_custom_emoji_id=(
+                MAIN_MENU_CUSTOM_EMOJI_IDS["subscription"] if use_premium_emoji else None
+            ),
         )
     keyboard.append([subscription_button])
     keyboard.append([
-        InlineKeyboardButton(text=texts.t("MENU_REFERRAL_BUTTON", "💲 Приглашай и зарабатывай"), callback_data="referral")
+        InlineKeyboardButton(
+            text=_premium_button_label(
+                texts.t("MENU_REFERRAL_BUTTON", "💲 Приглашай и зарабатывай"),
+                use_premium_emoji,
+                "💲",
+            ),
+            callback_data="referral",
+            icon_custom_emoji_id=(
+                MAIN_MENU_CUSTOM_EMOJI_IDS["referral"] if use_premium_emoji else None
+            ),
+        )
     ])
     keyboard.append([
-        InlineKeyboardButton(text=texts.t("MENU_SUPPORT_BUTTON", "💬 Поддержка"), callback_data="support"),
-        InlineKeyboardButton(text=texts.t("MENU_PROFILE_BUTTON", "🪪 Профиль"), callback_data="profile")
+        InlineKeyboardButton(
+            text=_premium_button_label(
+                texts.t("MENU_SUPPORT_BUTTON", "💬 Поддержка"),
+                use_premium_emoji,
+                "💬",
+            ),
+            callback_data="support",
+            icon_custom_emoji_id=(
+                MAIN_MENU_CUSTOM_EMOJI_IDS["support"] if use_premium_emoji else None
+            ),
+        ),
+        InlineKeyboardButton(
+            text=_premium_button_label(
+                texts.t("MENU_PROFILE_BUTTON", "🪪 Профиль"),
+                use_premium_emoji,
+                "🪪",
+            ),
+            callback_data="profile",
+            icon_custom_emoji_id=(
+                MAIN_MENU_CUSTOM_EMOJI_IDS["profile"] if use_premium_emoji else None
+            ),
+        )
     ])
     
     if is_admin:
         keyboard.append([
-            InlineKeyboardButton(text=texts.MENU_ADMIN, callback_data="admin_panel")
+            InlineKeyboardButton(
+                text=_premium_button_label(
+                    texts.MENU_ADMIN,
+                    use_premium_emoji,
+                    "🔧",
+                ),
+                callback_data="admin_panel",
+                icon_custom_emoji_id=(
+                    MAIN_MENU_CUSTOM_EMOJI_IDS["admin"] if use_premium_emoji else None
+                ),
+            )
         ])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

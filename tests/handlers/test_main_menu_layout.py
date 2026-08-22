@@ -20,6 +20,37 @@ def test_active_subscriber_main_menu_places_devices_between_connect_and_subscrip
     ]
 
 
+def test_primary_bot_main_menu_uses_custom_emoji_without_duplicate_unicode_icons():
+    keyboard = inline.get_new_main_menu_keyboard(
+        balance_rub=0,
+        has_active_subscription=True,
+        is_admin=True,
+        language="ru",
+        use_premium_emoji=True,
+    )
+
+    buttons = {
+        button.callback_data: button
+        for row in keyboard.inline_keyboard
+        for button in row
+    }
+
+    expected = {
+        "howto": ("Подключить устройство", "connect"),
+        "subscription_manage_devices": ("Мои устройства", "devices"),
+        "subscription": ("Управление Подпиской", "subscription"),
+        "referral": ("Приглашай и зарабатывай", "referral"),
+        "support": ("Поддержка", "support"),
+        "profile": ("Профиль", "profile"),
+        "admin_panel": ("Админ-панель", "admin"),
+    }
+
+    for callback_data, (text, emoji_key) in expected.items():
+        button = buttons[callback_data]
+        assert button.text == text
+        assert button.icon_custom_emoji_id == inline.MAIN_MENU_CUSTOM_EMOJI_IDS[emoji_key]
+
+
 def test_inactive_subscriber_main_menu_starts_the_extend_flow():
     keyboard = inline.get_new_main_menu_keyboard(
         balance_rub=0,

@@ -29,6 +29,7 @@ from app.database.crud.ad_attribution import (
 )
 from app.external import tv_pairing
 from app.utils.ad_attribution import parse_ad_payload
+from app.utils.bot_registry import is_primary_bot
 from app.database.models import PinnedMessage, SubscriptionStatus, UserStatus
 from app.keyboards.inline import (
     get_rules_keyboard,
@@ -1173,6 +1174,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             has_active_subscription=has_active_sub,
             is_admin=is_admin,
             language=user.language,
+            use_premium_emoji=is_primary_bot(message.bot.id if message.bot else None),
         )
 
         image_path = os.path.join("images", "main_menu.webp")
@@ -2154,6 +2156,7 @@ async def complete_registration(
                 has_active_subscription=has_active_sub,
                 is_admin=is_admin,
                 language=existing_user.language,
+                use_premium_emoji=is_primary_bot(message.bot.id if message.bot else None),
             )
             await message.answer(
                 menu_text,
