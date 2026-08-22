@@ -67,6 +67,19 @@ def test_ios_happ_download_uses_same_icon_as_incy_download():
     assert icons == [CUSTOM_EMOJI["download_incy"], CUSTOM_EMOJI["download_incy"]]
 
 
+def test_happ_key_uses_same_icon_as_incy_key_on_every_platform():
+    markup = _markup(
+        InlineKeyboardButton(text="➡️ Ключ в Incy", url="https://example.com/incy"),
+        InlineKeyboardButton(text="➡️ Ключ в Happ", url="https://example.com/happ"),
+        InlineKeyboardButton(text="🛠 Передать ключ в Happ", url="https://example.com/happ-transfer"),
+    )
+
+    result = apply_premium_button_icons(markup)
+    icons = [row[0].icon_custom_emoji_id for row in result.inline_keyboard]
+
+    assert icons == [CUSTOM_EMOJI["key_incy"]] * 3
+
+
 def test_leaves_unmapped_and_already_decorated_buttons_unchanged():
     existing_id = "6030597532030081221"
     markup = _markup(
