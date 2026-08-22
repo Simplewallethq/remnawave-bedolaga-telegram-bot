@@ -66,7 +66,7 @@ async def show_platega_autopay_menu(
                 and can_use_platega_subscription(db_user.username)
             ),
         ),
-        photo_path="images/pay.jpg" if os.path.exists("images/pay.jpg") else None,
+        photo_path="images/pay.webp" if os.path.exists("images/pay.webp") else None,
     )
     if answer_callback:
         await callback.answer()
@@ -108,7 +108,7 @@ async def start_platega_autopay_setup(
                 ]
             ]
         ),
-        photo_path="images/pay.jpg" if os.path.exists("images/pay.jpg") else None,
+        photo_path="images/pay.webp" if os.path.exists("images/pay.webp") else None,
     )
     await state.clear()
     await state.update_data(
@@ -162,7 +162,7 @@ async def request_platega_autopay_cancellation(
                 ],
             ]
         ),
-        photo_path="images/pay.jpg" if os.path.exists("images/pay.jpg") else None,
+        photo_path="images/pay.webp" if os.path.exists("images/pay.webp") else None,
     )
     await callback.answer()
 
@@ -694,7 +694,7 @@ async def process_platega_subscription_amount(
         "Чтобы подключить автоплатеж нажми на кнопку и соверши платеж.\n\n"
         "Баланс пополняется после каждого успешного ежемесячного списания.",
     )
-    pay_image_path = os.path.join("images", "pay.jpg")
+    pay_image_path = os.path.join("images", "pay.webp")
     if os.path.exists(pay_image_path):
         await message.answer_photo(
             FSInputFile(pay_image_path),
@@ -1021,7 +1021,7 @@ async def process_platega_universal_payment_amount(
                 delete_error,
             )
 
-    pay_image_path = os.path.join("images", "pay.jpg")
+    pay_image_path = os.path.join("images", "pay.webp")
     if os.path.exists(pay_image_path):
         invoice_message = await message.answer_photo(
             FSInputFile(pay_image_path),

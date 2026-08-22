@@ -62,7 +62,7 @@ from app.utils.success_notifications import (
 
 logger = logging.getLogger(__name__)
 
-PAY_IMAGE_PATH = os.path.join("images", "pay.jpg")
+PAY_IMAGE_PATH = os.path.join("images", "pay.webp")
 
 
 _PERIOD_LABEL_KEYS = {
@@ -447,7 +447,7 @@ async def show_tariffs_page(
         back_callback=back_callback,
     )
 
-    image_path = os.path.join("images", "plans.jpg")
+    image_path = os.path.join("images", "plans.webp")
     await edit_or_answer_photo(
         callback,
         message_text,
@@ -575,7 +575,7 @@ async def show_tariff_periods(
         language=db_user.language,
     )
 
-    image_path = os.path.join("images", "plans.jpg")
+    image_path = os.path.join("images", "plans.webp")
     await edit_or_answer_photo(
         callback,
         message_text,
@@ -1837,7 +1837,7 @@ async def show_renew_current(
 
     keyboard = get_renew_periods_keyboard(plan.id, period_prices, language=db_user.language)
 
-    image_path = os.path.join("images", "subscription.jpg")
+    image_path = os.path.join("images", "subscription.webp")
     await edit_or_answer_photo(
         callback,
         message_text,

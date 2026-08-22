@@ -541,7 +541,7 @@ async def handle_device_management(
                                 callback_data="main_menu",
                             )],
                         ]),
-                        photo_path=os.path.join("images", "devices.jpg"),
+                        photo_path=os.path.join("images", "devices.webp"),
                     )
                     await callback.answer()
                     return
@@ -624,7 +624,7 @@ async def show_devices_page(
             db_user.language
         ),
         parse_mode="HTML",
-        photo_path=os.path.join("images", "devices.jpg"),
+        photo_path=os.path.join("images", "devices.webp"),
     )
 
 async def handle_devices_page(
@@ -719,7 +719,7 @@ async def handle_single_device_reset(
                             page,
                             db_user.language,
                         ),
-                        photo_path=os.path.join("images", "devices.jpg"),
+                        photo_path=os.path.join("images", "devices.webp"),
                     )
                     await callback.answer()
                 else:
@@ -817,7 +817,7 @@ async def confirm_single_device_reset(
                     db_user.language,
                     callback_data="subscription_manage_devices",
                 ),
-                photo_path=os.path.join("images", "devices.jpg"),
+                photo_path=os.path.join("images", "devices.webp"),
             )
             await callback.answer()
 
@@ -846,7 +846,7 @@ async def show_all_devices_reset_confirmation(
             "Вы точно хотите сбросить все устройства?",
         ),
         get_all_devices_reset_confirm_keyboard(db_user.language),
-        photo_path=os.path.join("images", "devices.jpg"),
+        photo_path=os.path.join("images", "devices.webp"),
     )
     await callback.answer()
 
@@ -932,7 +932,7 @@ async def handle_all_devices_reset_from_management(
                             db_user.language,
                             callback_data="subscription_manage_devices",
                         ),
-                        photo_path=os.path.join("images", "devices.jpg"),
+                        photo_path=os.path.join("images", "devices.webp"),
                     )
                     logger.info(f"✅ Пользователь {db_user.telegram_id} успешно сбросил {success_count} устройств")
                 else:
@@ -951,7 +951,7 @@ async def handle_all_devices_reset_from_management(
                             db_user.language,
                             callback_data="subscription_manage_devices",
                         ),
-                        photo_path=os.path.join("images", "devices.jpg"),
+                        photo_path=os.path.join("images", "devices.webp"),
                     )
                     logger.warning(
                         f"⚠️ Частичный сброс у пользователя {db_user.telegram_id}: {success_count}/{len(devices_list)}")
@@ -970,7 +970,7 @@ async def handle_all_devices_reset_from_management(
                         db_user.language,
                         callback_data="subscription_manage_devices",
                     ),
-                    photo_path=os.path.join("images", "devices.jpg"),
+                    photo_path=os.path.join("images", "devices.webp"),
                 )
                 logger.error(f"❌ Не удалось сбросить ни одного устройства у пользователя {db_user.telegram_id}")
 
@@ -983,7 +983,7 @@ async def handle_all_devices_reset_from_management(
                 db_user.language,
                 callback_data="subscription_manage_devices",
             ),
-            photo_path=os.path.join("images", "devices.jpg"),
+            photo_path=os.path.join("images", "devices.webp"),
         )
 
     await callback.answer()

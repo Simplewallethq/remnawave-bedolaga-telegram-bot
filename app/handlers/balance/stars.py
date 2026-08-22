@@ -165,7 +165,7 @@ async def process_stars_payment_amount(
             f"Нажмите кнопку ниже для оплаты:"
         )
 
-        pay_image_path = os.path.join("images", "pay.jpg")
+        pay_image_path = os.path.join("images", "pay.webp")
         if os.path.exists(pay_image_path):
             invoice_message = await message.answer_photo(
                 photo=FSInputFile(pay_image_path),

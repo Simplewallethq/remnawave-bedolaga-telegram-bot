@@ -186,7 +186,7 @@ async def test_connect_platform_handler_shows_raw_subscription_link(monkeypatch)
     assert "авторизуйся через Telegram или с помощью ключа доступа" in rendered_text
     assert SUBSCRIPTION_LINK in rendered_text
     assert rendered_keyboard.inline_keyboard[0][0].text == "☀️ Скачать Leto VPN"
-    assert render.await_args.kwargs["photo_path"] == "images/connection.jpg"
+    assert render.await_args.kwargs["photo_path"] == "images/connection.webp"
     callback.answer.assert_awaited_once()
 
 
@@ -212,7 +212,7 @@ async def test_connect_menu_main_screen_shows_universal_raw_key(monkeypatch):
     assert "Выбери платформу для подключения:" in rendered_text
     assert SUBSCRIPTION_LINK in rendered_text
     assert rendered_keyboard.inline_keyboard[0][0].callback_data == "connect_platform_android"
-    assert render.await_args.kwargs["photo_path"] == "images/connection.jpg"
+    assert render.await_args.kwargs["photo_path"] == "images/connection.webp"
     callback.answer.assert_awaited_once()
 
 
@@ -246,7 +246,7 @@ async def test_connect_platform_submenus_use_connection_image(monkeypatch):
 
     assert render.await_count == 3
     for call in render.await_args_list:
-        assert call.kwargs["photo_path"] == "images/connection.jpg"
+        assert call.kwargs["photo_path"] == "images/connection.webp"
 
     assert render.await_args_list[0].args[2].inline_keyboard[1][0].url == "https://redirect.example/happ"
     assert render.await_args_list[1].args[2].inline_keyboard[0][1].url == "https://redirect.example/incy"

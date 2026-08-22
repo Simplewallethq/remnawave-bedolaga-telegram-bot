@@ -22,7 +22,7 @@ async def test_devices_list_uses_devices_image(monkeypatch):
     )
 
     assert "Подключенные устройства" in render.await_args.args[1]
-    assert render.await_args.kwargs["photo_path"] == "images/devices.jpg"
+    assert render.await_args.kwargs["photo_path"] == "images/devices.webp"
 
 
 class _ApiContext:
@@ -54,7 +54,7 @@ async def test_empty_devices_screen_uses_devices_image(monkeypatch):
     await devices.handle_device_management(callback, user, AsyncMock())
 
     assert "нет подключенных устройств" in render.await_args.args[1]
-    assert render.await_args.kwargs["photo_path"] == "images/devices.jpg"
+    assert render.await_args.kwargs["photo_path"] == "images/devices.webp"
     keyboard = render.await_args.args[2]
     assert keyboard.inline_keyboard[0][0].text == "📲 Привязать устройство"
     assert keyboard.inline_keyboard[0][0].callback_data == "howto"

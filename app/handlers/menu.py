@@ -224,7 +224,7 @@ async def show_main_menu(
         language=db_user.language,
     )
 
-    image_path = os.path.join("images", "main_menu.jpg")
+    image_path = os.path.join("images", "main_menu.webp")
     if not os.path.exists(image_path):
         image_path = None
 
@@ -331,8 +331,8 @@ async def show_info_menu(
         ),
         parse_mode="HTML",
         photo_path=(
-            os.path.join("images", "info.jpg")
-            if os.path.exists(os.path.join("images", "info.jpg"))
+            os.path.join("images", "info.webp")
+            if os.path.exists(os.path.join("images", "info.webp"))
             else None
         ),
     )
@@ -963,8 +963,8 @@ async def show_language_menu(
         ),
         parse_mode="HTML",
         photo_path=(
-            os.path.join("images", "profile.jpg")
-            if os.path.exists(os.path.join("images", "profile.jpg"))
+            os.path.join("images", "profile.webp")
+            if os.path.exists(os.path.join("images", "profile.webp"))
             else None
         ),
     )
@@ -1380,7 +1380,7 @@ async def handle_howto(
         await _build_connect_platform_selection_text(db, user),
         get_connection_platform_keyboard(user.language),
         parse_mode="HTML",
-        photo_path=os.path.join("images", "connection.jpg"),
+        photo_path=os.path.join("images", "connection.webp"),
         disable_web_page_preview=True,
     )
     await callback.answer()
@@ -1425,7 +1425,7 @@ async def handle_connect_platform_android(
             happ_transfer_url=_get_happ_transfer_url(user),
         ),
         parse_mode="HTML",
-        photo_path=os.path.join("images", "connection.jpg"),
+        photo_path=os.path.join("images", "connection.webp"),
         disable_web_page_preview=True,
     )
     await callback.answer()
@@ -1468,7 +1468,7 @@ async def handle_connect_platform_apple(
             happ_transfer_url=_get_happ_transfer_url(user),
         ),
         parse_mode="HTML",
-        photo_path=os.path.join("images", "connection.jpg"),
+        photo_path=os.path.join("images", "connection.webp"),
         disable_web_page_preview=True,
     )
     await callback.answer()
@@ -1500,7 +1500,7 @@ async def handle_connect_platform_windows(
             happ_transfer_url=_get_happ_transfer_url(user),
         ),
         parse_mode="HTML",
-        photo_path=os.path.join("images", "connection.jpg"),
+        photo_path=os.path.join("images", "connection.webp"),
         disable_web_page_preview=True,
     )
     await callback.answer()
@@ -1518,7 +1518,7 @@ async def handle_onboarding_connect_free(
 
     caption = _build_onboarding_device_selection_view(user)
 
-    image_path = os.path.join("images", "connection.jpg")
+    image_path = os.path.join("images", "connection.webp")
     if not os.path.exists(image_path):
         image_path = None
 
@@ -1582,7 +1582,7 @@ async def handle_onboarding_device_selection(
         raw_subscription_link=raw_subscription_link,
     )
 
-    image_path = os.path.join("images", "connection.jpg")
+    image_path = os.path.join("images", "connection.webp")
     if not os.path.exists(image_path):
         image_path = None
 
@@ -1783,7 +1783,7 @@ async def handle_profile(callback: types.CallbackQuery, db_user: User, db: Async
         + texts.t("PROFILE_REG_DATE", "Дата регистрации: {reg_date}").format(reg_date=reg_date)
     )
 
-    image_path = os.path.join("images", "profile.jpg")
+    image_path = os.path.join("images", "profile.webp")
     if not os.path.exists(image_path):
          image_path = None
 
@@ -1878,8 +1878,8 @@ async def handle_referral(callback: types.CallbackQuery, db_user: User, db: Asyn
             show_rewards_shop=shop_enabled,
         ),
         photo_path=(
-            os.path.join("images", "ref.jpg")
-            if os.path.exists(os.path.join("images", "ref.jpg"))
+            os.path.join("images", "ref.webp")
+            if os.path.exists(os.path.join("images", "ref.webp"))
             else None
         ),
     )
@@ -1960,7 +1960,7 @@ async def handle_support(callback: types.CallbackQuery, db_user: User, db: Async
         )
     )
     
-    image_path = os.path.join("images", "support.jpg")
+    image_path = os.path.join("images", "support.webp")
     if not os.path.exists(image_path):
          image_path = None
 

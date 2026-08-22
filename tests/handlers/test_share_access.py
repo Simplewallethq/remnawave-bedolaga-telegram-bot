@@ -372,7 +372,7 @@ async def test_handle_share_access_uses_subscription_url_without_share_token(mon
     assert SUBSCRIPTION_LINK in rendered_text
     assert "<b>Ключ доступа (для Happ, Incy):</b>" in rendered_text
     assert "Ключ для входа в Leto VPN" not in rendered_text
-    assert render.await_args.kwargs["photo_path"] == "images/connection.jpg"
+    assert render.await_args.kwargs["photo_path"] == "images/connection.webp"
     assert keyboard.inline_keyboard[0][0].text == "📤 Переслать друзьям"
     share_url = keyboard.inline_keyboard[0][0].url
     assert share_url.startswith("https://t.me/share/url?url=")

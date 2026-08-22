@@ -100,7 +100,7 @@ async def test_current_tariff_renewal_uses_subscription_image(monkeypatch):
 
     await tariffs.show_renew_current(callback, user, db)
 
-    assert render.await_args.kwargs["photo_path"] == "images/subscription.jpg"
+    assert render.await_args.kwargs["photo_path"] == "images/subscription.webp"
 
 
 async def test_legacy_extend_keeps_legacy_calculator(monkeypatch):

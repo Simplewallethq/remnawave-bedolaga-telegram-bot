@@ -268,7 +268,7 @@ async def show_payment_methods(
             stored_amount, db_user.language, db_user.username
         )
 
-        image_path = os.path.join("images", "pay.jpg")
+        image_path = os.path.join("images", "pay.webp")
         await edit_or_answer_photo(
             callback,
             prompt,
@@ -287,7 +287,7 @@ async def show_payment_methods(
         [types.InlineKeyboardButton(text=texts.BACK, callback_data="subscription")]
     ])
 
-    image_path = os.path.join("images", "pay.jpg")
+    image_path = os.path.join("images", "pay.webp")
     await edit_or_answer_photo(
         callback,
         prompt_text,
@@ -327,7 +327,7 @@ async def _render_payment_methods_with_amount(
         amount_kopeks, db_user.language, db_user.username
     )
 
-    image_path = os.path.join("images", "pay.jpg")
+    image_path = os.path.join("images", "pay.webp")
     if not os.path.exists(image_path):
         try:
             if message.text:

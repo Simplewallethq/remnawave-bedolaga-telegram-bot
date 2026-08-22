@@ -25,7 +25,7 @@ async def show_promocode_menu(
 ):
     texts = get_texts(db_user.language)
     
-    image_path = os.path.join("images", "promo.jpg")
+    image_path = os.path.join("images", "promo.webp")
     await edit_or_answer_photo(
         callback,
         texts.PROMOCODE_ENTER,

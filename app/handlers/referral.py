@@ -51,8 +51,8 @@ async def show_referral_info(
         referral_text,
         get_referral_keyboard(db_user.language),
         photo_path=(
-            os.path.join("images", "ref.jpg")
-            if os.path.exists(os.path.join("images", "ref.jpg"))
+            os.path.join("images", "ref.webp")
+            if os.path.exists(os.path.join("images", "ref.webp"))
             else None
         ),
     )

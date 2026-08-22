@@ -519,9 +519,16 @@ async def show_trial_offer(
         price_line=price_line,
     )
 
-    await callback.message.edit_text(
-        trial_text,
-        reply_markup=get_trial_keyboard(db_user.language)
+    trial_image_path = os.path.join("images", "trial.webp")
+    if not os.path.exists(trial_image_path):
+        trial_image_path = None
+
+    await edit_or_answer_photo(
+        callback=callback,
+        caption=trial_text,
+        keyboard=get_trial_keyboard(db_user.language),
+        parse_mode="HTML",
+        photo_path=trial_image_path,
     )
     await callback.answer()
 
@@ -760,7 +767,7 @@ async def activate_trial(
 
             connect_keyboard = get_activation_keyboard(subscription_link)
 
-            image_path = os.path.join("images", "subscription.jpg")
+            image_path = os.path.join("images", "subscription.webp")
             if not os.path.exists(image_path):
                  image_path = None
 
@@ -848,7 +855,7 @@ async def start_subscription_purchase(
     keyboard = get_subscription_period_keyboard(db_user.language, db_user)
     prompt_text = await _build_subscription_period_prompt(db_user, texts, db)
 
-    image_path = os.path.join("images", "plans.jpg")
+    image_path = os.path.join("images", "plans.webp")
     await edit_or_answer_photo(
         callback,
         prompt_text,
@@ -2717,7 +2724,7 @@ async def handle_subscription_menu(
             )
             text = f"{header_line}\n\n{text}"
 
-    image_path = os.path.join("images", "subscription.jpg")
+    image_path = os.path.join("images", "subscription.webp")
     if not os.path.exists(image_path):
          image_path = None
 
@@ -2938,7 +2945,7 @@ async def handle_share_access(
         )],
     ])
 
-    image_path = os.path.join("images", "connection.jpg")
+    image_path = os.path.join("images", "connection.webp")
     await edit_or_answer_photo(
         callback,
         text,
@@ -3002,7 +3009,7 @@ async def handle_sub_add_days(
         return
 
     text = "Выберите срок действия подписки"
-    image_path = os.path.join("images", "plans.jpg")
+    image_path = os.path.join("images", "plans.webp")
     if not os.path.exists(image_path):
          image_path = None
 
@@ -3026,7 +3033,7 @@ async def handle_sub_add_devices(
         "📱 <b>Устройства</b>\n\nВыберите действие:",
     )
 
-    image_path = os.path.join("images", "devices.jpg")
+    image_path = os.path.join("images", "devices.webp")
     if not os.path.exists(image_path):
         image_path = None
 
@@ -3079,7 +3086,7 @@ async def handle_sub_change_devices_count(
         ),
     ).format(current_devices=current_devices)
 
-    image_path = os.path.join("images", "devices.jpg")
+    image_path = os.path.join("images", "devices.webp")
     if not os.path.exists(image_path):
         image_path = None
 
@@ -3132,7 +3139,7 @@ async def handle_topup_days(
         f"Выберите способ оплаты:"
     )
 
-    image_path = os.path.join("images", "pay.jpg")
+    image_path = os.path.join("images", "pay.webp")
     if not os.path.exists(image_path):
          image_path = None
 
@@ -3232,7 +3239,7 @@ async def handle_device_selection_confirm(
         f"Выберите способ оплаты:"
     )
 
-    image_path = os.path.join("images", "pay.jpg")
+    image_path = os.path.join("images", "pay.webp")
     if not os.path.exists(image_path):
          image_path = None
 
@@ -3625,7 +3632,7 @@ async def handle_payment_selection(
                  ),
                  keyboard=keyboard,
                  parse_mode="HTML",
-                 photo_path=os.path.join("images", "pay.jpg")
+                 photo_path=os.path.join("images", "pay.webp")
              )
 
         except Exception as e:
@@ -3673,7 +3680,7 @@ async def handle_payment_selection(
                  ),
                  keyboard=keyboard,
                  parse_mode="HTML",
-                 photo_path=os.path.join("images", "pay.jpg")
+                 photo_path=os.path.join("images", "pay.webp")
              )
 
         except Exception as e:
@@ -3758,7 +3765,7 @@ async def handle_payment_selection(
                 ),
                 keyboard=keyboard,
                 parse_mode="HTML",
-                photo_path=os.path.join("images", "pay.jpg")
+                photo_path=os.path.join("images", "pay.webp")
             )
         except Exception as e:
             logger.error(f"Error creating YooKassa payment: {e}")

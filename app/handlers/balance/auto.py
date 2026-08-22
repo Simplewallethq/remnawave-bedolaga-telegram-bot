@@ -270,7 +270,7 @@ async def _render_invoice(
                 "Не удалось удалить сообщение с запросом суммы: %s", delete_error
             )
 
-    pay_image_path = os.path.join("images", "pay.jpg")
+    pay_image_path = os.path.join("images", "pay.webp")
     if os.path.exists(pay_image_path):
         invoice_message = await message.answer_photo(
             FSInputFile(pay_image_path),

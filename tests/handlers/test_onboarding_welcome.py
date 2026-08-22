@@ -55,7 +55,7 @@ async def test_trial_activation_shows_onboarding_welcome(monkeypatch):
     assert render.await_args.kwargs["keyboard"].inline_keyboard[0][0].callback_data == (
         "connect_platform_android"
     )
-    assert render.await_args.kwargs["photo_path"] == "images/connection.jpg"
+    assert render.await_args.kwargs["photo_path"] == "images/connection.webp"
 
 
 async def test_partner_activation_shows_onboarding_welcome(monkeypatch):
@@ -81,7 +81,7 @@ async def test_partner_activation_shows_onboarding_welcome(monkeypatch):
     assert success is True
     assert "Hi, you have a free 3-day subscription" in render.await_args.kwargs["caption"]
     assert render.await_args.kwargs["keyboard"].inline_keyboard[-1][0].callback_data == "main_menu"
-    assert render.await_args.kwargs["photo_path"] == "images/connection.jpg"
+    assert render.await_args.kwargs["photo_path"] == "images/connection.webp"
 
 
 async def test_onboarding_welcome_sends_connection_image_for_new_registration():
@@ -96,7 +96,7 @@ async def test_onboarding_welcome_sends_connection_image_for_new_registration():
 
     assert success is True
     assert message.answer_photo.await_args.kwargs["caption"].startswith("Привет, тебе")
-    assert message.answer_photo.await_args.args[0].path == "images/connection.jpg"
+    assert message.answer_photo.await_args.args[0].path == "images/connection.webp"
 
 
 async def test_existing_device_link_sends_russian_confirmation_with_connection_image(
@@ -114,7 +114,7 @@ async def test_existing_device_link_sends_russian_confirmation_with_connection_i
     db.commit.assert_awaited_once()
     message.answer.assert_not_awaited()
     message.answer_photo.assert_awaited_once()
-    assert message.answer_photo.await_args.args[0].path == "images/connection.jpg"
+    assert message.answer_photo.await_args.args[0].path == "images/connection.webp"
     assert message.answer_photo.await_args.kwargs["caption"] == (
         "Устройство подключено к вашей подписке, вернитесь обратно."
     )

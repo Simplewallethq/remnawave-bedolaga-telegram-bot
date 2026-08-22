@@ -84,7 +84,7 @@ logger = logging.getLogger(__name__)
 DEVICE_LINK_SUCCESS_TEXT = (
     "Устройство подключено к вашей подписке, вернитесь обратно."
 )
-DEVICE_LINK_SUCCESS_PHOTO = os.path.join("images", "connection.jpg")
+DEVICE_LINK_SUCCESS_PHOTO = os.path.join("images", "connection.webp")
 
 
 async def _send_device_link_success(target) -> None:
@@ -408,7 +408,7 @@ async def _show_onboarding_welcome(
         return False
 
     keyboard = get_onboarding_welcome_keyboard(lang)
-    photo_path = os.path.join("images", "connection.jpg")
+    photo_path = os.path.join("images", "connection.webp")
     if is_callback:
         await edit_or_answer_photo(
             callback=message_or_callback,
@@ -667,7 +667,7 @@ async def _prompt_language_selection(message: types.Message, state: FSMContext) 
     logger.info(f"🌐 LANGUAGE: Запрос выбора языка для пользователя {message.from_user.id}")
 
     await state.set_state(RegistrationStates.waiting_for_language)
-    image_path = os.path.join("images", "profile.jpg")
+    image_path = os.path.join("images", "profile.webp")
     keyboard = get_language_selection_keyboard()
     if os.path.exists(image_path):
         await message.answer_photo(
@@ -1175,7 +1175,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             language=user.language,
         )
 
-        image_path = os.path.join("images", "main_menu.jpg")
+        image_path = os.path.join("images", "main_menu.webp")
         force_text = settings.is_text_main_menu_mode()
 
         if not force_text and (settings.ENABLE_LOGO_MODE or os.path.exists(image_path)):
@@ -2063,7 +2063,7 @@ async def complete_registration_from_callback(
             "Нажми «✨ Активировать» и начнём.",
         )
         try:
-            image_path = os.path.join("images", "start_screen.png")
+            image_path = os.path.join("images", "trial.webp")
             if not os.path.exists(image_path):
                 image_path = None
             await edit_or_answer_photo(
@@ -2379,7 +2379,7 @@ async def complete_registration(
             "Нажми «✨ Активировать» и начнём.",
         )
         try:
-            image_path = os.path.join("images", "start_screen.png")
+            image_path = os.path.join("images", "trial.webp")
             if os.path.exists(image_path):
                 await message.answer_photo(
                     photo=types.FSInputFile(image_path),

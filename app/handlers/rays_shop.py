@@ -114,8 +114,8 @@ async def show_rays_shop(callback: types.CallbackQuery, db_user: User, db: Async
         "\n".join(lines),
         types.InlineKeyboardMarkup(inline_keyboard=rows),
         photo_path=(
-            os.path.join("images", "ref.jpg")
-            if os.path.exists(os.path.join("images", "ref.jpg"))
+            os.path.join("images", "ref.webp")
+            if os.path.exists(os.path.join("images", "ref.webp"))
             else None
         ),
     )

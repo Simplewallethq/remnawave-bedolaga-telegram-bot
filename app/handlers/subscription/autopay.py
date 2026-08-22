@@ -84,8 +84,8 @@ from app.utils.photo_message import edit_or_answer_photo
 from .countries import _get_available_countries, _should_show_countries_management
 from .pricing import _build_subscription_period_prompt
 
-PAY_IMAGE_PATH = os.path.join("images", "pay.jpg")
-PLANS_IMAGE_PATH = os.path.join("images", "plans.jpg")
+PAY_IMAGE_PATH = os.path.join("images", "pay.webp")
+PLANS_IMAGE_PATH = os.path.join("images", "plans.webp")
 
 async def handle_autopay_menu(
         callback: types.CallbackQuery,

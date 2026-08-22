@@ -28,8 +28,8 @@ async def show_support_info(
         keyboard=get_support_keyboard(db_user.language),
         parse_mode="HTML",
         photo_path=(
-            os.path.join("images", "support.jpg")
-            if os.path.exists(os.path.join("images", "support.jpg"))
+            os.path.join("images", "support.webp")
+            if os.path.exists(os.path.join("images", "support.webp"))
             else None
         ),
     )
