@@ -245,8 +245,8 @@ async def test_connect_platform_submenus_use_connection_image(monkeypatch):
         assert call.kwargs["photo_path"] == "images/connection.webp"
 
     assert render.await_args_list[0].args[2].inline_keyboard[1][0].url == "https://redirect.example/happ"
-    assert render.await_args_list[1].args[2].inline_keyboard[0][1].url == "https://redirect.example/incy"
-    assert render.await_args_list[1].args[2].inline_keyboard[1][1].url == "https://redirect.example/happ"
+    assert render.await_args_list[1].args[2].inline_keyboard[1][0].url == "https://redirect.example/incy"
+    assert render.await_args_list[1].args[2].inline_keyboard[3][0].url == "https://redirect.example/happ"
     assert render.await_args_list[2].args[2].inline_keyboard[1][0].url == "https://redirect.example/happ"
 
 
