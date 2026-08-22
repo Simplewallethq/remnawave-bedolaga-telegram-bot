@@ -55,6 +55,18 @@ def test_current_wata_and_trial_variants_are_supported():
     ]
 
 
+def test_ios_happ_download_uses_same_icon_as_incy_download():
+    markup = _markup(
+        InlineKeyboardButton(text="🍏 Скачать Incy", url="https://example.com/incy"),
+        InlineKeyboardButton(text="🍎 Скачать Happ", url="https://example.com/happ"),
+    )
+
+    result = apply_premium_button_icons(markup)
+    icons = [row[0].icon_custom_emoji_id for row in result.inline_keyboard]
+
+    assert icons == [CUSTOM_EMOJI["download_incy"], CUSTOM_EMOJI["download_incy"]]
+
+
 def test_leaves_unmapped_and_already_decorated_buttons_unchanged():
     existing_id = "6030597532030081221"
     markup = _markup(

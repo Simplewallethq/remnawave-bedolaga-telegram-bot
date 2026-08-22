@@ -3484,35 +3484,34 @@ def get_connect_apple_keyboard(
 ) -> InlineKeyboardMarkup:
     """iPhone/macOS-specific Connect menu actions."""
     texts = get_texts(language)
-    incy_row = [
-        InlineKeyboardButton(
+    buttons: List[List[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(
             text=texts.t("CONNECT_DOWNLOAD_INCY_BUTTON", "🍏 Скачать Incy (RU App Store)"),
             url=settings.get_incy_download_link(),
-        )
+        )]
     ]
     if incy_transfer_url:
-        incy_row.append(
-            InlineKeyboardButton(
+        buttons.append(
+            [InlineKeyboardButton(
                 text=texts.t("CONNECT_TRANSFER_INCY_BUTTON", "🛠 Передать ключ в Incy"),
                 url=incy_transfer_url,
-            )
+            )]
         )
 
-    happ_row = [
-        InlineKeyboardButton(
+    buttons.append(
+        [InlineKeyboardButton(
             text=texts.t("CONNECT_DOWNLOAD_HAPP_IOS_BUTTON", "🍎 Скачать Happ (Int. App Store)"),
             url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
-        )
-    ]
+        )]
+    )
     if happ_transfer_url:
-        happ_row.append(
-            InlineKeyboardButton(
+        buttons.append(
+            [InlineKeyboardButton(
                 text=texts.t("CONNECT_TRANSFER_HAPP_BUTTON", "🛠 Передать ключ в Happ"),
                 url=happ_transfer_url,
-            )
+            )]
         )
 
-    buttons: List[List[InlineKeyboardButton]] = [incy_row, happ_row]
     buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data="howto")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

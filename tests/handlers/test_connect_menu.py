@@ -123,14 +123,10 @@ def test_connect_platform_keyboards_include_transfer_buttons(monkeypatch):
         ("⬅️ Назад", None),
     ]
     assert [[(button.text, button.url) for button in row] for row in apple_rows] == [
-        [
-            ("🍏 Скачать Incy", inline.settings.get_incy_download_link()),
-            ("➡️ Ключ в Incy", incy_url),
-        ],
-        [
-            ("🍎 Скачать Happ", "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"),
-            ("➡️ Ключ в Happ", happ_url),
-        ],
+        [("🍏 Скачать Incy", inline.settings.get_incy_download_link())],
+        [("➡️ Ключ в Incy", incy_url)],
+        [("🍎 Скачать Happ", "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215")],
+        [("➡️ Ключ в Happ", happ_url)],
         [("⬅️ Назад", None)],
     ]
     assert [(row[0].text, row[0].url) for row in windows_rows] == [
