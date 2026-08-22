@@ -103,10 +103,11 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
     from app.utils import bot_registry
+    from app.utils.premium_buttons import PremiumEmojiBot
 
     _default = DefaultBotProperties(parse_mode=ParseMode.HTML)
 
-    primary_bot = Bot(token=settings.BOT_TOKEN, default=_default)
+    primary_bot = PremiumEmojiBot(token=settings.BOT_TOKEN, default=_default)
     primary_bot_id = (await primary_bot.get_me()).id
     bot_registry.register_bot(primary_bot_id, Path(settings.LOGO_FILE))
     logger.info("Primary bot registered: id=%s", primary_bot_id)
