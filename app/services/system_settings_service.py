@@ -86,6 +86,7 @@ class BotConfigurationService:
         "CLOUDPAYMENTS": "💳 CloudPayments",
         "YOOKASSA": "🟣 YooKassa",
         "PLATEGA": "💳 {platega_name}",
+        "PAYMENT_ROUTER": "🎲 Роутер платежей",
         "TRIBUTE": "🎁 Tribute",
         "MULENPAY": "💰 {mulenpay_name}",
         "PAL24": "🏦 PAL24 / PayPalych",
@@ -137,6 +138,12 @@ class BotConfigurationService:
         "CHANNEL": "Настройки обязательной подписки на канал или группу.",
         "TIMEZONE": "Часовой пояс панели и отображение времени.",
         "PAYMENT": "Общие тексты платежей, описания чеков и шаблоны.",
+        "PAYMENT_ROUTER": (
+            "Единая кнопка «Оплатить»: веса Platega/WATA/YooKassa, фолбэк, "
+            "поверхности. Вес 0 = шлюз выключен для НОВЫХ счетов; уже "
+            "выставленные счета продолжат обрабатываться. Не выключайте "
+            "*_ENABLED — это осиротит счета в полёте."
+        ),
         "PAYMENT_VERIFICATION": "Автоматическая проверка пополнений и интервал выполнения.",
         "YOOKASSA": "Интеграция с YooKassa: идентификаторы магазина и вебхуки.",
         "CRYPTOBOT": "CryptoBot и криптоплатежи через Telegram.",
@@ -326,6 +333,7 @@ class BotConfigurationService:
         "PLATEGA_": "PLATEGA",
         "MULENPAY_": "MULENPAY",
         "PAL24_": "PAL24",
+        "PAYMENT_ROUTER_": "PAYMENT_ROUTER",
         "PAYMENT_": "PAYMENT",
         "PAYMENT_VERIFICATION_": "PAYMENT_VERIFICATION",
         "WATA_": "WATA",

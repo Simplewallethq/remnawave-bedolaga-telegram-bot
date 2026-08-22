@@ -157,3 +157,36 @@ async def test_set_value_applies_without_env_override(monkeypatch):
 
     assert settings.SUPPORT_MENU_ENABLED is target_value
     assert bot_configuration_service.has_override("SUPPORT_MENU_ENABLED")
+
+
+def test_payment_router_keys_are_runtime_editable() -> None:
+    """Ключи роутера не должны попадать в .env.
+
+    ENV_OVERRIDE_KEYS замораживает любой ключ, присутствующий в окружении:
+    BotConfigurationService сохранит значение в БД, но НЕ применит его. Для
+    рубильника и весов это означало бы невозможность отката без деплоя.
+    """
+    from app.config import ENV_OVERRIDE_KEYS
+
+    router_keys = {
+        "PAYMENT_ROUTER_ENABLED",
+        "PAYMENT_ROUTER_SURFACES",
+        "PAYMENT_ROUTER_WEIGHT_PLATEGA",
+        "PAYMENT_ROUTER_WEIGHT_WATA",
+        "PAYMENT_ROUTER_WEIGHT_YOOKASSA",
+        "PAYMENT_ROUTER_FALLBACK_ENABLED",
+        "PAYMENT_ROUTER_LOG_ENABLED",
+    }
+    frozen = router_keys & ENV_OVERRIDE_KEYS
+    assert not frozen, (
+        f"Ключи роутера заданы в окружении и не будут применяться из БД: {frozen}"
+    )
+
+
+def test_payment_router_settings_land_in_own_category() -> None:
+    """PAYMENT_ROUTER_ не должен схлопнуться в общую категорию PAYMENT."""
+    from app.services.system_settings_service import BotConfigurationService
+
+    BotConfigurationService.initialize_definitions()
+    definition = BotConfigurationService.get_definition("PAYMENT_ROUTER_ENABLED")
+    assert definition.category_key == "PAYMENT_ROUTER"

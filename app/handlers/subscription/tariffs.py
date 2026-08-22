@@ -186,7 +186,17 @@ async def _start_tariff_platega_checkout(
     texts = get_texts(db_user.language)
     missing_kopeks = max(0, total_kopeks - db_user.balance_kopeks)
     invoice_kopeks = missing_kopeks or total_kopeks
-    if not settings.is_platega_universal_enabled():
+
+    from app.services.payment_gateway_router import (
+        SOURCE_PARTIAL,
+        payment_gateway_router,
+    )
+
+    router_available = payment_gateway_router.is_enabled(
+        SOURCE_PARTIAL
+    ) and bool(payment_gateway_router.eligible_gateways(invoice_kopeks))
+
+    if not router_available and not settings.is_platega_universal_enabled():
         await callback.answer(
             texts.t(
                 "PLATEGA_UNIVERSAL_TEMPORARILY_UNAVAILABLE",
@@ -199,6 +209,7 @@ async def _start_tariff_platega_checkout(
     await state.update_data(
         platega_pending_amount=invoice_kopeks,
         platega_back_callback=back_callback,
+        invoice_back_callback=back_callback,
         tariff_checkout_summary={
             "total_kopeks": total_kopeks,
             "balance_kopeks": db_user.balance_kopeks,
@@ -206,6 +217,27 @@ async def _start_tariff_platega_checkout(
             "balance_callback": balance_callback if missing_kopeks == 0 else None,
         },
     )
+
+    if router_available:
+        from app.database.database import AsyncSessionLocal
+        from app.handlers.balance.auto import process_auto_payment_amount
+
+        async with AsyncSessionLocal() as db:
+            created = await process_auto_payment_amount(
+                callback.message,
+                db_user,
+                db,
+                invoice_kopeks,
+                state,
+                source=SOURCE_PARTIAL,
+            )
+        if created:
+            await callback.answer()
+            return
+        # Счёт не выставлен — падаем на прежний путь Platega, если он доступен.
+        if not settings.is_platega_universal_enabled():
+            return
+
     from app.handlers.balance.platega import start_platega_universal_payment
 
     await start_platega_universal_payment(callback, db_user, state)
@@ -1292,7 +1324,7 @@ async def show_tariff_partial_payment_methods(
     )
     if any(
         get_provider_min_kopeks(m) > shortfall
-        for m in ("yookassa", "mulenpay", "pal24", "platega", "wata", "cloudpayments", "cryptobot", "heleket")
+        for m in ("auto", "yookassa", "mulenpay", "pal24", "platega", "wata", "cloudpayments", "cryptobot", "heleket")
     ):
         message_text += "\n\n" + texts.t(
             "TARIFF_PARTIAL_MIN_NOTE",

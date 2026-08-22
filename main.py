@@ -381,15 +381,20 @@ async def main():
         polling_enabled = bot_run_mode in {"polling", "both"}
         telegram_webhook_enabled = bot_run_mode in {"webhook", "both"}
 
+        # Список должен совпадать с гейтами регистрации роутов в
+        # app/webserver/payments.py, иначе веб-сервер может не подняться и
+        # вебхуки уже включённого шлюза будут отваливаться в 404.
         payment_webhooks_enabled = any(
             [
                 settings.TRIBUTE_ENABLED,
                 settings.is_cryptobot_enabled(),
                 settings.is_mulenpay_enabled(),
-                settings.is_yookassa_enabled(),
+                settings.is_yookassa_configured(),
                 settings.is_pal24_enabled(),
-                settings.is_wata_enabled(),
-                settings.is_heleket_enabled(),
+                settings.is_wata_configured(),
+                settings.is_heleket_service_enabled(),
+                settings.is_platega_configured(),
+                settings.is_cloudpayments_enabled(),
             ]
         )
 

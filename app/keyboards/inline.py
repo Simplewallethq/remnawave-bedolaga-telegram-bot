@@ -1578,6 +1578,36 @@ def get_balance_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMark
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
+def _auto_route_available(amount_kopeks: int, source: str) -> bool:
+    """Доступна ли единая кнопка «Оплатить» для этой суммы и поверхности.
+
+    Импорт внутри функции: inline.py подтягивается очень рано, а роутер тянет
+    за собой модели и сервисы — на уровне модуля это дало бы цикл.
+    """
+    try:
+        from app.services.payment_gateway_router import payment_gateway_router
+
+        if not payment_gateway_router.is_enabled(source):
+            return False
+        return bool(payment_gateway_router.eligible_gateways(int(amount_kopeks or 0)))
+    except Exception:  # pragma: no cover - клавиатура не должна падать
+        return False
+
+
+def _build_auto_pay_button(
+    amount_kopeks: int,
+    language: str,
+    callback_data: str,
+) -> InlineKeyboardButton:
+    texts = get_texts(language)
+    return InlineKeyboardButton(
+        text=texts.t("PAYMENT_AUTO_PAY_BUTTON", "\U0001f4b3 Оплатить {amount}").format(
+            amount=settings.format_price(int(amount_kopeks or 0))
+        ),
+        callback_data=callback_data,
+    )
+
+
 def get_balance_topup_payment_methods_keyboard(
     amount_kopeks: int,
     language: str = DEFAULT_LANGUAGE,
@@ -1605,7 +1635,13 @@ def get_balance_topup_payment_methods_keyboard(
             ]
         )
 
-    if settings.is_platega_universal_enabled():
+    # Единая кнопка: шлюз выбирается роутером в момент формирования счёта.
+    # Регулярный СБП выше — это другой продукт, а не карточный шлюз.
+    if _auto_route_available(amount_kopeks, "balance_topup"):
+        keyboard.append(
+            [_build_auto_pay_button(amount_kopeks, language, _build_callback("auto"))]
+        )
+    elif settings.is_platega_universal_enabled():
         keyboard.append(
             [
                 InlineKeyboardButton(
@@ -1659,6 +1695,15 @@ def get_payment_methods_keyboard(
             return f"topup_amount|{method}|{amount_kopeks}"
         return f"topup_{method}"
 
+    # При включённом роутере три универсальных шлюза схлопываются в одну
+    # кнопку; остальные способы (Stars, крипта, прочие) остаются как есть.
+    auto_route = _auto_route_available(amount_kopeks, "subscription_cart")
+    if auto_route:
+        keyboard.append(
+            [_build_auto_pay_button(amount_kopeks, language, _build_callback("auto"))]
+        )
+        has_direct_payment_methods = True
+
     if settings.TELEGRAM_STARS_ENABLED:
         keyboard.append([
             InlineKeyboardButton(
@@ -1668,7 +1713,7 @@ def get_payment_methods_keyboard(
         ])
         has_direct_payment_methods = True
 
-    if settings.is_yookassa_enabled():
+    if settings.is_yookassa_enabled() and not auto_route:
         if settings.YOOKASSA_SBP_ENABLED:
             keyboard.append([
                 InlineKeyboardButton(
@@ -1708,7 +1753,7 @@ def get_payment_methods_keyboard(
         ])
         has_direct_payment_methods = True
 
-    if settings.is_wata_enabled():
+    if settings.is_wata_enabled() and not auto_route:
         keyboard.append([
             InlineKeyboardButton(
                 text=texts.t("PAYMENT_CARD_WATA", "💳 Банковская карта (WATA)"),
@@ -1730,6 +1775,7 @@ def get_payment_methods_keyboard(
         settings.is_platega_enabled()
         and settings.get_platega_active_methods()
         and not settings.is_platega_universal_enabled()
+        and not auto_route
     ):
         platega_name = settings.get_platega_display_name()
         keyboard.append([
@@ -1740,7 +1786,7 @@ def get_payment_methods_keyboard(
         ])
         has_direct_payment_methods = True
 
-    if settings.is_platega_universal_enabled():
+    if settings.is_platega_universal_enabled() and not auto_route:
         keyboard.append([
             InlineKeyboardButton(
                 text=texts.t(
@@ -3761,12 +3807,20 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
             callback_data=_build_callback("balance")
         )])
 
+    # Единая кнопка роутера: конкретный шлюз выбирается при создании счёта.
+    auto_amount_kopeks = price_kopeks if price_kopeks > 0 else int(round(amount_rub * 100))
+    auto_route = _auto_route_available(auto_amount_kopeks, "simple_pay")
+    if auto_route:
+        buttons.append(
+            [_build_auto_pay_button(auto_amount_kopeks, language, _build_callback("auto"))]
+        )
+
     # Telegram Stars
     if settings.TELEGRAM_STARS_ENABLED:
         buttons.append([InlineKeyboardButton(text="⭐️ Telegram Stars", callback_data=_build_callback("stars"))])
     
     # YooKassa (SBP or Card)
-    if settings.is_yookassa_enabled():
+    if settings.is_yookassa_enabled() and not auto_route:
         if settings.YOOKASSA_SBP_ENABLED:
             buttons.append([InlineKeyboardButton(text="🏦 СБП (YooKassa)", callback_data=_build_callback("yookassa_sbp"))])
         buttons.append([InlineKeyboardButton(text="💳 Карта (YooKassa)", callback_data=_build_callback("yookassa"))])
@@ -3776,11 +3830,12 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
         settings.is_platega_enabled()
         and settings.get_platega_active_methods()
         and not settings.is_platega_universal_enabled()
+        and not auto_route
     ):
         platega_name = settings.get_platega_display_name()
         buttons.append([InlineKeyboardButton(text="💳 СБП/Банковская карта", callback_data=_build_callback("platega"))])
 
-    if settings.is_platega_universal_enabled():
+    if settings.is_platega_universal_enabled() and not auto_route:
         buttons.append([InlineKeyboardButton(
             text=texts.t("PAYMENT_PLATEGA_UNIVERSAL", "💳 Карта / СБП / Крипто"),
             callback_data=_build_callback("platega_universal"),
@@ -3791,7 +3846,7 @@ def get_simple_payment_methods_keyboard(days: int = 0, amount_rub: float = 0, ba
         buttons.append([InlineKeyboardButton(text="🏦 СБП (PayPalych)", callback_data=_build_callback("pal24"))])
     
     # WATA
-    if settings.is_wata_enabled():
+    if settings.is_wata_enabled() and not auto_route:
         buttons.append([InlineKeyboardButton(text="💳 Карта (WATA)", callback_data=_build_callback("wata"))])
     
     # Mulenpay

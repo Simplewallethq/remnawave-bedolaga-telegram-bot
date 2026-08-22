@@ -710,6 +710,28 @@ async def get_payment_methods(
 
     methods: List[MiniAppPaymentMethod] = []
 
+    # Единая кнопка роутера вместо трёх универсальных шлюзов.
+    from app.services.payment_gateway_router import (
+        SOURCE_MINIAPP,
+        payment_gateway_router,
+    )
+
+    auto_route = payment_gateway_router.is_enabled(SOURCE_MINIAPP) and bool(
+        payment_gateway_router.enabled_gateways()
+    )
+    if auto_route:
+        methods.append(
+            MiniAppPaymentMethod(
+                id="auto",
+                icon="\U0001f4b3",
+                requires_amount=True,
+                currency="RUB",
+                min_amount_kopeks=payment_gateway_router.combined_min_kopeks(),
+                max_amount_kopeks=payment_gateway_router.combined_max_kopeks(),
+                integration_type=MiniAppPaymentIntegrationType.REDIRECT,
+            )
+        )
+
     if settings.TELEGRAM_STARS_ENABLED:
         stars_min_amount = _compute_stars_min_amount()
         methods.append(
@@ -724,7 +746,7 @@ async def get_payment_methods(
             )
         )
 
-    if settings.is_yookassa_enabled():
+    if settings.is_yookassa_enabled() and not auto_route:
         if getattr(settings, "YOOKASSA_SBP_ENABLED", False):
             methods.append(
                 MiniAppPaymentMethod(
@@ -802,7 +824,7 @@ async def get_payment_methods(
             )
         )
 
-    if settings.is_wata_enabled():
+    if settings.is_wata_enabled() and not auto_route:
         methods.append(
             MiniAppPaymentMethod(
                 id="wata",
@@ -815,7 +837,11 @@ async def get_payment_methods(
             )
         )
 
-    if settings.is_platega_enabled() and settings.get_platega_active_methods():
+    if (
+        settings.is_platega_enabled()
+        and settings.get_platega_active_methods()
+        and not auto_route
+    ):
         platega_methods = settings.get_platega_active_methods()
         definitions = settings.get_platega_method_definitions()
         options: List[MiniAppPaymentOption] = []
@@ -937,6 +963,47 @@ async def create_payment_link(
         payload.amount_rubles,
         payload.amount_kopeks,
     )
+
+    if method == "auto":
+        from app.services.payment_gateway_router import (
+            SOURCE_MINIAPP,
+            payment_gateway_router,
+        )
+
+        if not payment_gateway_router.is_enabled(SOURCE_MINIAPP):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, detail="Payment method is unavailable"
+            )
+        if amount_kopeks is None or amount_kopeks <= 0:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, detail="Amount must be positive"
+            )
+
+        routed = await payment_gateway_router.create_invoice(
+            db,
+            payment_service=PaymentService(),
+            user=user,
+            amount_kopeks=amount_kopeks,
+            source=SOURCE_MINIAPP,
+            description=settings.get_balance_payment_description(amount_kopeks),
+            language=user.language or settings.DEFAULT_LANGUAGE,
+        )
+        if not routed:
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY, detail="Failed to create payment"
+            )
+
+        return MiniAppPaymentCreateResponse(
+            method="auto",
+            payment_url=routed.payment_url,
+            amount_kopeks=amount_kopeks,
+            extra={
+                "gateway": routed.gateway,
+                "local_payment_id": routed.local_payment_id,
+                "payment_id": routed.external_id,
+                "routing_log_id": routed.routing_log_id,
+            },
+        )
 
     if method == "stars":
         if not settings.TELEGRAM_STARS_ENABLED:

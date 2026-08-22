@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.services.payment.common import _record_router_payment
 from app.database.models import PaymentMethod, TransactionType
 from app.localization.texts import get_texts
 from app.services.platega_service import PlategaService
@@ -928,6 +929,14 @@ class PlategaPaymentMixin:
         await db.commit()
         await db.refresh(user)
         topup_status = "🆕 Первое пополнение" if was_first_topup else "🔄 Пополнение"
+
+        await _record_router_payment(
+            db,
+            gateway="platega",
+            payment=payment,
+            transaction=transaction,
+            amount_kopeks=credit_amount_kopeks,
+        )
 
         try:
             from app.services.referral_service import process_referral_topup

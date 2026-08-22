@@ -12,6 +12,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+_MIN_EXPIRATION_MINUTES = 15
+
 
 class WataAPIError(RuntimeError):
     """Raised when the WATA API returns an error response."""
@@ -155,7 +157,10 @@ class WataService:
             expiration_minutes = int(ttl) if ttl is not None else None
 
         if expiration_minutes:
-            expiration_time = datetime.utcnow() + timedelta(minutes=expiration_minutes)
+            # WATA отвергает expirationDateTime <= now + 10 минут.
+            # 15 минут дают запас на расхождение часов и задержку запроса.
+            safe_minutes = max(int(expiration_minutes), _MIN_EXPIRATION_MINUTES)
+            expiration_time = datetime.utcnow() + timedelta(minutes=safe_minutes)
             payload["expirationDateTime"] = self._format_datetime(expiration_time)
 
         if allow_arbitrary_amount:

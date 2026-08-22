@@ -1813,5 +1813,12 @@
   "TV_PAIRING_USED": "ℹ️ <b>This code has already been used</b>\n\nThis TV is already connected, or a new code was generated for it.",
   "TV_PAIRING_NOT_FOUND": "❌ <b>Code not found</b>\n\nGet a new code on your TV and open the link again.",
   "TV_PAIRING_TOO_MANY_ATTEMPTS": "⏳ Too many attempts. Wait a minute and try again.",
-  "TV_PAIRING_ERROR": "⚠️ Could not connect the TV. Please try again in a minute."
+  "TV_PAIRING_ERROR": "⚠️ Could not connect the TV. Please try again in a minute.",
+  "PAYMENT_AUTO_PAY_BUTTON": "💳 Pay {amount}",
+  "PAYMENT_AUTO_PAY_BUTTON_WITH_AMOUNT": "💳 Pay – {amount}",
+  "PAYMENT_AUTO_INSTRUCTIONS": "<b>Payment — {amount}</b>\nCard / SBP / Crypto\n\n🔒 Secure payment\nUsually takes up to 10 seconds",
+  "PAYMENT_AUTO_UNAVAILABLE": "❌ Payments are temporarily unavailable. Please try later or contact support.",
+  "PAYMENT_AUTO_CREATE_ERROR": "❌ Could not create the invoice. Please try later or contact support.",
+  "PAYMENT_AUTO_AMOUNT_TOO_LOW": "Minimum payment amount: {amount}",
+  "PAYMENT_AUTO_AMOUNT_TOO_HIGH": "Maximum payment amount: {amount}"
 }

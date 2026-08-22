@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.services.payment.common import _record_router_payment
 from app.database.crud.subscription_event import record_subscription_purchase_event
 from app.database.models import PaymentMethod, TransactionType
 from app.services.subscription_auto_purchase_service import (
@@ -628,6 +629,16 @@ class YooKassaPaymentMixin:
                     payment.transaction_id = getattr(linked_payment, "transaction_id", transaction.id)
                     if hasattr(linked_payment, "transaction"):
                         payment.transaction = linked_payment.transaction
+
+            # Отметка в журнале роутинга: ставится после привязки транзакции,
+            # поэтому покрывает и пополнение баланса, и прямую покупку подписки.
+            await _record_router_payment(
+                db,
+                gateway="yookassa",
+                payment=payment,
+                transaction=transaction,
+                amount_kopeks=credit_amount_kopeks,
+            )
 
             critical_flow_completed = False
             processing_marked = False

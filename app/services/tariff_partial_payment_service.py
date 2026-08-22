@@ -31,8 +31,25 @@ _STARS_SNAPSHOT_KEY = "tariff_checkout_stars:{user_id}:{token}"
 _STARS_SNAPSHOT_TTL = 86400
 
 
+def get_auto_min_kopeks() -> int:
+    """Минимум для метода `auto` — МАКСИМУМ из минимумов доступных шлюзов.
+
+    Счёт должен быть оплатим любым шлюзом, который может выпасть. Если взять
+    минимум, пользователь, которому выпала WATA, получит отказ на сумме,
+    подходящей только для YooKassa.
+    """
+    try:
+        from app.services.payment_gateway_router import payment_gateway_router
+
+        return payment_gateway_router.combined_min_kopeks()
+    except Exception:  # pragma: no cover - не должно ломать построение клавиатуры
+        return 0
+
+
 def get_provider_min_kopeks(method: str) -> int:
     """Минимальная сумма счёта провайдера по коду метода из callback topup_amount|{method}|…"""
+    if method == "auto":
+        return get_auto_min_kopeks()
     mins = {
         "yookassa": settings.YOOKASSA_MIN_AMOUNT_KOPEKS,
         "yookassa_sbp": settings.YOOKASSA_MIN_AMOUNT_KOPEKS,

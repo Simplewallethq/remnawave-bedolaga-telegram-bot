@@ -321,7 +321,10 @@ def create_payment_router(bot: Bot, payment_service: PaymentService) -> APIRoute
 
         routes_registered = True
 
-    if settings.is_yookassa_enabled():
+    # Гейтим по «настроен», а не «включён»: роуты создаются один раз при
+    # старте, и выключение шлюза в рантайме иначе осиротит уже
+    # выставленные счета («оплачено, но не зачислено»).
+    if settings.is_yookassa_configured():
 
         @router.options(settings.YOOKASSA_WEBHOOK_PATH)
         async def yookassa_options() -> Response:
@@ -424,7 +427,7 @@ def create_payment_router(bot: Bot, payment_service: PaymentService) -> APIRoute
 
         routes_registered = True
 
-    if settings.is_wata_enabled():
+    if settings.is_wata_configured():
         wata_handler = WataWebhookHandler(payment_service)
 
         @router.options(settings.WATA_WEBHOOK_PATH)
@@ -601,7 +604,7 @@ def create_payment_router(bot: Bot, payment_service: PaymentService) -> APIRoute
 
         routes_registered = True
 
-    if settings.is_platega_enabled():
+    if settings.is_platega_configured():
 
         @router.get(settings.PLATEGA_WEBHOOK_PATH)
         async def platega_health() -> JSONResponse:

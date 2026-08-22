@@ -503,3 +503,58 @@ async def test_cryptobot_invalid_signature(monkeypatch: pytest.MonkeyPatch) -> N
     response = await route.endpoint(request)
 
     assert response.status_code == 401
+
+
+def _has_route(router, path: str, method: str = "POST") -> bool:
+    if router is None:
+        return False
+    for route in router.routes:
+        if getattr(route, "path", "") == path and method in getattr(route, "methods", set()):
+            return True
+    return False
+
+
+def test_routes_registered_when_configured_but_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Роуты гейтятся по «настроен», а не «включён».
+
+    Иначе выключение шлюза в рантайме осиротит уже выставленные счета:
+    вебхук придёт в 404, деньги спишутся, баланс не пополнится.
+    """
+    monkeypatch.setattr(settings, "YOOKASSA_ENABLED", False, raising=False)
+    monkeypatch.setattr(settings, "YOOKASSA_SHOP_ID", "shop", raising=False)
+    monkeypatch.setattr(settings, "YOOKASSA_SECRET_KEY", "key", raising=False)
+
+    monkeypatch.setattr(settings, "WATA_ENABLED", False, raising=False)
+    monkeypatch.setattr(settings, "WATA_ACCESS_TOKEN", "token", raising=False)
+    monkeypatch.setattr(settings, "WATA_TERMINAL_PUBLIC_ID", "terminal", raising=False)
+    monkeypatch.setattr(settings, "WATA_WEBHOOK_PATH", "/wata", raising=False)
+
+    monkeypatch.setattr(settings, "PLATEGA_ENABLED", False, raising=False)
+    monkeypatch.setattr(settings, "PLATEGA_MERCHANT_ID", "merchant", raising=False)
+    monkeypatch.setattr(settings, "PLATEGA_SECRET", "secret", raising=False)
+    monkeypatch.setattr(settings, "PLATEGA_WEBHOOK_PATH", "/platega", raising=False)
+
+    router = create_payment_router(DummyBot(), SimpleNamespace())
+
+    assert _has_route(router, "/yookassa")
+    assert _has_route(router, "/wata")
+    assert _has_route(router, "/platega")
+
+
+def test_routes_absent_when_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "YOOKASSA_SHOP_ID", None, raising=False)
+    monkeypatch.setattr(settings, "YOOKASSA_SECRET_KEY", None, raising=False)
+    monkeypatch.setattr(settings, "WATA_ACCESS_TOKEN", None, raising=False)
+    monkeypatch.setattr(settings, "WATA_TERMINAL_PUBLIC_ID", None, raising=False)
+    monkeypatch.setattr(settings, "WATA_WEBHOOK_PATH", "/wata", raising=False)
+    monkeypatch.setattr(settings, "PLATEGA_MERCHANT_ID", None, raising=False)
+    monkeypatch.setattr(settings, "PLATEGA_SECRET", None, raising=False)
+    monkeypatch.setattr(settings, "PLATEGA_WEBHOOK_PATH", "/platega", raising=False)
+
+    router = create_payment_router(DummyBot(), SimpleNamespace())
+
+    assert not _has_route(router, "/yookassa")
+    assert not _has_route(router, "/wata")
+    assert not _has_route(router, "/platega")

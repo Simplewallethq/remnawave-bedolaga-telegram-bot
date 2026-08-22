@@ -796,6 +796,34 @@ async def _create_topup_payment(
     ps = PaymentService()
     description = settings.get_balance_payment_description(amount_kopeks)
 
+    # Роутер обслуживает и card, и sbp: все три шлюза универсальны и сами
+    # показывают карты и СБП на своей странице. crypto не трогаем.
+    if kind in ("card", "sbp"):
+        from app.services.payment_gateway_router import (
+            SOURCE_CABINET,
+            payment_gateway_router,
+        )
+
+        if payment_gateway_router.is_enabled(SOURCE_CABINET):
+            routed = await payment_gateway_router.create_invoice(
+                db,
+                payment_service=ps,
+                user=user,
+                amount_kopeks=amount_kopeks,
+                source=SOURCE_CABINET,
+                description=description,
+                language=user.language or settings.DEFAULT_LANGUAGE,
+            )
+            if routed:
+                return {
+                    "paymentUrl": routed.payment_url,
+                    "amountKopeks": amount_kopeks,
+                    "gateway": routed.gateway,
+                }
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY, detail="Failed to create payment"
+            )
+
     if kind == "card":
         if settings.is_yookassa_enabled():
             result = await ps.create_yookassa_payment(

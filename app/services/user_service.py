@@ -21,7 +21,7 @@ from app.database.crud.subscription import (
 from app.database.models import (
     User, UserStatus, Subscription, Transaction, PromoCode, PromoCodeUse,
     ReferralEarning, SubscriptionServer, YooKassaPayment, BroadcastHistory,
-    CryptoBotPayment, PlategaPayment, SubscriptionConversion, UserMessage, WelcomeText,
+    CryptoBotPayment, PlategaPayment, WataPayment, SubscriptionConversion, UserMessage, WelcomeText,
     SentNotification, PromoGroup, MulenPayPayment, Pal24Payment, HeleketPayment,
     AdvertisingCampaign, AdvertisingCampaignRegistration, PaymentMethod,
     TransactionType
@@ -786,6 +786,27 @@ class UserService:
                     await db.flush()
             except Exception as e:
                 logger.error(f"❌ Ошибка удаления CryptoBot платежей: {e}")
+
+            try:
+                wata_result = await db.execute(
+                    select(WataPayment).where(WataPayment.user_id == user_id)
+                )
+                wata_payments = wata_result.scalars().all()
+
+                if wata_payments:
+                    logger.info(f"\U0001f504 Удаляем {len(wata_payments)} WATA платежей")
+                    await db.execute(
+                        update(WataPayment)
+                        .where(WataPayment.user_id == user_id)
+                        .values(transaction_id=None)
+                    )
+                    await db.flush()
+                    await db.execute(
+                        delete(WataPayment).where(WataPayment.user_id == user_id)
+                    )
+                    await db.flush()
+            except Exception as e:
+                logger.error(f"\u274c Ошибка удаления WATA платежей: {e}")
 
             try:
                 platega_result = await db.execute(

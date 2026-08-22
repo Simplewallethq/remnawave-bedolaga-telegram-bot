@@ -625,10 +625,42 @@ async def process_topup_amount(
                     )
                     return
 
+                # Роутер включён — «введите сумму» сразу превращается в счёт,
+                # без промежуточного экрана выбора способа оплаты.
+                from app.services.payment_gateway_router import (
+                    SOURCE_BALANCE,
+                    payment_gateway_router,
+                )
+
+                if payment_gateway_router.is_enabled(
+                    SOURCE_BALANCE
+                ) and payment_gateway_router.eligible_gateways(amount_kopeks):
+                    from .auto import process_auto_payment_amount
+
+                    created = await process_auto_payment_amount(
+                        message,
+                        db_user,
+                        db,
+                        amount_kopeks,
+                        state,
+                        source=SOURCE_BALANCE,
+                    )
+                    if created:
+                        return
+
             await _render_payment_methods_with_amount(message, db_user, amount_kopeks)
             return
 
-        if payment_method == "stars":
+        if payment_method == "auto":
+            from app.database.database import AsyncSessionLocal
+            from app.services.payment_gateway_router import SOURCE_BALANCE
+            from .auto import process_auto_payment_amount
+
+            async with AsyncSessionLocal() as db:
+                await process_auto_payment_amount(
+                    message, db_user, db, amount_kopeks, state, source=SOURCE_BALANCE
+                )
+        elif payment_method == "stars":
             from .stars import process_stars_payment_amount
             await process_stars_payment_amount(message, db_user, amount_kopeks, state)
         elif payment_method == "yookassa":
@@ -882,7 +914,24 @@ async def handle_topup_amount_callback(
         return
 
     try:
-        if method == "yookassa":
+        if method == "auto":
+            from app.database.database import AsyncSessionLocal
+            from app.services.payment_gateway_router import SOURCE_BALANCE
+            from .auto import process_auto_payment_amount
+
+            async with AsyncSessionLocal() as db:
+                created = await process_auto_payment_amount(
+                    callback.message,
+                    db_user,
+                    db,
+                    amount_kopeks,
+                    state,
+                    source=SOURCE_BALANCE,
+                )
+            if not created:
+                await callback.answer()
+                return
+        elif method == "yookassa":
             from app.database.database import AsyncSessionLocal
             from .yookassa import process_yookassa_payment_amount
             async with AsyncSessionLocal() as db:

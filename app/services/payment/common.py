@@ -166,3 +166,33 @@ class PaymentCommonMixin:
         except Exception as error:
             logger.error("Ошибка обработки платежа %s: %s", payment_id, error)
             return False
+
+
+async def _record_router_payment(
+    db,
+    *,
+    gateway: str,
+    payment,
+    transaction=None,
+    amount_kopeks=None,
+) -> None:
+    """Отмечает факт оплаты в журнале маршрутизации.
+
+    Вызывается из finalize каждого шлюза ПОСЛЕ зачисления баланса и никогда
+    не бросает исключений: сбой журнала не должен ломать денежный путь.
+    """
+    try:
+        from app.services.payment_gateway_router import payment_gateway_router
+
+        await payment_gateway_router.record_payment(
+            db,
+            gateway=gateway,
+            local_payment_id=getattr(payment, "id", None),
+            transaction_id=getattr(transaction, "id", None),
+            amount_kopeks=amount_kopeks,
+            paid_at=getattr(payment, "paid_at", None),
+        )
+    except Exception as error:  # pragma: no cover - журнал не блокирует оплату
+        logger.warning(
+            "Не удалось записать оплату в журнал роутинга (%s): %s", gateway, error
+        )

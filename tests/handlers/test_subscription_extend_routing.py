@@ -375,6 +375,7 @@ async def test_tariff_platega_checkout_preserves_purchase_context(monkeypatch):
     state.update_data.assert_awaited_once_with(
         platega_pending_amount=38800,
         platega_back_callback="tariff_select:solo",
+        invoice_back_callback="tariff_select:solo",
         tariff_checkout_summary={
             "total_kopeks": 39000,
             "balance_kopeks": 200,

@@ -288,6 +288,7 @@ class Settings(BaseSettings):
     YOOKASSA_SECRET_KEY: Optional[str] = None
     YOOKASSA_RETURN_URL: Optional[str] = None
     YOOKASSA_DEFAULT_RECEIPT_EMAIL: Optional[str] = None
+    YOOKASSA_SEND_RECEIPT: bool = True
     YOOKASSA_VAT_CODE: int = 1
     YOOKASSA_SBP_ENABLED: bool = False 
     YOOKASSA_PAYMENT_MODE: str = "full_payment"
@@ -424,6 +425,19 @@ class Settings(BaseSettings):
     WATA_WEBHOOK_PORT: int = 8085
     WATA_PUBLIC_KEY_URL: Optional[str] = None
     WATA_PUBLIC_KEY_CACHE_SECONDS: int = 3600
+
+    # --- Роутер платежей: единая кнопка «Оплатить» со взвешенным выбором шлюза ---
+    # ВАЖНО: эти ключи НЕ должны попадать в .env — иначе BotConfigurationService
+    # перестанет их применять (ENV_OVERRIDE_KEYS) и рубильник «замёрзнет».
+    PAYMENT_ROUTER_ENABLED: bool = False
+    PAYMENT_ROUTER_SURFACES: str = (
+        "balance_topup,subscription_cart,tariff_partial,simple_pay,cabinet,miniapp"
+    )
+    PAYMENT_ROUTER_WEIGHT_PLATEGA: int = 1
+    PAYMENT_ROUTER_WEIGHT_WATA: int = 0
+    PAYMENT_ROUTER_WEIGHT_YOOKASSA: int = 0
+    PAYMENT_ROUTER_FALLBACK_ENABLED: bool = True
+    PAYMENT_ROUTER_LOG_ENABLED: bool = True
 
     # CloudPayments
     CLOUDPAYMENTS_ENABLED: bool = False
@@ -1420,6 +1434,79 @@ class Settings(BaseSettings):
             and self.WATA_ACCESS_TOKEN is not None
             and self.WATA_TERMINAL_PUBLIC_ID is not None
         )
+
+    # --- Наличие учётных данных, независимо от флага ENABLED ---
+    # Вебхук-роуты регистрируются один раз при старте, поэтому гейтить их надо
+    # по «настроен», а не по «включён»: иначе выключение шлюза в рантайме
+    # осиротит уже выставленные счета («оплачено, но не зачислено»).
+
+    def is_platega_configured(self) -> bool:
+        return (
+            self.PLATEGA_MERCHANT_ID is not None
+            and self.PLATEGA_SECRET is not None
+        )
+
+    def is_wata_configured(self) -> bool:
+        return (
+            self.WATA_ACCESS_TOKEN is not None
+            and self.WATA_TERMINAL_PUBLIC_ID is not None
+        )
+
+    def is_yookassa_configured(self) -> bool:
+        return (
+            self.YOOKASSA_SHOP_ID is not None
+            and self.YOOKASSA_SECRET_KEY is not None
+        )
+
+    def is_yookassa_receipt_required(self) -> bool:
+        """Нужно ли собирать объект чека 54-ФЗ при создании платежа.
+
+        Чек обязателен только если фискализация магазина идёт через ЮKassa.
+        Если нет — receipt не передаётся вовсе, и контакт покупателя не нужен.
+        """
+        return bool(self.YOOKASSA_SEND_RECEIPT)
+
+    def is_yookassa_receipt_satisfiable(self) -> bool:
+        """Сможем ли мы вообще создать платёж YooKassa.
+
+        ЮKassa доставляет чек только на e-mail и сама его у покупателя не
+        запрашивает, поэтому без адреса по умолчанию платёж с чеком не создать.
+        """
+        if not self.is_yookassa_receipt_required():
+            return True
+        return bool((self.YOOKASSA_DEFAULT_RECEIPT_EMAIL or "").strip())
+
+    # --- Роутер платежей ---
+
+    def is_payment_router_enabled(self) -> bool:
+        return bool(self.PAYMENT_ROUTER_ENABLED)
+
+    def get_payment_router_surfaces(self) -> set:
+        raw = self.PAYMENT_ROUTER_SURFACES or ""
+        return {part.strip() for part in raw.split(",") if part.strip()}
+
+    def is_payment_router_surface_enabled(self, surface: str) -> bool:
+        if not self.is_payment_router_enabled():
+            return False
+        return surface in self.get_payment_router_surfaces()
+
+    def get_payment_router_weights(self) -> dict:
+        raw = {
+            "platega": self.PAYMENT_ROUTER_WEIGHT_PLATEGA,
+            "wata": self.PAYMENT_ROUTER_WEIGHT_WATA,
+            "yookassa": self.PAYMENT_ROUTER_WEIGHT_YOOKASSA,
+        }
+        weights = {}
+        for gateway, value in raw.items():
+            try:
+                weight = int(value)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Некорректный вес роутера для %s: %s", gateway, value
+                )
+                weight = 0
+            weights[gateway] = max(0, weight)
+        return weights
 
     def is_cloudpayments_enabled(self) -> bool:
         return (

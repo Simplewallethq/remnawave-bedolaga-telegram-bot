@@ -3779,6 +3779,37 @@ async def handle_payment_selection(
             logger.error(f"Error creating Platega payment: {e}")
             await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
 
+    elif method == "auto":
+        from app.services.payment_gateway_router import (
+            SOURCE_SIMPLE,
+            payment_gateway_router,
+        )
+        from app.handlers.balance.auto import process_auto_payment_amount
+
+        back_callback = f"topup_days:{value}" if prefix == "pay" else "subscription"
+        await state.update_data(
+            invoice_back_callback=back_callback,
+            platega_back_callback=back_callback,
+        )
+
+        try:
+            created = await process_auto_payment_amount(
+                callback.message,
+                db_user,
+                db,
+                amount_kopeks,
+                state,
+                source=SOURCE_SIMPLE,
+            )
+        except Exception as e:
+            logger.error(f"Error creating routed payment: {e}")
+            created = False
+
+        if not created:
+            await callback.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+        else:
+            await callback.answer()
+
     elif method == "platega_universal":
         if not settings.is_platega_universal_enabled():
             await callback.answer("❌ Platega временно недоступна", show_alert=True)

@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.services.payment.common import _record_router_payment
 from app.database.models import PaymentMethod, TransactionType
 from app.services.subscription_auto_purchase_service import (
     auto_purchase_saved_cart_after_topup,
@@ -514,6 +515,14 @@ class WataPaymentMixin:
         user.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(user)
+
+        await _record_router_payment(
+            db,
+            gateway="wata",
+            payment=payment,
+            transaction=transaction,
+            amount_kopeks=credit_amount_kopeks,
+        )
 
         promo_group = user.get_primary_promo_group()
         subscription = getattr(user, "subscription", None)

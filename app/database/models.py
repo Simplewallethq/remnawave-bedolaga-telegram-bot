@@ -1287,6 +1287,76 @@ class SubscriptionPlanPrice(Base):
     plan = relationship("SubscriptionPlan", back_populates="prices")
 
 
+class PaymentRoutingLog(Base):
+    """Журнал маршрутизации счетов между универсальными шлюзами.
+
+    Одна строка = одно нажатие «Оплатить», независимо от того, удалось ли
+    выставить счёт. Источник правды для конверсии по шлюзам: знаменатель —
+    requested_gateway, числитель — status == "paid".
+
+    requested_gateway и gateway различаются, когда сработал фолбэк: без этой
+    пары конверсию назначенного шлюза посчитать нельзя.
+    """
+
+    __tablename__ = "payment_routing_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # SET NULL, а не CASCADE: удаление пользователя не должно стирать историю
+    # платежей, но и не должно падать на внешнем ключе.
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+    source = Column(String(32), nullable=False, index=True)
+    amount_kopeks = Column(Integer, nullable=False)
+
+    requested_gateway = Column(String(20), nullable=False, index=True)
+    gateway = Column(String(20), nullable=True, index=True)
+    status = Column(String(16), nullable=False, default="pending")
+    fallback_used = Column(Boolean, nullable=False, default=False)
+
+    weights_json = Column(JSON, nullable=True)
+    attempts_json = Column(JSON, nullable=True)
+
+    local_payment_id = Column(Integer, nullable=True)
+    external_id = Column(String(255), nullable=True, index=True)
+    payment_url = Column(Text, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+
+    transaction_id = Column(
+        Integer, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True
+    )
+    paid_at = Column(DateTime, nullable=True)
+    paid_amount_kopeks = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime, default=func.now(), index=True)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("ix_payment_routing_log_gw_created", "gateway", "created_at"),
+        Index("ix_payment_routing_log_user_created", "user_id", "created_at"),
+        Index("ix_payment_routing_log_lookup", "gateway", "local_payment_id"),
+    )
+
+    @property
+    def amount_rubles(self) -> float:
+        return self.amount_kopeks / 100
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            "<PaymentRoutingLog(id={0}, requested={1}, gateway={2}, "
+            "amount={3}\u20bd, status={4})>".format(
+                self.id,
+                self.requested_gateway,
+                self.gateway,
+                self.amount_rubles,
+                self.status,
+            )
+        )
+
+
 class Transaction(Base):
     __tablename__ = "transactions"
     

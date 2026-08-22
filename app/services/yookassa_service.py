@@ -1,6 +1,7 @@
 import uuid
 import logging
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, Any, List
 
 from yookassa import Configuration, Payment as YooKassaPayment
@@ -10,6 +11,76 @@ from yookassa.domain.common.confirmation_type import ConfirmationType
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# SDK ЮKassa синхронный и по умолчанию БЕЗ таймаута сокета. На дефолтном
+# executor'е зависший эндпоинт выел бы общий пул потоков и подвесил бота
+# целиком, поэтому: (1) навязываем таймаут запросам SDK, (2) уводим вызовы
+# в отдельный ограниченный пул, (3) сверху страхуемся asyncio-таймаутом.
+
+_YOOKASSA_EXECUTOR = ThreadPoolExecutor(
+    max_workers=max(1, int(getattr(settings, "YOOKASSA_MAX_CONCURRENT_REQUESTS", 4))),
+    thread_name_prefix="yookassa-sdk",
+)
+
+_YOOKASSA_CALL_TIMEOUT = 30
+
+
+def _patch_yookassa_timeout() -> None:
+    """Навязывает таймаут HTTP-запросам SDK.
+
+    Патчим get_session, а не execute: execute не принимает timeout, а таймаут
+    нужен именно на уровне requests.Session — иначе зависший эндпоинт держит
+    поток бесконечно.
+    """
+    try:
+        from yookassa.client import ApiClient
+    except Exception as error:  # pragma: no cover - зависит от версии SDK
+        logger.warning("Не удалось пропатчить таймаут YooKassa SDK: %s", error)
+        return
+
+    if getattr(ApiClient, "_bedolaga_timeout_patched", False):
+        return
+
+    if not hasattr(ApiClient, "get_session"):  # pragma: no cover
+        logger.warning("YooKassa SDK: get_session отсутствует, таймаут не навязан")
+        return
+
+    connect_timeout = float(getattr(settings, "YOOKASSA_HTTP_CONNECT_TIMEOUT", 5))
+    read_timeout = float(getattr(settings, "YOOKASSA_HTTP_READ_TIMEOUT", 20))
+    original_get_session = ApiClient.get_session
+
+    def get_session_with_timeout(self, *args, **kwargs):
+        session = original_get_session(self, *args, **kwargs)
+        if session is not None and not getattr(session, "_bedolaga_timeout", False):
+            original_request = session.request
+
+            def request_with_timeout(method, url, **request_kwargs):
+                request_kwargs.setdefault("timeout", (connect_timeout, read_timeout))
+                return original_request(method, url, **request_kwargs)
+
+            session.request = request_with_timeout
+            session._bedolaga_timeout = True
+        return session
+
+    ApiClient.get_session = get_session_with_timeout
+    ApiClient._bedolaga_timeout_patched = True
+    logger.info(
+        "YooKassa SDK: таймауты запросов %s/%s сек", connect_timeout, read_timeout
+    )
+
+
+_patch_yookassa_timeout()
+
+
+async def _run_yookassa_call(func):
+    """Выполняет синхронный вызов SDK в отдельном пуле под общим таймаутом."""
+    loop = asyncio.get_running_loop()
+    return await asyncio.wait_for(
+        loop.run_in_executor(_YOOKASSA_EXECUTOR, func),
+        timeout=_YOOKASSA_CALL_TIMEOUT,
+    )
+
 
 
 class YooKassaService:
@@ -78,20 +149,27 @@ class YooKassaService:
             logger.error("YooKassa не сконфигурирован. Невозможно создать платеж.")
             return None
 
+        # Чек 54-ФЗ обязателен, только если фискализация магазина идёт через
+        # ЮKassa. Если нет — receipt не отправляем вовсе, и контакт не нужен.
+        # ЮKassa сама email у покупателя не спрашивает и доставляет чек только
+        # на почту, поэтому «пусть спросит на своей странице» не работает.
+        send_receipt = settings.is_yookassa_receipt_required()
+
         customer_contact_for_receipt = {}
-        if receipt_email:
-            customer_contact_for_receipt["email"] = receipt_email
-        elif receipt_phone:
-            customer_contact_for_receipt["phone"] = receipt_phone
-        elif hasattr(settings, 'YOOKASSA_DEFAULT_RECEIPT_EMAIL') and settings.YOOKASSA_DEFAULT_RECEIPT_EMAIL:
-            customer_contact_for_receipt["email"] = settings.YOOKASSA_DEFAULT_RECEIPT_EMAIL
-        else:
-            logger.error(
-                "КРИТИЧНО: Не предоставлен email/телефон для чека YooKassa и YOOKASSA_DEFAULT_RECEIPT_EMAIL не установлен.")
-            return {
-                "error": True,
-                "internal_message": "Отсутствуют контактные данные для чека YooKassa и не настроен email по умолчанию."
-            }
+        if send_receipt:
+            if receipt_email:
+                customer_contact_for_receipt["email"] = receipt_email
+            elif receipt_phone:
+                customer_contact_for_receipt["phone"] = receipt_phone
+            elif getattr(settings, 'YOOKASSA_DEFAULT_RECEIPT_EMAIL', None):
+                customer_contact_for_receipt["email"] = settings.YOOKASSA_DEFAULT_RECEIPT_EMAIL
+            else:
+                logger.error(
+                    "КРИТИЧНО: Не предоставлен email/телефон для чека YooKassa и YOOKASSA_DEFAULT_RECEIPT_EMAIL не установлен.")
+                return {
+                    "error": True,
+                    "internal_message": "Отсутствуют контактные данные для чека YooKassa и не настроен email по умолчанию."
+                }
 
         try:
             builder = PaymentRequestBuilder()
@@ -124,7 +202,8 @@ class YooKassaService:
                 "items": receipt_items_list
             }
 
-            builder.set_receipt(receipt_data_dict)
+            if send_receipt:
+                builder.set_receipt(receipt_data_dict)
 
             idempotence_key = str(uuid.uuid4())
             payment_request = builder.build()
@@ -133,9 +212,7 @@ class YooKassaService:
                 f"Создание платежа YooKassa (Idempotence-Key: {idempotence_key}). "
                 f"Сумма: {amount} {currency}. Метаданные: {metadata}. Чек: {receipt_data_dict}")
 
-            loop = asyncio.get_running_loop()
-            response = await loop.run_in_executor(
-                None, lambda: YooKassaPayment.create(payment_request, idempotence_key))
+            response = await _run_yookassa_call(lambda: YooKassaPayment.create(payment_request, idempotence_key))
 
             logger.info(
                 f"Ответ YooKassa Payment.create: ID={response.id}, Status={response.status}, Paid={response.paid}")
@@ -172,20 +249,27 @@ class YooKassaService:
             logger.error("YooKassa не сконфигурирован. Невозможно создать платеж через СБП.")
             return None
 
+        # Чек 54-ФЗ обязателен, только если фискализация магазина идёт через
+        # ЮKassa. Если нет — receipt не отправляем вовсе, и контакт не нужен.
+        # ЮKassa сама email у покупателя не спрашивает и доставляет чек только
+        # на почту, поэтому «пусть спросит на своей странице» не работает.
+        send_receipt = settings.is_yookassa_receipt_required()
+
         customer_contact_for_receipt = {}
-        if receipt_email:
-            customer_contact_for_receipt["email"] = receipt_email
-        elif receipt_phone:
-            customer_contact_for_receipt["phone"] = receipt_phone
-        elif hasattr(settings, 'YOOKASSA_DEFAULT_RECEIPT_EMAIL') and settings.YOOKASSA_DEFAULT_RECEIPT_EMAIL:
-            customer_contact_for_receipt["email"] = settings.YOOKASSA_DEFAULT_RECEIPT_EMAIL
-        else:
-            logger.error(
-                "КРИТИЧНО: Не предоставлен email/телефон для чека YooKassa и YOOKASSA_DEFAULT_RECEIPT_EMAIL не установлен.")
-            return {
-                "error": True,
-                "internal_message": "Отсутствуют контактные данные для чека YooKassa и не настроен email по умолчанию."
-            }
+        if send_receipt:
+            if receipt_email:
+                customer_contact_for_receipt["email"] = receipt_email
+            elif receipt_phone:
+                customer_contact_for_receipt["phone"] = receipt_phone
+            elif getattr(settings, 'YOOKASSA_DEFAULT_RECEIPT_EMAIL', None):
+                customer_contact_for_receipt["email"] = settings.YOOKASSA_DEFAULT_RECEIPT_EMAIL
+            else:
+                logger.error(
+                    "КРИТИЧНО: Не предоставлен email/телефон для чека YooKassa и YOOKASSA_DEFAULT_RECEIPT_EMAIL не установлен.")
+                return {
+                    "error": True,
+                    "internal_message": "Отсутствуют контактные данные для чека YooKassa и не настроен email по умолчанию."
+                }
 
         try:
             # Создаем один платеж с подтверждением через QR
@@ -230,7 +314,8 @@ class YooKassaService:
                 "items": receipt_items_list
             }
 
-            builder.set_receipt(receipt_data_dict)
+            if send_receipt:
+                builder.set_receipt(receipt_data_dict)
 
             idempotence_key = str(uuid.uuid4())
 
@@ -240,9 +325,7 @@ class YooKassaService:
                 f"Создание платежа YooKassa СБП с подтверждением 'qr' (Idempotence-Key: {idempotence_key}). "
                 f"Сумма: {amount} {currency}. Метаданные: {metadata}. Чек: {receipt_data_dict}")
 
-            loop = asyncio.get_running_loop()
-            response = await loop.run_in_executor(
-                None, lambda: YooKassaPayment.create(payment_request, idempotence_key))
+            response = await _run_yookassa_call(lambda: YooKassaPayment.create(payment_request, idempotence_key))
 
             logger.info(
                 f"Ответ YooKassa Payment.create (СБП, qr): ID={response.id}, Status={response.status}, Paid={response.paid}")
@@ -323,7 +406,8 @@ class YooKassaService:
                 "items": receipt_items_list
             }
 
-            builder.set_receipt(receipt_data_dict)
+            if settings.is_yookassa_receipt_required():
+                builder.set_receipt(receipt_data_dict)
 
             idempotence_key = str(uuid.uuid4())
 
@@ -333,9 +417,7 @@ class YooKassaService:
                 f"Создание платежа YooKassa СБП с подтверждением '{confirmation_type}' (Idempotence-Key: {idempotence_key}). "
                 f"Сумма: {amount} {currency}. Метаданные: {metadata}. Чек: {receipt_data_dict}")
 
-            loop = asyncio.get_running_loop()
-            response = await loop.run_in_executor(
-                None, lambda: YooKassaPayment.create(payment_request, idempotence_key))
+            response = await _run_yookassa_call(lambda: YooKassaPayment.create(payment_request, idempotence_key))
 
             logger.info(
                 f"Ответ YooKassa Payment.create (СБП, {confirmation_type}): ID={response.id}, Status={response.status}, Paid={response.paid}")
@@ -378,9 +460,7 @@ class YooKassaService:
         try:
             logger.info(f"Получение информации о платеже YooKassa ID: {payment_id_in_yookassa}")
 
-            loop = asyncio.get_running_loop()
-            payment_info_yk = await loop.run_in_executor(
-                None, lambda: YooKassaPayment.find_one(payment_id_in_yookassa))
+            payment_info_yk = await _run_yookassa_call(lambda: YooKassaPayment.find_one(payment_id_in_yookassa))
 
             if payment_info_yk:
                 logger.info(

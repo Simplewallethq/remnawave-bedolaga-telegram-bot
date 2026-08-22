@@ -220,6 +220,16 @@ def _build_list_keyboard(
 
         buttons.append(navigation_row)
 
+    if settings.PAYMENT_ROUTER_LOG_ENABLED:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text="🎲 Статистика роутинга",
+                    callback_data="admin_payments_routing:24h",
+                )
+            ]
+        )
+
     buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -602,11 +612,133 @@ async def manual_check_payment(
     await callback.answer(message, show_alert=True)
 
 
+_ROUTING_WINDOWS = {"24h": 24, "7d": 24 * 7, "30d": 24 * 30}
+_ROUTING_WINDOW_TITLES = {"24h": "24 часа", "7d": "7 дней", "30d": "30 дней"}
+
+
+def _percent(part: int, whole: int) -> str:
+    if not whole:
+        return "—"
+    return f"{part / whole * 100:.1f}%"
+
+
+@admin_required
+@error_handler
+async def show_routing_stats(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+) -> None:
+    """Конверсия по шлюзам из журнала маршрутизации.
+
+    Знаменатель — назначенный шлюз (requested), а не фактический: при фолбэке
+    счёт выставит другой шлюз, и по факту конверсия назначения исказилась бы.
+    """
+    from datetime import datetime, timedelta
+
+    from app.database.crud.payment_routing import (
+        backfill_routing_paid_flags,
+        routing_stats,
+    )
+
+    _, _, window = callback.data.partition(":")
+    window = window or "24h"
+    hours = _ROUTING_WINDOWS.get(window, 24)
+    since = datetime.utcnow() - timedelta(hours=hours)
+
+    # Догоняем пропущенные отметки оплаты перед показом — расхождения
+    # самозалечиваются, отдельный фоновый цикл не нужен.
+    try:
+        await backfill_routing_paid_flags(db, since=since)
+    except Exception:  # pragma: no cover - статистика не критична
+        pass
+
+    rows = await routing_stats(db, since=since)
+
+    lines = [
+        f"🎲 <b>Роутинг платежей — {_ROUTING_WINDOW_TITLES.get(window, window)}</b>",
+        "",
+    ]
+
+    if settings.is_payment_router_enabled():
+        weights = settings.get_payment_router_weights()
+        lines.append(
+            "Веса: " + ", ".join(f"{g}={w}" for g, w in weights.items())
+        )
+    else:
+        lines.append("⚠️ Роутер выключен")
+    lines.append("")
+
+    total_requested = sum(row["requested"] for row in rows)
+    total_paid = sum(row["paid"] for row in rows)
+
+    if not rows:
+        lines.append("Данных за период нет.")
+    else:
+        for row in rows:
+            lines.append(f"<b>{html.escape(row['gateway'])}</b>")
+            lines.append(
+                f"  назначено {row['requested']} · выставлено {row['issued']} · "
+                f"оплачено {row['paid']}"
+            )
+            lines.append(
+                f"  конверсия {_percent(row['paid'], row['requested'])} · "
+                f"уник. юзеров {row['users']}"
+            )
+            if row["fallbacks"]:
+                lines.append(f"  ⚠️ фолбэков: {row['fallbacks']}")
+            lines.append(f"  сумма оплат: {settings.format_price(row['paid_kopeks'])}")
+            lines.append("")
+
+        lines.append(
+            f"<b>Итого конверсия по счетам: {_percent(total_paid, total_requested)}</b> "
+            f"({total_paid} из {total_requested})"
+        )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=("· 24ч ·" if window == "24h" else "24ч"),
+                    callback_data="admin_payments_routing:24h",
+                ),
+                InlineKeyboardButton(
+                    text=("· 7д ·" if window == "7d" else "7д"),
+                    callback_data="admin_payments_routing:7d",
+                ),
+                InlineKeyboardButton(
+                    text=("· 30д ·" if window == "30d" else "30д"),
+                    callback_data="admin_payments_routing:30d",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=get_texts(db_user.language).BACK,
+                    callback_data="admin_payments",
+                )
+            ],
+        ]
+    )
+
+    try:
+        await callback.message.edit_text(
+            "\n".join(lines), reply_markup=keyboard, parse_mode="HTML"
+        )
+    except Exception:
+        await callback.message.answer(
+            "\n".join(lines), reply_markup=keyboard, parse_mode="HTML"
+        )
+    await callback.answer()
+
+
 def register_handlers(dp: Dispatcher) -> None:
     dp.callback_query.register(manual_check_payment, F.data.startswith("admin_payment_check_"))
     dp.callback_query.register(
         show_payment_details,
         F.data.startswith("admin_payment_") & ~F.data.startswith("admin_payment_check_"),
+    )
+    dp.callback_query.register(
+        show_routing_stats, F.data.startswith("admin_payments_routing")
     )
     dp.callback_query.register(show_payments_overview, F.data.startswith("admin_payments_page_"))
     dp.callback_query.register(show_payments_overview, F.data == "admin_payments")

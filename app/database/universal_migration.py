@@ -4827,6 +4827,116 @@ async def create_button_click_logs_table() -> bool:
         return False
 
 
+async def create_payment_routing_log_table() -> bool:
+    """Создаёт журнал маршрутизации счетов между универсальными шлюзами."""
+    table_exists = await check_table_exists("payment_routing_log")
+    if table_exists:
+        logger.info("ℹ️ Таблица payment_routing_log уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == "sqlite":
+                create_table_sql = """
+                CREATE TABLE payment_routing_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+                    source VARCHAR(32) NOT NULL,
+                    amount_kopeks INTEGER NOT NULL,
+                    requested_gateway VARCHAR(20) NOT NULL,
+                    gateway VARCHAR(20) NULL,
+                    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                    fallback_used BOOLEAN NOT NULL DEFAULT 0,
+                    weights_json TEXT NULL,
+                    attempts_json TEXT NULL,
+                    local_payment_id INTEGER NULL,
+                    external_id VARCHAR(255) NULL,
+                    payment_url TEXT NULL,
+                    expires_at DATETIME NULL,
+                    transaction_id INTEGER NULL REFERENCES transactions(id) ON DELETE SET NULL,
+                    paid_at DATETIME NULL,
+                    paid_amount_kopeks INTEGER NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            elif db_type == "postgresql":
+                create_table_sql = """
+                CREATE TABLE payment_routing_log (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+                    source VARCHAR(32) NOT NULL,
+                    amount_kopeks INTEGER NOT NULL,
+                    requested_gateway VARCHAR(20) NOT NULL,
+                    gateway VARCHAR(20) NULL,
+                    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                    fallback_used BOOLEAN NOT NULL DEFAULT FALSE,
+                    weights_json JSONB NULL,
+                    attempts_json JSONB NULL,
+                    local_payment_id INTEGER NULL,
+                    external_id VARCHAR(255) NULL,
+                    payment_url TEXT NULL,
+                    expires_at TIMESTAMP NULL,
+                    transaction_id INTEGER NULL REFERENCES transactions(id) ON DELETE SET NULL,
+                    paid_at TIMESTAMP NULL,
+                    paid_amount_kopeks INTEGER NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+                """
+            else:
+                create_table_sql = """
+                CREATE TABLE payment_routing_log (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NULL,
+                    source VARCHAR(32) NOT NULL,
+                    amount_kopeks INT NOT NULL,
+                    requested_gateway VARCHAR(20) NOT NULL,
+                    gateway VARCHAR(20) NULL,
+                    status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                    fallback_used BOOLEAN NOT NULL DEFAULT FALSE,
+                    weights_json JSON NULL,
+                    attempts_json JSON NULL,
+                    local_payment_id INT NULL,
+                    external_id VARCHAR(255) NULL,
+                    payment_url TEXT NULL,
+                    expires_at TIMESTAMP NULL,
+                    transaction_id INT NULL,
+                    paid_at TIMESTAMP NULL,
+                    paid_amount_kopeks INT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB
+                """
+
+            await conn.execute(text(create_table_sql))
+
+            index_statements = [
+                "CREATE INDEX ix_payment_routing_log_user_id ON payment_routing_log(user_id)",
+                "CREATE INDEX ix_payment_routing_log_source ON payment_routing_log(source)",
+                "CREATE INDEX ix_payment_routing_log_requested_gateway ON payment_routing_log(requested_gateway)",
+                "CREATE INDEX ix_payment_routing_log_gateway ON payment_routing_log(gateway)",
+                "CREATE INDEX ix_payment_routing_log_external_id ON payment_routing_log(external_id)",
+                "CREATE INDEX ix_payment_routing_log_created_at ON payment_routing_log(created_at)",
+                "CREATE INDEX ix_payment_routing_log_gw_created ON payment_routing_log(gateway, created_at)",
+                "CREATE INDEX ix_payment_routing_log_user_created ON payment_routing_log(user_id, created_at)",
+                "CREATE INDEX ix_payment_routing_log_lookup ON payment_routing_log(gateway, local_payment_id)",
+            ]
+            for stmt in index_statements:
+                await conn.execute(text(stmt))
+
+            logger.info("✅ Таблица payment_routing_log создана")
+            return True
+
+    except Exception as error:
+        logger.error(f"❌ Ошибка создания таблицы payment_routing_log: {error}")
+        return False
+
+
 async def create_web_api_tokens_table() -> bool:
     table_exists = await check_table_exists("web_api_tokens")
     if table_exists:
@@ -7741,6 +7851,13 @@ async def run_universal_migration():
             logger.info("✅ Таблица button_click_logs готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей button_click_logs")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ PAYMENT_ROUTING_LOG ===")
+        payment_routing_log_ready = await create_payment_routing_log_table()
+        if payment_routing_log_ready:
+            logger.info("✅ Таблица payment_routing_log готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей payment_routing_log")
 
         logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ ДЛЯ ТРИАЛЬНЫХ СКВАДОВ ===")
         trial_column_ready = await add_server_trial_flag_column()

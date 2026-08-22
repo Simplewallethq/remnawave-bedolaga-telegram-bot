@@ -64,6 +64,7 @@ CATEGORY_GROUP_METADATA: Dict[str, Dict[str, object]] = {
         "description": "YooKassa, CryptoBot, Heleket, CloudPayments, MulenPay, PAL24, Wata, Platega, Tribute и Telegram Stars.",
         "icon": "💳",
         "categories": (
+            "PAYMENT_ROUTER",
             "PAYMENT",
             "PAYMENT_VERIFICATION",
             "YOOKASSA",
@@ -258,11 +259,21 @@ def _get_group_status(group_key: str) -> Tuple[str, str]:
             "CloudPayments": settings.is_cloudpayments_enabled(),
             "MulenPay": settings.is_mulenpay_enabled(),
             "PAL24": settings.is_pal24_enabled(),
+            "WATA": settings.is_wata_enabled(),
+            "Heleket": settings.is_heleket_service_enabled(),
             "Tribute": settings.TRIBUTE_ENABLED,
             "Stars": settings.TELEGRAM_STARS_ENABLED,
         }
         active = sum(1 for value in payment_statuses.values() if value)
         total = len(payment_statuses)
+
+        if settings.is_payment_router_enabled():
+            weights = settings.get_payment_router_weights()
+            summary = "/".join(
+                f"{gateway}={weight}" for gateway, weight in weights.items()
+            )
+            return "🎲", f"Роутер: {summary}"
+
         if active == 0:
             return "🔴", "Нет активных платежей"
         if active < total:
@@ -1332,6 +1343,14 @@ def _build_settings_keyboard(
     elif category_key == "CRYPTOBOT":
         label = texts.t("PAYMENT_CRYPTOBOT", "🪙 Криптовалюта (CryptoBot)")
         test_payment_buttons.append([_test_button(f"{label} · тест", "cryptobot")])
+    elif category_key == "PLATEGA":
+        label = settings.get_platega_display_name()
+        test_payment_buttons.append([_test_button(f"💳 {label} · тест", "platega")])
+    elif category_key == "PAYMENT_ROUTER":
+        test_payment_buttons.append([_test_button("🎲 Роутер · тест", "router")])
+        test_payment_buttons.append([_test_button("💳 Platega · тест", "platega")])
+        test_payment_buttons.append([_test_button("💳 WATA · тест", "wata")])
+        test_payment_buttons.append([_test_button("💳 YooKassa · тест", "yookassa")])
 
     if test_payment_buttons:
         rows.extend(test_payment_buttons)
@@ -1978,12 +1997,128 @@ async def test_payment_provider(
             except Exception:
                 pass
 
+    def _test_amount_kopeks(minimum: int) -> int:
+        """Сумма тестового платежа: 10 ₽, но не ниже минимума шлюза.
+
+        Хардкод 10 ₽ во всех ветках ниже минимума Platega (в проде 100 ₽) и
+        WATA — из-за этого кнопки теста молча не работали.
+        """
+        return max(10 * 100, int(minimum or 0))
+
+    if method == "platega":
+        if not settings.is_platega_universal_enabled():
+            await callback.answer("❌ Platega универсальная отключена", show_alert=True)
+            return
+
+        amount_kopeks = _test_amount_kopeks(settings.PLATEGA_MIN_AMOUNT_KOPEKS)
+        payment_result = await payment_service.create_platega_universal_payment(
+            db,
+            user_id=db_user.id,
+            amount_kopeks=amount_kopeks,
+            description=f"Тестовый платеж (админ) на {texts.format_price(amount_kopeks)}",
+            language=language,
+            metadata={"purpose": "admin_test_payment", "provider": "platega"},
+        )
+
+        redirect_url = (payment_result or {}).get("redirect_url")
+        if not redirect_url:
+            await callback.answer("❌ Не удалось создать тестовый платеж Platega", show_alert=True)
+            await _refresh_markup()
+            return
+
+        await callback.message.answer(
+            "🧪 <b>Тестовый платеж Platega</b>\n\n"
+            f"💰 Сумма: {texts.format_price(amount_kopeks)}\n"
+            f"🆔 ID: {(payment_result or {}).get('transaction_id')}",
+            reply_markup=types.InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [types.InlineKeyboardButton(text="💳 Оплатить", url=redirect_url)],
+                    [
+                        types.InlineKeyboardButton(
+                            text="📊 Проверить статус",
+                            callback_data=f"check_platega_{payment_result['local_payment_id']}",
+                        )
+                    ],
+                ]
+            ),
+            parse_mode="HTML",
+        )
+        await callback.answer("✅ Ссылка на платеж Platega отправлена", show_alert=True)
+        await _refresh_markup()
+        return
+
+    if method == "router":
+        from app.services.payment_gateway_router import (
+            SOURCE_ADMIN,
+            payment_gateway_router,
+        )
+
+        amount_kopeks = max(
+            10 * 100, payment_gateway_router.combined_min_kopeks()
+        )
+        routed = await payment_gateway_router.create_invoice(
+            db,
+            payment_service=payment_service,
+            user=db_user,
+            amount_kopeks=amount_kopeks,
+            source=SOURCE_ADMIN,
+            description=f"Тестовый платеж роутера (админ) на {texts.format_price(amount_kopeks)}",
+            language=language,
+            metadata={"purpose": "admin_test_payment", "provider": "router"},
+        )
+
+        if not routed:
+            weights = settings.get_payment_router_weights()
+            await callback.message.answer(
+                "🧪 <b>Тест роутера</b>\n\n"
+                "❌ Не удалось выставить счёт ни одним шлюзом.\n"
+                f"Веса: <code>{weights}</code>\n"
+                f"Доступные шлюзы: <code>{payment_gateway_router.eligible_gateways(amount_kopeks)}</code>",
+                parse_mode="HTML",
+            )
+            await callback.answer("❌ Роутер не смог создать платеж", show_alert=True)
+            await _refresh_markup()
+            return
+
+        attempts_text = "\n".join(
+            "• {gateway}: {status}{error}".format(
+                gateway=attempt.get("gateway"),
+                status="ok" if attempt.get("ok") else "ошибка",
+                error=f" — {attempt.get('error')}" if attempt.get("error") else "",
+            )
+            for attempt in routed.attempts
+        )
+
+        await callback.message.answer(
+            "🧪 <b>Тест роутера платежей</b>\n\n"
+            f"💰 Сумма: {texts.format_price(amount_kopeks)}\n"
+            f"🎯 Назначен: <b>{routed.requested_gateway}</b>\n"
+            f"✅ Выставил счёт: <b>{routed.gateway}</b>\n"
+            f"🔁 Фолбэк: {'да' if routed.fallback_used else 'нет'}\n\n"
+            f"<b>Попытки:</b>\n{attempts_text}",
+            reply_markup=types.InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [types.InlineKeyboardButton(text="💳 Оплатить", url=routed.payment_url)],
+                    [
+                        types.InlineKeyboardButton(
+                            text="📊 Проверить статус",
+                            callback_data=routed.check_callback,
+                        )
+                    ],
+                ]
+            ),
+            parse_mode="HTML",
+        )
+        await callback.answer(f"✅ Счёт выставлен: {routed.gateway}", show_alert=True)
+        await _refresh_markup()
+        return
+
     if method == "yookassa":
         if not settings.is_yookassa_enabled():
             await callback.answer("❌ YooKassa отключена", show_alert=True)
             return
 
-        amount_kopeks = 10 * 100
+        amount_kopeks = _test_amount_kopeks(settings.YOOKASSA_MIN_AMOUNT_KOPEKS)
         description = settings.get_balance_payment_description(amount_kopeks, telegram_user_id=db_user.telegram_id),
         payment_result = await payment_service.create_yookassa_payment(
             db=db,
@@ -2026,6 +2161,48 @@ async def test_payment_provider(
         )
         await callback.message.answer(message_text, reply_markup=reply_markup, parse_mode="HTML")
         await callback.answer("✅ Ссылка на платеж YooKassa отправлена", show_alert=True)
+        await _refresh_markup()
+        return
+
+    if method == "wata":
+        if not settings.is_wata_enabled():
+            await callback.answer("❌ WATA отключена", show_alert=True)
+            return
+
+        amount_kopeks = _test_amount_kopeks(settings.WATA_MIN_AMOUNT_KOPEKS)
+        payment_result = await payment_service.create_wata_payment(
+            db,
+            user_id=db_user.id,
+            amount_kopeks=amount_kopeks,
+            description=f"Тестовый платеж (админ) на {texts.format_price(amount_kopeks)}",
+            language=language,
+            metadata={"purpose": "admin_test_payment", "provider": "wata"},
+        )
+
+        payment_url = (payment_result or {}).get("payment_url")
+        if not payment_url:
+            await callback.answer("❌ Не удалось создать тестовый платеж WATA", show_alert=True)
+            await _refresh_markup()
+            return
+
+        await callback.message.answer(
+            "🧪 <b>Тестовый платеж WATA</b>\n\n"
+            f"💰 Сумма: {texts.format_price(amount_kopeks)}\n"
+            f"🆔 ID: {(payment_result or {}).get('payment_link_id')}",
+            reply_markup=types.InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [types.InlineKeyboardButton(text="💳 Оплатить", url=payment_url)],
+                    [
+                        types.InlineKeyboardButton(
+                            text="📊 Проверить статус",
+                            callback_data=f"check_wata_{payment_result['local_payment_id']}",
+                        )
+                    ],
+                ]
+            ),
+            parse_mode="HTML",
+        )
+        await callback.answer("✅ Ссылка на платеж WATA отправлена", show_alert=True)
         await _refresh_markup()
         return
 
@@ -2131,7 +2308,7 @@ async def test_payment_provider(
             await callback.answer("❌ PayPalych отключен", show_alert=True)
             return
 
-        amount_kopeks = 10 * 100
+        amount_kopeks = _test_amount_kopeks(settings.PAL24_MIN_AMOUNT_KOPEKS)
         payment_result = await payment_service.create_pal24_payment(
             db=db,
             user_id=db_user.id,

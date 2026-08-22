@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import importlib
 import os
 import sys
 import types
@@ -21,8 +22,20 @@ os.environ.setdefault("BOT_TOKEN", "test-token")
 os.environ.setdefault("BACKUP_LOCATION", "/tmp/remnawave-bedolaga-test-backups")
 
 # Создаём заглушки для драйверов, которых может не быть в окружении тестов.
-sys.modules.setdefault("asyncpg", types.ModuleType("asyncpg"))
-sys.modules.setdefault("aiosqlite", types.ModuleType("aiosqlite"))
+# Настоящий драйвер, если он установлен, всегда предпочтительнее: с пустой
+# заглушкой SQLAlchemy не может поднять async-движок, и тесты, которым нужна
+# реальная БД, падают на AttributeError.
+def _stub_missing_driver(name: str) -> None:
+    if name in sys.modules:
+        return
+    try:
+        importlib.import_module(name)
+    except Exception:
+        sys.modules[name] = types.ModuleType(name)
+
+
+_stub_missing_driver("asyncpg")
+_stub_missing_driver("aiosqlite")
 
 # Эмуляция redis.asyncio, чтобы модуль кеша мог импортироваться.
 if "redis.asyncio" not in sys.modules:
