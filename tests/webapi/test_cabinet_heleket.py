@@ -106,3 +106,43 @@ async def test_current_paid_plan_checkout_saves_renewal_intent(
     assert captured["cart"]["tariff_op"] == "renew"
     assert "partial_payment" not in captured["cart"]
     assert create_payment.await_args.args[2:] == ("crypto", 29_000)
+
+
+@pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize("method", ["card", "sbp"])
+async def test_cabinet_tariff_checkout_uses_non_crypto_payment_router(
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+) -> None:
+    captured = {}
+
+    async def save_cart(user_id, cart_data, ttl=3600):
+        captured.update(user_id=user_id, cart=cart_data, ttl=ttl)
+        return True
+
+    create_payment = AsyncMock(
+        return_value={
+            "paymentUrl": "https://pay.example/invoice",
+            "gateway": "platega",
+        }
+    )
+    monkeypatch.setattr(user_cart_service, "save_user_cart", save_cart)
+    monkeypatch.setattr(cabinet_module, "_create_topup_payment", create_payment)
+
+    user = _user(balance=5_000, plan_id=1, is_trial=True, status="trial")
+    result = await cabinet_module._create_cabinet_tariff_payment(
+        db=SimpleNamespace(),
+        user=user,
+        plan=_plan(),
+        period_days=30,
+        price_kopeks=29_000,
+        base_price_kopeks=29_000,
+        payment_method=method,
+    )
+
+    assert result["gateway"] == "platega"
+    assert captured["cart"]["source"] == "cabinet"
+    assert captured["cart"]["partial_payment"]["shortfall_kopeks"] == 24_000
+    assert captured["ttl"] == 3600
+    create_payment.assert_awaited_once()
+    assert create_payment.await_args.args[2:] == (method, 24_000)

@@ -526,7 +526,13 @@ async def purchase(
 
     if user.balance_kopeks < price_kopeks:
         method = (payload.method or "").strip().lower()
-        if method != "crypto" or not settings.is_heleket_cabinet_enabled():
+        if method == "crypto":
+            if not settings.is_heleket_cabinet_enabled():
+                raise HTTPException(
+                    status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Insufficient balance",
+                )
+        elif method not in {"card", "sbp"}:
             raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient balance")
 
         return await _create_cabinet_tariff_payment(
@@ -539,6 +545,7 @@ async def purchase(
                 db, plan.id, period_days, cohort=resolve_pricing_cohort(user)
             ),
             fixed_offer=fixed_offer,
+            payment_method=method,
         )
 
     old_end_date = subscription.end_date
@@ -644,8 +651,9 @@ async def _create_cabinet_tariff_payment(
     price_kopeks: int,
     base_price_kopeks: Optional[int],
     fixed_offer: Any = None,
+    payment_method: str = "crypto",
 ) -> Dict[str, Any]:
-    """Create a cabinet-only Heleket checkout that completes the tariff intent.
+    """Create a cabinet checkout that completes the saved tariff intent.
 
     The shared top-up webhook already knows how to consume tariff intent carts.
     Keeping the intent server-side makes the redirect safe: the browser never
@@ -728,7 +736,13 @@ async def _create_cabinet_tariff_payment(
         if partial:
             cart_data["partial_payment"] = partial
 
-    ttl = max(3600, settings.get_heleket_lifetime() + 300)
+    # Crypto keeps its existing Heleket lifetime. Card/SBP invoices use the
+    # same one-hour intent window as tariff checkouts in the Telegram bot.
+    ttl = (
+        max(3600, settings.get_heleket_lifetime() + 300)
+        if payment_method == "crypto"
+        else 3600
+    )
     if not await user_cart_service.save_user_cart(user.id, cart_data, ttl=ttl):
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -750,12 +764,13 @@ async def _create_cabinet_tariff_payment(
         refreshed = await get_user_by_id(db, user.id) or user
         return {"subscription": cabinet_service.build_subscription(refreshed)}
 
-    invoice_amount_kopeks = clamp_invoice_amount("heleket", shortfall_kopeks)
+    invoice_method = "heleket" if payment_method == "crypto" else "auto"
+    invoice_amount_kopeks = clamp_invoice_amount(invoice_method, shortfall_kopeks)
     try:
         return await _create_topup_payment(
             db,
             user,
-            "crypto",
+            payment_method,
             invoice_amount_kopeks,
         )
     except Exception:
