@@ -30,6 +30,7 @@ def test_onboarding_welcome_keyboard_opens_connect_platform_submenus():
 async def test_onboarding_welcome_text_has_only_copyable_subscription_link(monkeypatch):
     text = await start._build_onboarding_welcome_text(AsyncMock(), _user())
 
+    assert text.startswith("🎁 Привет, тебе")
     assert "Привет, тебе доступна бесплатная подписка на 3 дня" in text
     assert "Ключ доступа для Happ, Incy:" in text
     assert f"<pre><code>{SUBSCRIPTION_LINK}</code></pre>" in text
@@ -95,7 +96,7 @@ async def test_onboarding_welcome_sends_connection_image_for_new_registration():
     )
 
     assert success is True
-    assert message.answer_photo.await_args.kwargs["caption"].startswith("Привет, тебе")
+    assert message.answer_photo.await_args.kwargs["caption"].startswith("🎁 Привет, тебе")
     assert message.answer_photo.await_args.args[0].path == "images/connection.webp"
 
 

@@ -379,7 +379,8 @@ async def _build_onboarding_welcome_text(
         return None
 
     text = (
-        texts.t(
+        "🎁 "
+        + texts.t(
             "ONBOARDING_WELCOME_TEXT",
             "Привет, тебе доступна бесплатная подписка на 3 дня! Установи приложение и пользуйся.",
         )
