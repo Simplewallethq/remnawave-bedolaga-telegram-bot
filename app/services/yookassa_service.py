@@ -192,7 +192,7 @@ class YooKassaService:
                     "value": str(round(amount, 2)),
                     "currency": currency.upper()
                 },
-                "vat_code": str(getattr(settings, 'YOOKASSA_VAT_CODE', 1)),
+                "vat_code": int(getattr(settings, 'YOOKASSA_VAT_CODE', 1)),
                 "payment_mode": getattr(settings, 'YOOKASSA_PAYMENT_MODE', 'full_payment'),
                 "payment_subject": getattr(settings, 'YOOKASSA_PAYMENT_SUBJECT', 'service')
             }]
@@ -304,7 +304,7 @@ class YooKassaService:
                     "value": str(round(amount, 2)),
                     "currency": currency.upper()
                 },
-                "vat_code": str(getattr(settings, 'YOOKASSA_VAT_CODE', 1)),
+                "vat_code": int(getattr(settings, 'YOOKASSA_VAT_CODE', 1)),
                 "payment_mode": getattr(settings, 'YOOKASSA_PAYMENT_MODE', 'full_payment'),
                 "payment_subject": getattr(settings, 'YOOKASSA_PAYMENT_SUBJECT', 'service')
             }]
@@ -396,7 +396,7 @@ class YooKassaService:
                     "value": str(round(amount, 2)),
                     "currency": currency.upper()
                 },
-                "vat_code": str(getattr(settings, 'YOOKASSA_VAT_CODE', 1)),
+                "vat_code": int(getattr(settings, 'YOOKASSA_VAT_CODE', 1)),
                 "payment_mode": getattr(settings, 'YOOKASSA_PAYMENT_MODE', 'full_payment'),
                 "payment_subject": getattr(settings, 'YOOKASSA_PAYMENT_SUBJECT', 'service')
             }]

@@ -2119,7 +2119,9 @@ async def test_payment_provider(
             return
 
         amount_kopeks = _test_amount_kopeks(settings.YOOKASSA_MIN_AMOUNT_KOPEKS)
-        description = settings.get_balance_payment_description(amount_kopeks, telegram_user_id=db_user.telegram_id),
+        description = settings.get_balance_payment_description(
+            amount_kopeks, telegram_user_id=db_user.telegram_id
+        )
         payment_result = await payment_service.create_yookassa_payment(
             db=db,
             user_id=db_user.id,
