@@ -16,6 +16,7 @@ def test_active_subscription_label_and_emojis_are_decorated():
     assert "<b>Подписка:</b>" in result
     assert f'emoji-id="{MAIN_MENU_TEXT_CUSTOM_EMOJI_IDS["active"]}"' in result
     assert f'emoji-id="{MAIN_MENU_TEXT_CUSTOM_EMOJI_IDS["channel"]}"' in result
+    assert ">👉</tg-emoji>" in result
     assert '<a href="https://t.me/vpnleto">➡️</a>' not in result
 
 

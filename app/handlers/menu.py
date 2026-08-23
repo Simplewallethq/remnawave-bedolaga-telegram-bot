@@ -80,7 +80,7 @@ logger = logging.getLogger(__name__)
 MAIN_MENU_TEXT_CUSTOM_EMOJI_IDS = {
     "active": "5416081784641168838",
     "inactive": "5411225014148014586",
-    "channel": "5282843764451195532",
+    "channel": "5471978009449731768",
 }
 
 
@@ -108,7 +108,7 @@ def _decorate_main_menu_text(
         elif subscription_state == "inactive":
             text = text.replace("🔴", _main_menu_custom_emoji("inactive", "🔴"), 1)
 
-        channel_emoji = _main_menu_custom_emoji("channel", "🖥")
+        channel_emoji = _main_menu_custom_emoji("channel", "👉")
         text = re.sub(
             r'<a\b[^>]*>\s*➡️?\s*</a>',
             channel_emoji,
