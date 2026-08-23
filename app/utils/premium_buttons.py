@@ -208,16 +208,33 @@ class PremiumEmojiBot(Bot):
         self._text_emoji_pattern = compile_text_emoji_pattern(self._text_emoji_map)
         return len(sticker_set.stickers), len(self._text_emoji_map)
 
-    def _uses_html_parse_mode(self, method) -> bool:
-        if not hasattr(method, "parse_mode"):
-            return False
-
-        parse_mode = method.parse_mode
+    def _is_html_parse_mode(self, parse_mode) -> bool:
         if isinstance(parse_mode, Default):
             parse_mode = self.default.parse_mode
         return parse_mode in {ParseMode.HTML, ParseMode.HTML.value}
 
-    async def __call__(self, method, request_timeout=None):
+    def _enhance_media_caption(self, media):
+        caption = getattr(media, "caption", None)
+        entities = getattr(media, "caption_entities", None)
+        parse_mode = getattr(media, "parse_mode", None)
+
+        if (
+            not isinstance(caption, str)
+            or entities
+            or not self._is_html_parse_mode(parse_mode)
+        ):
+            return media
+
+        enhanced_caption = apply_premium_text_emojis(
+            caption,
+            self._text_emoji_map,
+            self._text_emoji_pattern,
+        )
+        if enhanced_caption == caption:
+            return media
+        return media.model_copy(update={"caption": enhanced_caption})
+
+    def _prepare_method(self, method):
         updates = {}
 
         markup = getattr(method, "reply_markup", None)
@@ -226,24 +243,43 @@ class PremiumEmojiBot(Bot):
             if enhanced is not markup:
                 updates["reply_markup"] = enhanced
 
-        if self._text_emoji_map and self._uses_html_parse_mode(method):
-            for field_name, entities_name in (
-                ("text", "entities"),
-                ("caption", "caption_entities"),
+        if self._text_emoji_map:
+            if hasattr(method, "parse_mode") and self._is_html_parse_mode(
+                method.parse_mode
             ):
-                value = getattr(method, field_name, None)
-                entities = getattr(method, entities_name, None)
-                if not isinstance(value, str) or entities:
-                    continue
+                for field_name, entities_name in (
+                    ("text", "entities"),
+                    ("caption", "caption_entities"),
+                ):
+                    value = getattr(method, field_name, None)
+                    entities = getattr(method, entities_name, None)
+                    if not isinstance(value, str) or entities:
+                        continue
 
-                enhanced_text = apply_premium_text_emojis(
-                    value,
-                    self._text_emoji_map,
-                    self._text_emoji_pattern,
-                )
-                if enhanced_text != value:
-                    updates[field_name] = enhanced_text
+                    enhanced_text = apply_premium_text_emojis(
+                        value,
+                        self._text_emoji_map,
+                        self._text_emoji_pattern,
+                    )
+                    if enhanced_text != value:
+                        updates[field_name] = enhanced_text
+
+            # EditMessageMedia and SendMediaGroup keep captions inside one or
+            # more InputMedia objects rather than on the Telegram method.
+            media = getattr(method, "media", None)
+            if isinstance(media, (list, tuple)):
+                enhanced_media = [self._enhance_media_caption(item) for item in media]
+                if any(new is not old for new, old in zip(enhanced_media, media)):
+                    updates["media"] = enhanced_media
+            elif media is not None:
+                enhanced_media = self._enhance_media_caption(media)
+                if enhanced_media is not media:
+                    updates["media"] = enhanced_media
 
         if updates:
-            method = method.model_copy(update=updates)
+            return method.model_copy(update=updates)
+        return method
+
+    async def __call__(self, method, request_timeout=None):
+        method = self._prepare_method(method)
         return await super().__call__(method, request_timeout=request_timeout)

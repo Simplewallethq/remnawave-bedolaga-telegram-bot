@@ -1,6 +1,12 @@
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.methods import EditMessageMedia
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 
-from app.utils.premium_buttons import CUSTOM_EMOJI, apply_premium_button_icons
+from app.utils.premium_buttons import (
+    CUSTOM_EMOJI,
+    PremiumEmojiBot,
+    apply_premium_button_icons,
+)
+from app.utils.premium_text import compile_text_emoji_pattern
 
 
 def _markup(*buttons: InlineKeyboardButton) -> InlineKeyboardMarkup:
@@ -96,3 +102,25 @@ def test_leaves_unmapped_and_already_decorated_buttons_unchanged():
     assert result is markup
     assert result.inline_keyboard[0][0].icon_custom_emoji_id is None
     assert result.inline_keyboard[1][0].icon_custom_emoji_id == existing_id
+
+
+def test_transforms_caption_nested_inside_edit_message_media():
+    bot = PremiumEmojiBot(token="123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi")
+    bot._text_emoji_map = {"☀️": "123456789"}
+    bot._text_emoji_pattern = compile_text_emoji_pattern(bot._text_emoji_map)
+    method = EditMessageMedia(
+        chat_id=1,
+        message_id=2,
+        media=InputMediaPhoto(
+            media="existing-photo-file-id",
+            caption="☀️ <b>Подписка:</b>",
+            parse_mode="HTML",
+        ),
+    )
+
+    result = bot._prepare_method(method)
+
+    assert result.media.caption == (
+        '<tg-emoji emoji-id="123456789">☀️</tg-emoji> <b>Подписка:</b>'
+    )
+    assert method.media.caption == "☀️ <b>Подписка:</b>"
