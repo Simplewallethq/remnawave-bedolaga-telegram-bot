@@ -109,6 +109,15 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
 
     primary_bot = PremiumEmojiBot(token=settings.BOT_TOKEN, default=_default)
     primary_bot_id = (await primary_bot.get_me()).id
+    try:
+        sticker_count, emoji_count = await primary_bot.load_text_emoji_set()
+        logger.info(
+            "Animated text emoji loaded: stickers=%s mappings=%s",
+            sticker_count,
+            emoji_count,
+        )
+    except Exception as error:
+        logger.warning("Failed to load animated text emoji set: %s", error)
     bot_registry.register_bot(primary_bot_id, Path(settings.LOGO_FILE))
     logger.info("Primary bot registered: id=%s", primary_bot_id)
 

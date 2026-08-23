@@ -1,9 +1,18 @@
-"""Premium custom emoji icons for the primary Leto bot keyboards."""
+"""Premium custom emoji support for the primary Leto bot."""
 
 from __future__ import annotations
 
 from aiogram import Bot
+from aiogram.client.default import Default
+from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+from app.utils.premium_text import (
+    RESTRICTED_EMOJI_SET_NAME,
+    apply_premium_text_emojis,
+    build_text_emoji_map,
+    compile_text_emoji_pattern,
+)
 
 
 # Public Telegram custom emoji identifiers selected by the bot owner.
@@ -183,12 +192,58 @@ def apply_premium_button_icons(markup: InlineKeyboardMarkup) -> InlineKeyboardMa
 
 
 class PremiumEmojiBot(Bot):
-    """Primary bot client that decorates every outgoing inline keyboard."""
+    """Primary bot client that decorates outgoing keyboards and message text."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._text_emoji_map: dict[str, str] = {}
+        self._text_emoji_pattern = None
+
+    async def load_text_emoji_set(
+        self,
+        name: str = RESTRICTED_EMOJI_SET_NAME,
+    ) -> tuple[int, int]:
+        sticker_set = await self.get_sticker_set(name=name)
+        self._text_emoji_map = build_text_emoji_map(sticker_set.stickers)
+        self._text_emoji_pattern = compile_text_emoji_pattern(self._text_emoji_map)
+        return len(sticker_set.stickers), len(self._text_emoji_map)
+
+    def _uses_html_parse_mode(self, method) -> bool:
+        if not hasattr(method, "parse_mode"):
+            return False
+
+        parse_mode = method.parse_mode
+        if isinstance(parse_mode, Default):
+            parse_mode = self.default.parse_mode
+        return parse_mode in {ParseMode.HTML, ParseMode.HTML.value}
 
     async def __call__(self, method, request_timeout=None):
+        updates = {}
+
         markup = getattr(method, "reply_markup", None)
         if isinstance(markup, InlineKeyboardMarkup):
             enhanced = apply_premium_button_icons(markup)
             if enhanced is not markup:
-                method = method.model_copy(update={"reply_markup": enhanced})
+                updates["reply_markup"] = enhanced
+
+        if self._text_emoji_map and self._uses_html_parse_mode(method):
+            for field_name, entities_name in (
+                ("text", "entities"),
+                ("caption", "caption_entities"),
+            ):
+                value = getattr(method, field_name, None)
+                entities = getattr(method, entities_name, None)
+                if not isinstance(value, str) or entities:
+                    continue
+
+                enhanced_text = apply_premium_text_emojis(
+                    value,
+                    self._text_emoji_map,
+                    self._text_emoji_pattern,
+                )
+                if enhanced_text != value:
+                    updates[field_name] = enhanced_text
+
+        if updates:
+            method = method.model_copy(update=updates)
         return await super().__call__(method, request_timeout=request_timeout)
