@@ -684,6 +684,14 @@ async def _prompt_language_selection(message: types.Message, state: FSMContext) 
         )
 
 
+async def _set_initial_registration_language(state: FSMContext) -> dict:
+    """Force Russian for onboarding without disabling profile language settings."""
+    data = await state.get_data() or {}
+    data['language'] = 'ru'
+    await state.set_data(data)
+    return data
+
+
 async def _continue_registration_after_language(
     *,
     message: types.Message | None,
@@ -1286,24 +1294,14 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
     else:
         logger.info(f"🆕 Новый пользователь, начинаем регистрацию")
 
-    data = await state.get_data() or {}
-    if not data.get('language'):
-        if settings.is_language_selection_enabled():
-            await _prompt_language_selection(message, state)
-            return
-
-        default_language = (
-            (settings.DEFAULT_LANGUAGE or DEFAULT_LANGUAGE)
-            if isinstance(settings.DEFAULT_LANGUAGE, str)
-            else DEFAULT_LANGUAGE
-        )
-        normalized_default = default_language.split("-")[0].lower()
-        data['language'] = normalized_default
-        await state.set_data(data)
-        logger.info(
-            "🌐 LANGUAGE: выбор языка отключен, устанавливаем язык по умолчанию '%s'",
-            normalized_default,
-        )
+    # Новые пользователи начинают регистрацию сразу на русском языке. Даже
+    # незавершённый старый onboarding не должен возвращать экран выбора языка.
+    # Глобальную настройку LANGUAGE_SELECTION_ENABLED не отключаем: она
+    # по-прежнему управляет ручной сменой языка в профиле.
+    await _set_initial_registration_language(state)
+    logger.info(
+        "🌐 LANGUAGE: для нового пользователя автоматически установлен русский язык",
+    )
 
     await _continue_registration_after_language(
         message=message,

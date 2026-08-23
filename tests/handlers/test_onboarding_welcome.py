@@ -27,6 +27,26 @@ def test_onboarding_welcome_keyboard_opens_connect_platform_submenus():
     ]
 
 
+async def test_initial_registration_skips_language_choice_and_forces_russian():
+    state = AsyncMock()
+    state.get_data.return_value = {"language": "en", "referral_code": "friend"}
+
+    data = await start._set_initial_registration_language(state)
+
+    assert data == {"language": "ru", "referral_code": "friend"}
+    state.set_data.assert_awaited_once_with(data)
+
+
+def test_profile_keeps_language_selector():
+    keyboard = inline.get_profile_keyboard("ru")
+
+    assert any(
+        button.callback_data == "profile_language"
+        for row in keyboard.inline_keyboard
+        for button in row
+    )
+
+
 async def test_onboarding_welcome_text_has_only_copyable_subscription_link(monkeypatch):
     text = await start._build_onboarding_welcome_text(AsyncMock(), _user())
 
