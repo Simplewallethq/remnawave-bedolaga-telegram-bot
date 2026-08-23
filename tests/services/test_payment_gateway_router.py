@@ -461,3 +461,63 @@ async def test_router_metadata_is_attached(
     assert captured["payment_router"]["gateway"] == GATEWAY_PLATEGA
     assert captured["payment_router"]["source"] == SOURCE_BALANCE
     assert captured["payment_router"]["attempt"] == 0
+
+
+@pytest.mark.anyio
+async def test_yookassa_metadata_is_flat(
+    router: PaymentGatewayRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ЮKassa пересылает metadata на свою сторону и принимает только плоские
+    строковые значения: вложенный объект даёт invalid_request по параметру
+    metadata.payment_router и роняет каждый платёж роутера.
+    """
+    monkeypatch.setattr(settings, "PAYMENT_ROUTER_WEIGHT_PLATEGA", 0, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_ROUTER_WEIGHT_WATA", 0, raising=False)
+
+    captured: Dict[str, Any] = {}
+
+    class CapturingService(StubPaymentService):
+        async def create_yookassa_payment(self, **kwargs: Any) -> Any:
+            captured.update(kwargs.get("metadata") or {})
+            return await super().create_yookassa_payment(**kwargs)
+
+    routed = await router.create_invoice(
+        DummySession(),
+        payment_service=CapturingService(),
+        user=DummyUser(),
+        amount_kopeks=50_000,
+        source=SOURCE_BALANCE,
+    )
+
+    assert routed is not None
+    assert isinstance(captured["payment_router"], str)
+    assert "gateway=yookassa" in captured["payment_router"]
+    assert len(captured["payment_router"]) <= 512
+    for key, value in captured.items():
+        assert not isinstance(value, (dict, list)), (key, value)
+
+
+@pytest.mark.anyio
+async def test_other_gateways_keep_structured_metadata(
+    router: PaymentGatewayRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Platega и WATA metadata наружу не отправляют — там структура полезнее."""
+    monkeypatch.setattr(settings, "PAYMENT_ROUTER_WEIGHT_WATA", 0, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_ROUTER_WEIGHT_YOOKASSA", 0, raising=False)
+
+    captured: Dict[str, Any] = {}
+
+    class CapturingService(StubPaymentService):
+        async def create_platega_universal_payment(self, db, **kwargs: Any) -> Any:
+            captured.update(kwargs.get("metadata") or {})
+            return await super().create_platega_universal_payment(db, **kwargs)
+
+    await router.create_invoice(
+        DummySession(),
+        payment_service=CapturingService(),
+        user=DummyUser(),
+        amount_kopeks=50_000,
+        source=SOURCE_BALANCE,
+    )
+
+    assert isinstance(captured["payment_router"], dict)

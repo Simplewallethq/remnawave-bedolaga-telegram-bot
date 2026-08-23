@@ -256,9 +256,27 @@ class PaymentGatewayRouter:
             metadata=metadata,
         )
 
+    @staticmethod
+    def _flatten_router_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Схлопывает служебный блок роутера в одну строку.
+
+        ЮKassa — единственный из трёх, кто пересылает metadata на свою сторону,
+        и она принимает только плоские строковые значения (вложенный объект даёт
+        invalid_request по параметру metadata.payment_router). Ограничения:
+        не более 16 ключей и 512 символов на значение.
+        """
+        result = dict(metadata or {})
+        router_meta = result.get("payment_router")
+        if isinstance(router_meta, dict):
+            result["payment_router"] = ";".join(
+                f"{key}={value}" for key, value in router_meta.items()
+            )[:512]
+        return result
+
     async def _create_yookassa(
         self, payment_service, db, user, amount_kopeks, description, language, metadata
     ):
+        metadata = self._flatten_router_metadata(metadata)
         receipt_email = None
         if settings.is_yookassa_receipt_required():
             # user.email почти всегда пуст (заполняется только через кабинет),
