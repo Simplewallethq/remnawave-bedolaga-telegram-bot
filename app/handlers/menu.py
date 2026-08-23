@@ -1,5 +1,6 @@
 import html
 import logging
+import re
 from decimal import Decimal
 from typing import Dict, List
 from aiogram import Dispatcher, types, F
@@ -74,6 +75,47 @@ from app.utils.user_utils import get_effective_referral_commission_percent
 from app.handlers.subscription.traffic import handle_add_traffic, add_traffic
 
 logger = logging.getLogger(__name__)
+
+
+MAIN_MENU_TEXT_CUSTOM_EMOJI_IDS = {
+    "active": "5416081784641168838",
+    "inactive": "5411225014148014586",
+    "channel": "5282843764451195532",
+}
+
+
+def _main_menu_custom_emoji(kind: str, fallback: str) -> str:
+    return (
+        f'<tg-emoji emoji-id="{MAIN_MENU_TEXT_CUSTOM_EMOJI_IDS[kind]}">'
+        f"{fallback}</tg-emoji>"
+    )
+
+
+def _decorate_main_menu_text(
+    text: str,
+    subscription_state: str,
+    *,
+    use_premium_emoji: bool,
+) -> str:
+    """Apply the primary bot's premium emoji and status emphasis."""
+    for label in ("Подписка:", "Subscription:"):
+        if label in text and f"<b>{label}</b>" not in text:
+            text = text.replace(label, f"<b>{label}</b>", 1)
+
+    if use_premium_emoji:
+        if subscription_state in {"trial", "active"}:
+            text = text.replace("🟢", _main_menu_custom_emoji("active", "🟢"), 1)
+        elif subscription_state == "inactive":
+            text = text.replace("🔴", _main_menu_custom_emoji("inactive", "🔴"), 1)
+
+        channel_emoji = _main_menu_custom_emoji("channel", "🖥")
+        text = re.sub(
+            r'<a\b[^>]*>\s*➡️?\s*</a>',
+            channel_emoji,
+            text,
+            count=1,
+        )
+    return text
 
 
 def _format_rubles(amount_kopeks: int) -> str:
@@ -198,7 +240,12 @@ async def show_main_menu(
     db_user.last_activity = datetime.utcnow()
     await db.commit()
 
-    menu_text = await get_main_menu_text(db_user, texts, db)
+    menu_text = await get_main_menu_text(
+        db_user,
+        texts,
+        db,
+        use_premium_emoji=is_primary_bot(callback.bot.id if callback.bot else None),
+    )
 
     # Determine status for keyboard
     subscription = db_user.subscription
@@ -1123,7 +1170,13 @@ def _insert_random_message(base_text: str, random_message: str, action_prompt: s
     return f"{base_text}\n\n{random_message}"
 
 
-async def get_main_menu_text(user, texts, db: AsyncSession):
+async def get_main_menu_text(
+    user,
+    texts,
+    db: AsyncSession,
+    *,
+    use_premium_emoji: bool = False,
+):
     subscription = user.subscription
     is_active = subscription and subscription.is_active
     is_trial = subscription and getattr(subscription, "is_trial", False)
@@ -1133,10 +1186,12 @@ async def get_main_menu_text(user, texts, db: AsyncSession):
     trial_used = (subscription is not None)
 
     base_text = ""
+    subscription_state = "available"
 
     date_fmt = "%d.%m.%Y"
 
     if trial_active and subscription.end_date:
+        subscription_state = "trial"
         end_str = format_local_datetime(subscription.end_date, date_fmt)
         days_left = max(0, (subscription.end_date - datetime.utcnow()).days)
         device_limit = getattr(subscription, "device_limit", 1) or 1
@@ -1145,6 +1200,7 @@ async def get_main_menu_text(user, texts, db: AsyncSession):
             "Подписка: 🟢Активна (пробная)\nдо {end_date} ({days} дн.)\n\nУстройств: {devices} шт."
         ).format(end_date=end_str, days=days_left, devices=device_limit)
     elif has_active_subscription and subscription.end_date:
+        subscription_state = "active"
         end_str = format_local_datetime(subscription.end_date, date_fmt)
         days_left = max(0, (subscription.end_date - datetime.utcnow()).days)
         device_limit = getattr(subscription, "device_limit", 1) or 1
@@ -1155,6 +1211,7 @@ async def get_main_menu_text(user, texts, db: AsyncSession):
     elif not trial_used:
         base_text += texts.t("MAIN_MENU_TRIAL_AVAILABLE", "Вам доступно 3 дня бесплатно 🎁")
     else:
+        subscription_state = "inactive"
         base_text += texts.t("MAIN_MENU_NO_SUBSCRIPTION", "Подписка: 🔴Истекла")
 
     base_text += texts.t(
@@ -1169,7 +1226,11 @@ async def get_main_menu_text(user, texts, db: AsyncSession):
         "<a href=\"https://telegra.ph/Polzovatelskoe-soglashenie-07-20-32\">Пользовательское соглашение</a>",
     )
 
-    return base_text
+    return _decorate_main_menu_text(
+        base_text,
+        subscription_state,
+        use_premium_emoji=use_premium_emoji,
+    )
 
 
 async def handle_activate_button(

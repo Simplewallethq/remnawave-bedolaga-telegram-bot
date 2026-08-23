@@ -1153,7 +1153,12 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
         if pinned_message and pinned_message.send_before_menu:
             await _send_pinned_message(message.bot, db, user, pinned_message)
 
-        menu_text = await get_main_menu_text(user, texts, db)
+        menu_text = await get_main_menu_text(
+            user,
+            texts,
+            db,
+            use_premium_emoji=is_primary_bot(message.bot.id if message.bot else None),
+        )
 
         # Determine status for keyboard
         subscription = user.subscription
@@ -1833,7 +1838,12 @@ async def complete_registration_from_callback(
             existing_user.subscription
         )
 
-        menu_text = await get_main_menu_text(existing_user, texts, db)
+        menu_text = await get_main_menu_text(
+            existing_user,
+            texts,
+            db,
+            use_premium_emoji=is_primary_bot(message.bot.id if message.bot else None),
+        )
 
         is_admin = settings.is_admin(existing_user.telegram_id)
         is_moderator = (
@@ -2130,7 +2140,12 @@ async def complete_registration(
             existing_user.subscription
         )
 
-        menu_text = await get_main_menu_text(existing_user, texts, db)
+        menu_text = await get_main_menu_text(
+            existing_user,
+            texts,
+            db,
+            use_premium_emoji=is_primary_bot(message.bot.id if message.bot else None),
+        )
 
         # Determine status for keyboard
         subscription = existing_user.subscription
@@ -2543,7 +2558,12 @@ async def required_sub_channel_check(
                 user.subscription
             )
 
-            menu_text = await get_main_menu_text(user, texts, db)
+            menu_text = await get_main_menu_text(
+                user,
+                texts,
+                db,
+                use_premium_emoji=is_primary_bot(message.bot.id if message.bot else None),
+            )
 
             from app.utils.bot_registry import get_logo_for_bot
             from aiogram.types import FSInputFile
