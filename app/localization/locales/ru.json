@@ -1731,7 +1731,7 @@
   "ACTIVATE_TRIAL_BUTTON": "✨ Активировать",
   "SUB_ADD_DAYS_BUTTON": "➕ Добавить дни",
   "SUB_ADD_DEVICES_BUTTON": "➕ Добавить устройства",
-  "SUB_ADD_DAYS_SHORT_BUTTON": "➕ Продлить",
+  "SUB_ADD_DAYS_SHORT_BUTTON": "➕ Продлить подписку",
   "SUB_ADD_DEVICES_SHORT_BUTTON": "📱 Устройства",
   "BIND_DEVICE_BUTTON": "🔗 Привязать устройство",
   "BIND_DEVICE_MESSAGE": "🔗 <b>Код для привязки устройства</b>\n\nОткройте приложение и введите этот код:\n\n<code>{code}</code>\n\nКод действует {ttl_hours} ч. Никому его не передавайте.",

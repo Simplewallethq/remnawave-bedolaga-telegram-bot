@@ -1,3 +1,5 @@
+from typing import Optional
+
 from aiogram import types
 from aiogram.types import InlineKeyboardButton
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -14,6 +16,7 @@ def build_miniapp_or_callback_button(
     *,
     callback_data: str,
     unavailable_callback: str = DEFAULT_UNAVAILABLE_CALLBACK,
+    style: Optional[str] = None,
 ) -> InlineKeyboardButton:
     """Create a button that opens the miniapp in text menu mode.
 
@@ -30,11 +33,16 @@ def build_miniapp_or_callback_button(
             return InlineKeyboardButton(
                 text=text,
                 web_app=types.WebAppInfo(url=miniapp_url),
+                style=style,
             )
         safe_callback = unavailable_callback or DEFAULT_UNAVAILABLE_CALLBACK
-        return InlineKeyboardButton(text=text, callback_data=safe_callback)
+        return InlineKeyboardButton(
+            text=text, callback_data=safe_callback, style=style
+        )
 
-    return InlineKeyboardButton(text=text, callback_data=callback_data)
+    return InlineKeyboardButton(
+        text=text, callback_data=callback_data, style=style
+    )
 
 
 def build_miniapp_connect_button(

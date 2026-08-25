@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Set, Tuple
 
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.enums import ChatMemberStatus
+from aiogram.enums import ButtonStyle, ChatMemberStatus
 from aiogram.types import FSInputFile
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -79,6 +79,9 @@ from app.utils.bot_registry import get_primary_logo
 logger = logging.getLogger(__name__)
 
 
+SUBSCRIPTION_EXPIRING_IMAGE = Path("images") / "subend.webp"
+
+
 class MonitoringService:
     SEND_LEGACY_EXPIRED_TELEGRAM_NOTIFICATIONS = False
     SEND_LEGACY_EXPIRED_FOLLOWUPS = False
@@ -138,6 +141,43 @@ class MonitoringService:
                 )
 
         return await self.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+
+    async def _send_message_with_image(
+        self,
+        chat_id: int,
+        text: str,
+        image_path: Path,
+        reply_markup=None,
+        parse_mode: Optional[str] = "HTML",
+    ):
+        """Отправляет сообщение с заданной картинкой, иначе — с логотипом."""
+        if not self.bot:
+            raise RuntimeError("Bot instance is not available")
+
+        if image_path.exists() and (text is None or len(text) <= 1000):
+            try:
+                return await self.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=FSInputFile(image_path),
+                    caption=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                )
+            except TelegramBadRequest as exc:
+                logger.warning(
+                    "Не удалось отправить сообщение с картинкой %s пользователю %s: %s. "
+                    "Откатываемся на логотип.",
+                    image_path,
+                    chat_id,
+                    exc,
+                )
+
+        return await self._send_message_with_logo(
             chat_id=chat_id,
             text=text,
             reply_markup=reply_markup,
@@ -1376,18 +1416,18 @@ class MonitoringService:
                     autopay_status = "✅ Включен - подписка продлится автоматически"
                     action_text = f"💰 Убедитесь, что на балансе достаточно средств: {texts.format_price(user.balance_kopeks)}"
                 else:
-                    autopay_status = "❌ Отключен - не забудьте продлить вручную!"
+                    autopay_status = "Отключен - не забудьте продлить вручную!"
                     action_text = "💡 Включите автоплатеж или продлите подписку вручную"
             else:
-                autopay_status = "❌ Отключен - не забудьте продлить вручную!"
+                autopay_status = "Отключен - не забудьте продлить вручную!"
                 action_text = "💡 Продлите подписку вручную"
             
             message = f"""
-⚠️ <b>Подписка истекает через {days_text}!</b>
+❗️ <b>Подписка истекает через {days_text}!</b>
 
 Ваша платная подписка истекает {format_local_datetime(subscription.end_date, "%d.%m.%Y %H:%M")}.
 
-💳 <b>Автоплатеж:</b> {autopay_status}
+🔄 <b>Автоплатеж:</b> {autopay_status}
 
 {action_text}
 """
@@ -1395,14 +1435,19 @@ class MonitoringService:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [build_miniapp_or_callback_button(text="⏰ Продлить подписку", callback_data="subscription_extend")],
+                [build_miniapp_or_callback_button(
+                    text="⏰ Продлить подписку",
+                    callback_data="subscription_extend",
+                    style=ButtonStyle.SUCCESS,
+                )],
                 [build_miniapp_or_callback_button(text="💳 Пополнить баланс", callback_data="balance_topup")],
                 [build_miniapp_or_callback_button(text="📱 Моя подписка", callback_data="subscription")],
             ])
 
-            await self._send_message_with_logo(
+            await self._send_message_with_image(
                 chat_id=user.telegram_id,
                 text=message,
+                image_path=SUBSCRIPTION_EXPIRING_IMAGE,
                 parse_mode="HTML",
                 reply_markup=keyboard,
             )

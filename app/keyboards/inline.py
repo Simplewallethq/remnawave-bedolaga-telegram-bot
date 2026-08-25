@@ -3726,13 +3726,13 @@ def get_subscription_menu_keyboard(
     #     )
 
     extend_button = InlineKeyboardButton(
-        text=texts.t("SUB_ADD_DAYS_SHORT_BUTTON", "➕ Продлить"),
+        text=texts.t("SUB_ADD_DAYS_SHORT_BUTTON", "➕ Продлить подписку"),
         callback_data="sub_add_days",
+        style=ButtonStyle.SUCCESS,
     )
 
-    action_row = [extend_button]
-
     buttons = [
+        [extend_button],
         [InlineKeyboardButton(text=balance_button_text, callback_data="balance_topup")],
         # [InlineKeyboardButton(text=autopay_button_text, callback_data="subscription_autopay")],
     ]
@@ -3745,8 +3745,6 @@ def get_subscription_menu_keyboard(
                 )
             ]
         )
-    buttons.append(action_row)
-
     buttons.append([
         InlineKeyboardButton(
             text=texts.t("RENEW_CHANGE_TARIFF", "🔀 Сменить тариф"),
