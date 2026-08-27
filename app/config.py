@@ -566,6 +566,14 @@ class Settings(BaseSettings):
     CABINET_OTP_RESEND_SECONDS: int = 60  # минимальный интервал между отправками кода
     CABINET_OTP_MAX_ATTEMPTS: int = 5
 
+    # Аккаунт для проверяющих в App Store и Google Play. Вход у нас без пароля,
+    # код приходит письмом — проверяющий такой почты не читает. Для одного этого
+    # адреса код постоянный и письмо не отправляется; его указывают в форме подачи.
+    # Пустой REVIEW_ACCOUNT_EMAIL полностью выключает механизм.
+    # Код ровно шесть цифр: столько принимают поля ввода в приложении и на /tv.
+    REVIEW_ACCOUNT_EMAIL: str = "googleplay.review@letovpn.com"
+    REVIEW_ACCOUNT_OTP_CODE: str = "481902"
+
     # Уведомления кабинета (лента + SSE)
     CABINET_NOTIFICATIONS_ENABLED: bool = True
     CABINET_NOTIFICATIONS_RETENTION_DAYS: int = 90

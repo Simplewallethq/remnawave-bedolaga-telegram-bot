@@ -45,6 +45,7 @@ from .cabinet import (
     _provision_remnawave,
     _verify_registration_code,
     ensure_remnawave_account,
+    is_review_account,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,17 @@ async def request_otp(
     """Шаг 1: сгенерировать и отправить email-код (login-or-register)."""
     from app.database.crud import cabinet_otp as otp_crud
     from app.services import email_service
+
+    # Проверяющему письмо не нужно: код у него постоянный. Отвечаем до проверки
+    # SendGrid, а resend_after=0 снимает cooldown — иначе повторное нажатие
+    # «отправить код» упрётся в 429 и будет выглядеть как поломка.
+    if is_review_account(payload.email):
+        logger.info("Запрос кода для review-аккаунта — письмо не отправляем")
+        return AppOtpRequestResponse(
+            ok=True,
+            ttl_seconds=settings.CABINET_OTP_TTL_MINUTES * 60,
+            resend_after=0,
+        )
 
     if not email_service.is_email_configured():
         logger.error("SendGrid не сконфигурирован — /api/auth/otp/request недоступен")

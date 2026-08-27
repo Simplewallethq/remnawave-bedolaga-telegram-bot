@@ -166,12 +166,35 @@ async def register_otp(
     }
 
 
+def is_review_account(email: str) -> bool:
+    """Это адрес, который отдан проверяющим в стор?
+
+    Механизм выключен, пока REVIEW_ACCOUNT_EMAIL пуст. Сравнение точное:
+    похожие адреса под правило не подпадают.
+    """
+    configured = (settings.REVIEW_ACCOUNT_EMAIL or "").strip().lower()
+    return bool(configured) and (email or "").strip().lower() == configured
+
+
+def _review_code_matches(code: Optional[str]) -> bool:
+    expected = (settings.REVIEW_ACCOUNT_OTP_CODE or "").strip()
+    return bool(expected) and (code or "").strip() == expected
+
+
 async def _verify_registration_code(db: AsyncSession, email: str, code: Optional[str]) -> None:
     """Проверяет email-код регистрации; 400 invalid_code / 410 code_expired."""
     from app.database.crud import cabinet_otp as otp_crud
 
     if not code or not code.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="code_required")
+
+    # У аккаунта для проверяющих код постоянный и письма ему не уходят, поэтому
+    # обычная ветка с записью в cabinet_otp для него не сработала бы вовсе.
+    if is_review_account(email):
+        if _review_code_matches(code):
+            logger.info("Вход по постоянному коду review-аккаунта: %s", email)
+            return
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="invalid_code")
 
     record = await otp_crud.get_active_otp(db, email)
     if not record:
@@ -341,6 +364,18 @@ async def auth_otp_request(
     from app.services import email_service
 
     _ensure_enabled()
+
+    # Проверяющему письмо не нужно: код у него постоянный. Отвечаем до проверки
+    # SendGrid и без капчи, а resendAfter=0 снимает cooldown — иначе повторное
+    # нажатие «отправить код» упрётся в 429 и выглядит как поломка.
+    if is_review_account(payload.email):
+        logger.info("Запрос кода для review-аккаунта — письмо не отправляем")
+        return {
+            "ok": True,
+            "ttlSeconds": settings.CABINET_OTP_TTL_MINUTES * 60,
+            "resendAfter": 0,
+        }
+
     if not email_service.is_email_configured():
         logger.error("SendGrid не сконфигурирован — /cabinet/auth/otp/request недоступен")
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail="Email delivery unavailable")
