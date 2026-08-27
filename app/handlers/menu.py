@@ -71,7 +71,11 @@ from app.services.public_offer_service import PublicOfferService
 from app.services.faq_service import FaqService
 from app.utils.timezone import format_local_datetime
 from app.utils.pricing_utils import format_period_description
-from app.utils.user_utils import get_effective_referral_commission_percent
+from app.utils.user_utils import (
+    get_effective_referral_commission_percent,
+    is_rays_program_available_for,
+    is_rays_shop_available_for,
+)
 from app.handlers.subscription.traffic import handle_add_traffic, add_traffic
 
 logger = logging.getLogger(__name__)
@@ -1875,8 +1879,8 @@ async def handle_referral(callback: types.CallbackQuery, db_user: User, db: Asyn
     amount = int(stats.get("total_earned_kopeks", 0) / 100)
     rays = db_user.rays_balance or 0
     percent = get_effective_referral_commission_percent(db_user)
-    rays_enabled = settings.is_rays_program_enabled()
-    shop_enabled = settings.is_rays_shop_enabled()
+    rays_enabled = is_rays_program_available_for(db_user)
+    shop_enabled = is_rays_shop_available_for(db_user)
 
     bot = await callback.bot.get_me()
     referral_link = f"https://t.me/{bot.username}?start={db_user.referral_code}"

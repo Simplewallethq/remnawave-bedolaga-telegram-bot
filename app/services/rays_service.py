@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database.crud.rays import add_user_rays
 from app.database.crud.user import get_user_by_id
+from app.utils.user_utils import is_partner_account
 from app.database.models import RayTransactionType, User
 from app.services.referral_service import send_referral_notification
 
@@ -50,6 +51,15 @@ async def award_rays_for_referral_purchase(
         referrer = await get_user_by_id(db, buyer.referred_by_id)
         if not referrer:
             logger.error("Реферер %s не найден для начисления лучей", buyer.referred_by_id)
+            return False
+
+        # Партнёр живёт на повышенной комиссии и вне программы лучей. Флаг
+        # квалификации у реферала не лочим: он к лучам партнёра отношения не имеет.
+        if is_partner_account(referrer):
+            logger.info(
+                "☀️ Реферер %s — партнёрский аккаунт, лучи не начисляются",
+                referrer.id,
+            )
             return False
 
         # Лочим реферала и начисляем лучи рефереру в одной транзакции.

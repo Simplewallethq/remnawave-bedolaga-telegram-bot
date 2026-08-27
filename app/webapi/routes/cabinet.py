@@ -42,6 +42,7 @@ from app.database.crud.user import (
     get_user_by_referral_code,
 )
 from app.database.crud.withdrawal import get_user_withdrawals
+from app.utils.user_utils import is_rays_shop_available_for
 from app.database.models import (
     PaymentMethod,
     SubscriptionStatus,
@@ -1050,8 +1051,8 @@ async def create_referral_withdrawal(
 
 # ── Магазин лучей ─────────────────────────────────────────────────────────
 
-def _ensure_shop_enabled() -> None:
-    if not settings.is_rays_shop_enabled():
+def _ensure_shop_enabled(user: User) -> None:
+    if not is_rays_shop_available_for(user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="shop_disabled")
 
 
@@ -1059,7 +1060,7 @@ def _ensure_shop_enabled() -> None:
 async def get_shop(
     user: User = Depends(get_current_cabinet_user),
 ) -> Dict[str, Any]:
-    _ensure_shop_enabled()
+    _ensure_shop_enabled(user)
     return cabinet_service.build_shop(user)
 
 
@@ -1069,7 +1070,7 @@ async def get_shop_claims(
     db: AsyncSession = Depends(get_db_session),
     user: User = Depends(get_current_cabinet_user),
 ) -> Dict[str, Any]:
-    _ensure_shop_enabled()
+    _ensure_shop_enabled(user)
     from app.database.crud.ray_prize_claim import get_user_claims
 
     claims = await get_user_claims(db, user.id, limit=limit)
@@ -1082,7 +1083,7 @@ async def redeem_shop_prize(
     db: AsyncSession = Depends(get_db_session),
     user: User = Depends(get_current_cabinet_user),
 ) -> Dict[str, Any]:
-    _ensure_shop_enabled()
+    _ensure_shop_enabled(user)
     from sqlalchemy import select
 
     from app.services.rays_shop_service import (

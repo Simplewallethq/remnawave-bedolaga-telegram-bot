@@ -3566,6 +3566,33 @@ async def add_referral_commission_percent_column() -> bool:
         return False
 
 
+async def add_user_is_partner_column() -> bool:
+    """Партнёрский аккаунт: users.is_partner. Идемпотентно."""
+    if await check_column_exists('users', 'is_partner'):
+        logger.info("ℹ️ Колонка users.is_partner уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                alter_sql = "ALTER TABLE users ADD COLUMN is_partner BOOLEAN NOT NULL DEFAULT 0"
+            elif db_type in ('postgresql', 'mysql'):
+                alter_sql = "ALTER TABLE users ADD COLUMN is_partner BOOLEAN NOT NULL DEFAULT FALSE"
+            else:
+                logger.error(f"Неподдерживаемый тип БД для добавления is_partner: {db_type}")
+                return False
+
+            await conn.execute(text(alter_sql))
+
+        logger.info("✅ Добавлена колонка is_partner в таблицу users")
+        return True
+    except Exception as error:
+        logger.error(f"Ошибка добавления users.is_partner: {error}")
+        return False
+
+
 async def add_referral_qualified_columns() -> bool:
     """Добавляет колонки для учёта "качественных" рефералов партнёра.
 
@@ -7819,6 +7846,12 @@ async def run_universal_migration():
             logger.info("✅ Колонка referral_commission_percent готова")
         else:
             logger.warning("⚠️ Проблемы с колонкой referral_commission_percent")
+
+        partner_column_ready = await add_user_is_partner_column()
+        if partner_column_ready:
+            logger.info("✅ Колонка users.is_partner готова")
+        else:
+            logger.warning("⚠️ Проблемы с колонкой users.is_partner")
 
         qualified_columns_ready = await add_referral_qualified_columns()
         if qualified_columns_ready:

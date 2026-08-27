@@ -60,13 +60,39 @@ async def generate_unique_referral_code(db: AsyncSession, telegram_id: int) -> s
     return f"ref{timestamp}"
 
 
+def is_partner_account(user) -> bool:
+    """Партнёрский аккаунт: повышенная комиссия и никакой программы лучей."""
+    return bool(getattr(user, "is_partner", False))
+
+
+def is_rays_program_available_for(user) -> bool:
+    """Лучи доступны, если программа включена и это не партнёр."""
+    if is_partner_account(user):
+        return False
+    return settings.is_rays_program_enabled()
+
+
+def is_rays_shop_available_for(user) -> bool:
+    """Магазин наград доступен по тем же правилам, что и сама программа."""
+    if is_partner_account(user):
+        return False
+    return settings.is_rays_shop_enabled()
+
+
 def get_effective_referral_commission_percent(user: User) -> int:
-    """Возвращает индивидуальный процент комиссии пользователя или дефолтное значение."""
+    """Возвращает индивидуальный процент комиссии пользователя или дефолтное значение.
+
+    Приоритет: явно выставленный админом процент → партнёрский → общий. Ручная
+    настройка остаётся сильнее флага, иначе админ не смог бы отклониться от 60%.
+    """
 
     percent = getattr(user, "referral_commission_percent", None)
 
     if percent is None:
-        percent = settings.REFERRAL_COMMISSION_PERCENT
+        if is_partner_account(user):
+            percent = settings.PARTNER_REFERRAL_COMMISSION_PERCENT
+        else:
+            percent = settings.REFERRAL_COMMISSION_PERCENT
 
     if percent < 0 or percent > 100:
         logger.error(

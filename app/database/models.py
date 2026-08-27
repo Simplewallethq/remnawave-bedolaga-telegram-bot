@@ -772,6 +772,9 @@ class User(Base):
     auto_promo_group_assigned = Column(Boolean, nullable=False, default=False)
     auto_promo_group_threshold_kopeks = Column(BigInteger, nullable=False, default=0)
     referral_commission_percent = Column(Integer, nullable=True)
+    # Партнёрский аккаунт: повышенная реферальная комиссия и никаких лучей.
+    # Не путать с Subscription.is_partner — там речь про саму подписку.
+    is_partner = Column(Boolean, nullable=False, default=False, server_default="false")
     # Суммарные пополнения реферала (для квалификации в партнёрской программе)
     referral_total_topup_kopeks = Column(BigInteger, nullable=False, default=0)
     # Счётчик рефералов партнёра, внёсших суммарно более 1000₽

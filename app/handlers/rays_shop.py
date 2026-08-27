@@ -13,6 +13,7 @@ from aiogram import Dispatcher, F, types
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.utils.user_utils import is_rays_shop_available_for
 from app.database.crud.ray_prize_claim import get_claim_by_id, get_user_claims
 from app.database.crud.user import get_user_by_id
 from app.database.models import RayPrizeClaimStatus, User
@@ -66,7 +67,7 @@ def _rays_tier_line(texts) -> str:
 
 async def show_rays_shop(callback: types.CallbackQuery, db_user: User, db: AsyncSession):
     """Каталог Магазина Наград."""
-    if not settings.is_rays_shop_enabled():
+    if not is_rays_shop_available_for(db_user):
         texts = get_texts(db_user.language)
         await callback.answer(
             texts.t("RAYS_SHOP_DISABLED", "Магазин Наград временно недоступен"),
@@ -126,7 +127,7 @@ async def show_rays_prize(callback: types.CallbackQuery, db_user: User, db: Asyn
     """Карточка приза: подтверждение покупки или экран нехватки лучей."""
     texts = get_texts(db_user.language)
     prize = get_prize_by_number(int(callback.data.rsplit("_", 1)[-1]))
-    if prize is None or not settings.is_rays_shop_enabled():
+    if prize is None or not is_rays_shop_available_for(db_user):
         await callback.answer(
             texts.t("RAYS_PRIZE_UNAVAILABLE", "Приз временно недоступен"), show_alert=True,
         )
@@ -216,7 +217,7 @@ async def confirm_rays_prize(callback: types.CallbackQuery, db_user: User, db: A
     """Подтверждение: списывает лучи, активирует подписку или создаёт заявку."""
     texts = get_texts(db_user.language)
     prize = get_prize_by_number(int(callback.data.rsplit("_", 1)[-1]))
-    if prize is None or not settings.is_rays_shop_enabled():
+    if prize is None or not is_rays_shop_available_for(db_user):
         await callback.answer(
             texts.t("RAYS_PRIZE_UNAVAILABLE", "Приз временно недоступен"), show_alert=True,
         )

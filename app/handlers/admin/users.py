@@ -1705,7 +1705,13 @@ async def show_user_management(
         back_callback = "admin_users_ready_to_renew_filter"
     
     # Базовая клавиатура профиля
-    kb = get_user_management_keyboard(user.id, user.status, db_user.language, back_callback)
+    kb = get_user_management_keyboard(
+        user.id,
+        user.status,
+        db_user.language,
+        back_callback,
+        is_partner=bool(user.is_partner),
+    )
     # Если пришли из тикета — добавим в начало кнопку возврата к тикету
     try:
         if origin_ticket_id:
@@ -1971,6 +1977,75 @@ async def start_edit_referral_percent(
         reply_markup=keyboard,
     )
     await callback.answer()
+
+
+async def toggle_user_partner_account(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    """Включает или снимает партнёрский аккаунт: комиссия 60% вместо 50% и
+    полное отключение программы лучей."""
+    texts = get_texts(db_user.language)
+    user_id = int(callback.data.rsplit("_", 1)[-1])
+
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        await callback.answer(
+            texts.t("ADMIN_USER_NOT_FOUND", "Пользователь не найден"),
+            show_alert=True,
+        )
+        return
+
+    user.is_partner = not bool(user.is_partner)
+    user.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(user)
+
+    percent = get_effective_referral_commission_percent(user)
+    logger.info(
+        "Админ %s %s партнёрский аккаунт пользователю %s (комиссия %s%%)",
+        callback.from_user.id,
+        "выдал" if user.is_partner else "снял",
+        user_id,
+        percent,
+    )
+
+    if user.is_partner:
+        alert = texts.t(
+            "ADMIN_USER_PARTNER_ENABLED",
+            "🤝 Партнёрский аккаунт включён. Комиссия: {percent}%. Лучи отключены.",
+        ).format(percent=percent)
+    else:
+        alert = texts.t(
+            "ADMIN_USER_PARTNER_DISABLED",
+            "Партнёрский аккаунт снят. Комиссия: {percent}%.",
+        ).format(percent=percent)
+
+    await callback.answer(alert, show_alert=True)
+
+    # Перерисовываем только клавиатуру: подпись кнопки зависит от флага.
+    # Кнопку «Назад» берём из текущей разметки, чтобы не увести админа из
+    # ветки, из которой он пришёл (например, из карточки тикета).
+    back_callback = "admin_users_list"
+    markup = callback.message.reply_markup if callback.message else None
+    if markup and markup.inline_keyboard and markup.inline_keyboard[-1]:
+        last = markup.inline_keyboard[-1][0]
+        if last.callback_data:
+            back_callback = last.callback_data
+
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=get_user_management_keyboard(
+                user.id,
+                user.status,
+                db_user.language,
+                back_callback,
+                is_partner=bool(user.is_partner),
+            )
+        )
+    except TelegramBadRequest as error:
+        logger.debug("Не удалось обновить клавиатуру карточки пользователя: %s", error)
 
 
 async def _update_referral_commission_percent(
@@ -5641,6 +5716,11 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         set_user_promo_group,
         F.data.startswith("admin_user_promo_group_toggle_")
+    )
+
+    dp.callback_query.register(
+        toggle_user_partner_account,
+        F.data.startswith("admin_user_partner_toggle_")
     )
 
     dp.callback_query.register(

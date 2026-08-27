@@ -36,7 +36,10 @@ from app.database.models import (
     TransactionType,
     User,
 )
-from app.utils.user_utils import get_effective_referral_commission_percent
+from app.utils.user_utils import (
+    get_effective_referral_commission_percent,
+    is_rays_shop_available_for,
+)
 from app.services.plan_pricing_service import (
     get_lowest_monthly_price,
     list_active_plans,
@@ -548,7 +551,7 @@ def build_shop(user: User) -> Dict[str, Any]:
     ])
 
     return {
-        "enabled": settings.is_rays_shop_enabled(),
+        "enabled": is_rays_shop_available_for(user),
         "rays": user.rays_balance or 0,
         "raysLifetime": user.rays_lifetime_earned or 0,
         "earnRules": [

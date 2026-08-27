@@ -1080,7 +1080,13 @@ def get_admin_statistics_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
     ])
 
 
-def get_user_management_keyboard(user_id: int, user_status: str, language: str = "ru", back_callback: str = "admin_users_list") -> InlineKeyboardMarkup:
+def get_user_management_keyboard(
+    user_id: int,
+    user_status: str,
+    language: str = "ru",
+    back_callback: str = "admin_users_list",
+    is_partner: bool = False,
+) -> InlineKeyboardMarkup:
     texts = get_texts(language)
 
     keyboard = [
@@ -1104,6 +1110,16 @@ def get_user_management_keyboard(user_id: int, user_status: str, language: str =
             InlineKeyboardButton(
                 text=_t(texts, "ADMIN_USER_REFERRALS_BUTTON", "🤝 Рефералы"),
                 callback_data=f"admin_user_referrals_{user_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=(
+                    _t(texts, "ADMIN_USER_PARTNER_OFF_BUTTON", "🤝 Снять партнёрский аккаунт")
+                    if is_partner
+                    else _t(texts, "ADMIN_USER_PARTNER_ON_BUTTON", "🤝 Сделать партнёром")
+                ),
+                callback_data=f"admin_user_partner_toggle_{user_id}"
             )
         ],
         [
