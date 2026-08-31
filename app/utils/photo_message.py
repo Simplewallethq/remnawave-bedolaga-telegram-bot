@@ -12,7 +12,7 @@ from .message_patch import (
     is_qr_message,
     prepare_privacy_safe_kwargs,
 )
-from app.utils.bot_registry import get_logo_for_bot
+from app.utils.bot_registry import get_logo_for_bot, resolve_photo_for_bot
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,8 @@ async def edit_or_answer_photo(
         return
 
     if photo_path:
-        media = FSInputFile(photo_path)
+        bot_id = callback.message.bot.id if callback.message.bot else None
+        media = FSInputFile(resolve_photo_for_bot(bot_id, photo_path))
     else:
         media = _resolve_media(callback.message)
 

@@ -6,7 +6,7 @@ from aiogram.types import FSInputFile, InputMediaPhoto, Message
 
 from app.config import settings
 from app.localization.texts import get_texts
-from app.utils.bot_registry import get_logo_for_bot
+from app.utils.bot_registry import get_logo_for_bot, resolve_photo_for_bot
 
 LOGO_PATH = Path(settings.LOGO_FILE)
 _PRIVACY_RESTRICTED_CODE = "BUTTON_USER_PRIVACY_RESTRICTED"
@@ -18,6 +18,8 @@ def is_qr_message(message: Message) -> bool:
 
 _original_answer = Message.answer
 _original_edit_text = Message.edit_text
+_original_answer_photo = Message.answer_photo
+_original_edit_media = Message.edit_media
 
 
 def _get_language(message: Message) -> str | None:
@@ -160,7 +162,45 @@ async def _edit_with_photo(self: Message, text: str, **kwargs):
     return await _original_edit_text(self, text, **kwargs)
 
 
+def _mirror_photo(message: Message, photo: Any) -> Any:
+    """Подменяет общую картинку страницы на собственную картинку зеркала."""
+    if not isinstance(photo, FSInputFile):
+        return photo
+    bot_id = message.bot.id if message.bot else None
+    resolved = resolve_photo_for_bot(bot_id, photo.path)
+    if str(resolved) == str(photo.path):
+        return photo
+    return FSInputFile(resolved)
+
+
+def _mirror_media(message: Message, media: Any) -> Any:
+    photo = getattr(media, "media", None)
+    swapped = _mirror_photo(message, photo)
+    if swapped is photo:
+        return media
+    return media.model_copy(update={"media": swapped})
+
+
+async def _answer_photo_for_bot(self: Message, *args, **kwargs):
+    if args:
+        args = (_mirror_photo(self, args[0]), *args[1:])
+    elif "photo" in kwargs:
+        kwargs["photo"] = _mirror_photo(self, kwargs["photo"])
+    return await _original_answer_photo(self, *args, **kwargs)
+
+
+async def _edit_media_for_bot(self: Message, *args, **kwargs):
+    if args:
+        args = (_mirror_media(self, args[0]), *args[1:])
+    elif "media" in kwargs:
+        kwargs["media"] = _mirror_media(self, kwargs["media"])
+    return await _original_edit_media(self, *args, **kwargs)
+
+
 def patch_message_methods():
+    # Зеркала показывают свою картинку независимо от режима логотипа
+    Message.answer_photo = _answer_photo_for_bot
+    Message.edit_media = _edit_media_for_bot
     if not settings.ENABLE_LOGO_MODE:
         return
     Message.answer = _answer_with_photo
