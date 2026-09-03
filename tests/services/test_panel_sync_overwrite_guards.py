@@ -214,3 +214,34 @@ async def test_staleness_check_disabled_without_snapshot_time():
     db.scalar.assert_not_awaited()
     assert subscription.traffic_limit_gb == 50
     assert subscription.device_limit == 2
+
+
+async def test_paid_squad_from_panel_is_not_imported(monkeypatch):
+    """Платный сквад живёт только в панели: в connected_squads он не попадает."""
+    from app.config import settings
+
+    paid_uuid = "7c8060f5-cacc-47ae-8aa4-484c48171764"
+    monkeypatch.setattr(settings, "PAID_INTERNAL_SQUAD_UUID", paid_uuid)
+    service = _create_service()
+
+    subscription = _make_subscription(connected_squads=["squad-1"])
+    user = _make_user(subscription)
+    panel_user = _make_panel_user(
+        expire_at=subscription.end_date,
+        traffic_limit_gb=0,
+        device_limit=10,
+    )
+    panel_user["activeInternalSquads"] = [
+        {"uuid": "squad-1", "name": "Default"},
+        {"uuid": paid_uuid, "name": "PaidUsers"},
+    ]
+
+    applied = await service._update_subscription_from_panel_data(
+        _make_db(datetime.utcnow() - timedelta(hours=1)),
+        user,
+        panel_user,
+        snapshot_taken_at=datetime.utcnow() - timedelta(minutes=1),
+    )
+
+    assert applied is True
+    assert subscription.connected_squads == ["squad-1"]

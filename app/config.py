@@ -140,6 +140,9 @@ class Settings(BaseSettings):
     PRICE_180_DAYS: int = 499000
     PRICE_360_DAYS: int = 899000
     PAID_SUBSCRIPTION_USER_TAG: Optional[str] = None
+    # Внутренний сквад панели, который получает каждая не-триальная подписка
+    # (поверх connected_squads). Пусто — сквад не добавляется.
+    PAID_INTERNAL_SQUAD_UUID: Optional[str] = None
 
     PRICE_TRAFFIC_5GB: int = 2000
     PRICE_TRAFFIC_10GB: int = 3500
@@ -1116,6 +1119,13 @@ class Settings(BaseSettings):
             self.PAID_SUBSCRIPTION_USER_TAG,
             "PAID_SUBSCRIPTION_USER_TAG",
         )
+
+    def get_paid_internal_squad_uuid(self) -> Optional[str]:
+        value = self.PAID_INTERNAL_SQUAD_UUID
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
 
     def get_bot_username(self) -> Optional[str]:
         username = getattr(self, "BOT_USERNAME", None)

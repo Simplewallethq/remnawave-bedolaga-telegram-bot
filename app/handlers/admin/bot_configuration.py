@@ -36,6 +36,8 @@ from app.external.telegram_stars import TelegramStarsService
 CATEGORY_PAGE_SIZE = 10
 SETTINGS_PAGE_SIZE = 8
 SIMPLE_SUBSCRIPTION_SQUADS_PAGE_SIZE = 6
+# Настройки, значение которых — UUID сквада панели: для них показывается выбор из списка.
+SQUAD_UUID_SETTING_KEYS = frozenset({"SIMPLE_SUBSCRIPTION_SQUAD_UUID", "PAID_INTERNAL_SQUAD_UUID"})
 
 CATEGORY_GROUP_METADATA: Dict[str, Dict[str, object]] = {
     "core": {
@@ -1448,7 +1450,7 @@ def _build_setting_keyboard(
         for chunk in _chunk(choice_buttons, 2):
             rows.append(list(chunk))
 
-    if key == "SIMPLE_SUBSCRIPTION_SQUAD_UUID" and not is_read_only:
+    if key in SQUAD_UUID_SETTING_KEYS and not is_read_only:
         rows.append([
             types.InlineKeyboardButton(
                 text="🌍 Выбрать сквад",
@@ -1712,7 +1714,7 @@ async def show_simple_subscription_squad_selector(
         await callback.answer("Эта настройка больше недоступна", show_alert=True)
         return
 
-    if key != "SIMPLE_SUBSCRIPTION_SQUAD_UUID":
+    if key not in SQUAD_UUID_SETTING_KEYS:
         await callback.answer("Эта настройка больше недоступна", show_alert=True)
         return
 

@@ -39,6 +39,7 @@ from app.database.models import (
     SubscriptionStatus,
     ServerSquad,
 )
+from app.utils.panel_squads import build_panel_squads, strip_paid_squad
 from app.utils.subscription_utils import (
     resolve_hwid_device_limit_for_payload,
 )
@@ -1260,7 +1261,7 @@ class RemnaWaveService:
                     try:
                         await api.update_user(
                             uuid=subscription.user.remnawave_uuid,
-                            active_internal_squads=new_squads,
+                            active_internal_squads=build_panel_squads(subscription, new_squads),
                         )
                         panel_updated += 1
                     except Exception as error:
@@ -1863,6 +1864,8 @@ class RemnaWaveService:
                         squad_uuids.append(squad['uuid'])
                     elif isinstance(squad, str):
                         squad_uuids.append(squad)
+            # Платный сквад живёт только в панели, в connected_squads его не тащим.
+            squad_uuids = strip_paid_squad(squad_uuids)
         
             subscription_data = {
                 'user_id': user.id,
@@ -2093,6 +2096,8 @@ class RemnaWaveService:
                         squad_uuids.append(squad['uuid'])
                     elif isinstance(squad, str):
                         squad_uuids.append(squad)
+            # Платный сквад живёт только в панели, в connected_squads его не тащим.
+            squad_uuids = strip_paid_squad(squad_uuids)
         
             current_squads = set(subscription.connected_squads or [])
             new_squads = set(squad_uuids)
@@ -2176,7 +2181,7 @@ class RemnaWaveService:
                                         username=user.username,
                                         telegram_id=user.telegram_id
                                     ),
-                                    active_internal_squads=sub.connected_squads,
+                                    active_internal_squads=build_panel_squads(sub),
                                 )
 
                                 if hwid_limit is not None:
@@ -2200,7 +2205,7 @@ class RemnaWaveService:
                                         traffic_limit_bytes=create_kwargs['traffic_limit_bytes'],
                                         traffic_limit_strategy=TrafficLimitStrategy.MONTH,
                                         description=create_kwargs['description'],
-                                        active_internal_squads=sub.connected_squads,
+                                        active_internal_squads=build_panel_squads(sub),
                                     )
 
                                     if hwid_limit is not None:

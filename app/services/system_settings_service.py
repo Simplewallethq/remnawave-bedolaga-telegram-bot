@@ -239,6 +239,7 @@ class BotConfigurationService:
         "PRICE_180_DAYS": "SUBSCRIPTION_PRICES",
         "PRICE_360_DAYS": "SUBSCRIPTION_PRICES",
         "PAID_SUBSCRIPTION_USER_TAG": "SUBSCRIPTION_PRICES",
+        "PAID_INTERNAL_SQUAD_UUID": "SUBSCRIPTIONS_CORE",
         "TRAFFIC_PACKAGES_CONFIG": "TRAFFIC_PACKAGES",
         "BASE_PROMO_GROUP_PERIOD_DISCOUNTS_ENABLED": "SUBSCRIPTIONS_CORE",
         "BASE_PROMO_GROUP_PERIOD_DISCOUNTS": "SUBSCRIPTIONS_CORE",
@@ -695,6 +696,20 @@ class BotConfigurationService:
             "example": "PAID_USER",
             "warning": "Если тег не задан или невалиден, существующий тег не будет изменён.",
             "dependencies": "Оплата подписки и интеграция с RemnaWave",
+        },
+        "PAID_INTERNAL_SQUAD_UUID": {
+            "description": (
+                "Внутренний сквад панели RemnaWave, который бот добавляет каждой платной "
+                "(не триальной) подписке поверх выбранных серверов. Хосты, чьи инбаунды лежат "
+                "только в этом скваде, видят только платные пользователи."
+            ),
+            "format": "Выберите сквад из списка или очистите значение.",
+            "example": "7c8060f5-cacc-47ae-8aa4-484c48171764",
+            "warning": (
+                "Сквад не попадает в connected_squads и в каталог серверов. "
+                "После смены значения старым пользователям нужен повторный прогон scripts/backfill_paid_squad.py."
+            ),
+            "dependencies": "Интеграция с RemnaWave",
         },
     }
 

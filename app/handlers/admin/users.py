@@ -36,6 +36,7 @@ from app.services.admin_notification_service import AdminNotificationService
 from app.database.crud.device_link import revoke_all_device_links
 from app.database.crud.promo_group import get_promo_groups_with_counts
 from app.utils.decorators import admin_required, error_handler
+from app.utils.panel_squads import build_panel_squads
 from app.utils.formatters import format_datetime, format_time_ago
 from app.utils.user_utils import get_effective_referral_commission_percent
 from app.services.remnawave_service import RemnaWaveService
@@ -3792,7 +3793,7 @@ async def toggle_user_server(
                 async with remnawave_service.get_api_client() as api:
                     await api.update_user(
                         uuid=user.remnawave_uuid,
-                        active_internal_squads=current_squads,
+                        active_internal_squads=build_panel_squads(subscription, current_squads),
                         description=settings.format_remnawave_user_description(
                             full_name=user.full_name,
                             username=user.username,
@@ -5064,7 +5065,7 @@ async def admin_buy_subscription_execute(
                                 username=target_user.username,
                                 telegram_id=target_user.telegram_id
                             ),
-                            active_internal_squads=subscription.connected_squads,
+                            active_internal_squads=build_panel_squads(subscription),
                         )
 
                         if hwid_limit is not None:
@@ -5090,7 +5091,7 @@ async def admin_buy_subscription_execute(
                                 username=target_user.username,
                                 telegram_id=target_user.telegram_id
                             ),
-                            active_internal_squads=subscription.connected_squads,
+                            active_internal_squads=build_panel_squads(subscription),
                         )
 
                         if hwid_limit is not None:

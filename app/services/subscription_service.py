@@ -17,6 +17,7 @@ from app.utils.pricing_utils import (
     calculate_prorated_price,
     validate_pricing_calculation
 )
+from app.utils.panel_squads import build_panel_squads
 from app.utils.subscription_utils import (
     resolve_hwid_device_limit_for_payload,
 )
@@ -235,7 +236,7 @@ class SubscriptionService:
                             username=user.username,
                             telegram_id=user.telegram_id
                         ),
-                        active_internal_squads=subscription.connected_squads,
+                        active_internal_squads=build_panel_squads(subscription),
                     )
 
                     if user_tag is not None:
@@ -269,7 +270,7 @@ class SubscriptionService:
                             username=user.username,
                             telegram_id=user.telegram_id
                         ),
-                        active_internal_squads=subscription.connected_squads,
+                        active_internal_squads=build_panel_squads(subscription),
                     )
 
                     if user_tag is not None:
@@ -352,7 +353,7 @@ class SubscriptionService:
                         username=user.username,
                         telegram_id=user.telegram_id
                     ),
-                    active_internal_squads=subscription.connected_squads,
+                    active_internal_squads=build_panel_squads(subscription),
                 )
 
                 if user_tag is not None:
