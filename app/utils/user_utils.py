@@ -66,7 +66,9 @@ def is_partner_account(user) -> bool:
 
 
 def is_rays_program_available_for(user) -> bool:
-    """Лучи доступны, если программа включена и это не партнёр."""
+    """Лучи доступны, если программа включена, витрина их продаёт и это не партнёр."""
+    if not settings.is_rays_program_enabled_for_brand():
+        return False
     if is_partner_account(user):
         return False
     return settings.is_rays_program_enabled()
@@ -74,6 +76,8 @@ def is_rays_program_available_for(user) -> bool:
 
 def is_rays_shop_available_for(user) -> bool:
     """Магазин наград доступен по тем же правилам, что и сама программа."""
+    if not settings.is_rays_program_enabled_for_brand():
+        return False
     if is_partner_account(user):
         return False
     return settings.is_rays_shop_enabled()

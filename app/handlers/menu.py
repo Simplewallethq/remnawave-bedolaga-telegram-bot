@@ -1218,11 +1218,14 @@ async def get_main_menu_text(
         subscription_state = "inactive"
         base_text += texts.t("MAIN_MENU_NO_SUBSCRIPTION", "Подписка: 🔴Истекла")
 
-    base_text += texts.t(
-        "MAIN_MENU_CHANNEL_HINT",
-        "\n\n<a href=\"https://t.me/vpnleto\">➡️</a> "
-        "<a href=\"https://t.me/vpnleto\">Подпишись на наш канал</a> — там много интересного",
-    )
+    # Копикэт без своего канала не показывает блок вовсе: чужая ссылка
+    # выдала бы витрину с головой.
+    if settings.is_brand_channel_enabled():
+        base_text += texts.t(
+            "MAIN_MENU_CHANNEL_HINT",
+            "\n\n<a href=\"https://t.me/vpnleto\">➡️</a> "
+            "<a href=\"https://t.me/vpnleto\">Подпишись на наш канал</a> — там много интересного",
+        )
     base_text += texts.t(
         "MAIN_MENU_LEGAL_LINKS",
         "\n\n<a href=\"https://telegra.ph/Politika-konfidencialnosti-07-20-101\">Политика конфиденциальности</a>"

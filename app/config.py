@@ -495,6 +495,18 @@ class Settings(BaseSettings):
     LETO_APP_DOWNLOAD_LINK_WINDOWS: Optional[str] = None
     LETO_APP_DOWNLOAD_LINK_MACOS: Optional[str] = None
 
+    # --- Бренд копикэта -------------------------------------------------
+    # Один код обслуживает несколько витрин. Имя приложения нигде не
+    # захардкожено: тексты пишутся с "Leto", а подстановка на лету меняет
+    # его на бренд конкретного бота. Пустое значение = остаёмся Leto.
+    VPN_BRAND_NAME: str = ""
+    # Витрина без собственного приложения показывает только Happ/Incy.
+    BRAND_HAS_OWN_APP: bool = True
+    # Канал: пустое значение убирает блок "подпишись" целиком.
+    BRAND_CHANNEL_ENABLED: bool = True
+    # Лучи и магазин наград: у копикэта остаётся голая рефка.
+    BRAND_RAYS_ENABLED: bool = True
+
     # Автообновление десктопного приложения (публичный манифест /cabinet/app/update).
     # Правится в админке: релиз = смена версии/ссылки/хеша без редеплоя.
     APP_UPDATE_WINDOWS_ENABLED: bool = False
@@ -1733,6 +1745,11 @@ class Settings(BaseSettings):
         result = {}
         for platform, method in methods.items():
             method = (method or "").strip().lower()
+            # Витрина без собственного приложения не предлагает его скачать —
+            # такой копикэт живёт на Happ/Incy, и leto_code для него не вариант.
+            if method == "leto_code" and not self.brand_has_own_app():
+                method = "happ_link"
+
             if method == "incy_link" and platform in incy_links:
                 store = incy_links[platform]
             elif method == "leto_code":
@@ -2139,6 +2156,24 @@ class Settings(BaseSettings):
 
     def get_support_contact_display_html(self) -> str:
         return html.escape(self.get_support_contact_display())
+
+    def get_vpn_brand_name(self) -> str:
+        """Имя приложения для этой витрины. По умолчанию — Leto."""
+        return (self.VPN_BRAND_NAME or "").strip() or "Leto"
+
+    def is_rays_program_enabled_for_brand(self) -> bool:
+        """Копикэт-витрина может продавать подписку без программы лучей."""
+        return bool(self.BRAND_RAYS_ENABLED)
+
+    def is_rebranded(self) -> bool:
+        return self.get_vpn_brand_name().casefold() != "leto"
+
+    def brand_has_own_app(self) -> bool:
+        """Есть ли у витрины собственное приложение (иначе только Happ/Incy)."""
+        return bool(self.BRAND_HAS_OWN_APP)
+
+    def is_brand_channel_enabled(self) -> bool:
+        return bool(self.BRAND_CHANNEL_ENABLED) and bool((self.CHANNEL_LINK or "").strip())
 
     def get_support_email(self) -> str:
         return (self.SUPPORT_EMAIL or "").strip()

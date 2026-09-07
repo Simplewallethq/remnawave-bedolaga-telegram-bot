@@ -5,6 +5,7 @@ import logging
 from typing import Any, Dict
 
 from app.config import settings
+from app.localization.branding import brand_text
 from app.localization.loader import (
     DEFAULT_LANGUAGE,
     clear_locale_cache,
@@ -202,18 +203,18 @@ class Texts:
             return self._get_value(key)
         except KeyError:
             if default is not None:
-                return default
+                return brand_text(default)
             raise
 
     def _get_value(self, item: str) -> Any:
         if item == "RULES_TEXT":
-            return _get_cached_rules_value(self.language)
+            return brand_text(_get_cached_rules_value(self.language))
 
         if item in self._values:
-            return self._values[item]
+            return brand_text(self._values[item])
 
         if item in self._fallback_values:
-            return self._fallback_values[item]
+            return brand_text(self._fallback_values[item])
 
         _logger.warning(
             "Missing localization key '%s' for language '%s'",
