@@ -33,6 +33,7 @@ from app.database.models import (
 )
 from app.localization.texts import get_texts
 from app.services.onepayment_service import (
+    ERROR_TRANSACTION_NOT_FOUND,
     STATUS_FAILURE,
     STATUS_INIT,
     STATUS_LABELS,
@@ -542,7 +543,16 @@ class OnePaymentPaymentMixin:
             try:
                 remote = await service.get_payment_status(user_data=payment.user_data)
             except OnePaymentAPIError as error:
-                logger.error("Ошибка получения статуса 1Payment %s: %s", payment.user_data, error)
+                if error.error_code == ERROR_TRANSACTION_NOT_FOUND:
+                    # Пользователь ещё не открыл форму оплаты — счёт просто ждёт.
+                    logger.debug(
+                        "1Payment: транзакция %s ещё не создана на стороне провайдера",
+                        payment.user_data,
+                    )
+                else:
+                    logger.error(
+                        "Ошибка получения статуса 1Payment %s: %s", payment.user_data, error
+                    )
             except Exception as error:  # pragma: no cover - safety net
                 logger.exception("Непредвиденная ошибка статуса 1Payment: %s", error)
 

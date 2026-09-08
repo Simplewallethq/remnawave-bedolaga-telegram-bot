@@ -40,6 +40,11 @@ STATUS_LABELS = {
     STATUS_REFUND_PENDING: "REFUND_PENDING",
 }
 
+# Транзакции ещё нет в 1Payment: init_form только выдаёт ссылку на форму, а сама
+# транзакция появляется, когда плательщик её открыл. Для неоплаченного счёта это
+# штатное состояние, а не сбой.
+ERROR_TRANSACTION_NOT_FOUND = 10
+
 API_ERROR_DESCRIPTIONS = {
     1: "общая ошибка",
     2: "неверная подпись sign",
@@ -234,6 +239,26 @@ class OnePaymentService:
                             f"1Payment {method} returned invalid JSON",
                             http_status=response.status,
                         )
+
+                    # 1Payment отдаёт отказы с HTTP 200 и полем error_code, поэтому
+                    # ориентироваться на код ответа нельзя: без этой проверки
+                    # отклонённое рекуррентное списание записалось бы как PENDING
+                    # и заблокировало повтор на сутки.
+                    if "error_code" in data:
+                        error_code = parse_status(data.get("error_code"))
+                        description = API_ERROR_DESCRIPTIONS.get(error_code or -1, "")
+                        logger.error(
+                            "1Payment API %s отказал: error_code=%s %s",
+                            method,
+                            error_code,
+                            description,
+                        )
+                        raise OnePaymentAPIError(
+                            f"1Payment {method} error_code={error_code} {description}".strip(),
+                            error_code=error_code,
+                            http_status=response.status,
+                        )
+
                     return data
         except aiohttp.ClientError as error:
             logger.error("Ошибка соединения с 1Payment (%s): %s", method, error)

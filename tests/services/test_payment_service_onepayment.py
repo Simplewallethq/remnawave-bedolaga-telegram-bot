@@ -648,3 +648,37 @@ async def test_cancel_binding_is_local(monkeypatch: pytest.MonkeyPatch) -> None:
 
     wrong_user = await service.cancel_onepayment_binding(DummySession(), binding_id=5, user_id=1)
     assert wrong_user is None
+
+
+@pytest.mark.anyio
+async def test_status_check_tolerates_transaction_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Пока плательщик не открыл форму, транзакции у 1Payment нет —
+    кнопка «Проверить оплату» не должна считать это сбоем."""
+    from app.services.onepayment_service import (
+        ERROR_TRANSACTION_NOT_FOUND,
+        OnePaymentAPIError,
+    )
+
+    payment = DummyPayment()
+
+    class RaisingService(StubOnePaymentService):
+        async def get_payment_status(self, **_: Any) -> Dict[str, Any]:
+            raise OnePaymentAPIError("not found", error_code=ERROR_TRANSACTION_NOT_FOUND)
+
+    service = _make_service(RaisingService())
+
+    async def fake_get_by_id(db: Any, payment_id: int) -> DummyPayment:
+        return payment
+
+    monkeypatch.setattr(
+        payment_service_module, "get_onepayment_payment_by_id", fake_get_by_id, raising=False
+    )
+
+    result = await service.get_onepayment_payment_status(DummySession(), payment.id)
+
+    assert result is not None
+    assert result["is_paid"] is False
+    assert result["status"] == "INIT"
+    assert result["remote"] is None

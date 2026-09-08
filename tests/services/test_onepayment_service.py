@@ -185,3 +185,85 @@ async def test_get_payment_status_requires_identifier(monkeypatch: pytest.Monkey
     service = _service(monkeypatch)
     with pytest.raises(OnePaymentAPIError):
         await service.get_payment_status()
+
+
+# ------------------------------------------- отказы приходят с HTTP 200
+
+
+class _FakeResponse:
+    def __init__(self, status: int, text: str) -> None:
+        self.status = status
+        self._text = text
+
+    async def text(self) -> str:
+        return self._text
+
+    async def __aenter__(self) -> "_FakeResponse":
+        return self
+
+    async def __aexit__(self, *_: Any) -> bool:
+        return False
+
+
+class _FakeSession:
+    def __init__(self, response: _FakeResponse) -> None:
+        self._response = response
+        self.sent: Dict[str, Any] = {}
+
+    def post(self, url: str, data: Any = None) -> _FakeResponse:
+        self.sent["url"] = url
+        self.sent["data"] = data
+        return self._response
+
+    async def __aenter__(self) -> "_FakeSession":
+        return self
+
+    async def __aexit__(self, *_: Any) -> bool:
+        return False
+
+
+def _patch_session(monkeypatch: pytest.MonkeyPatch, status: int, body: str) -> _FakeSession:
+    session = _FakeSession(_FakeResponse(status, body))
+    monkeypatch.setattr(
+        "app.services.onepayment_service.aiohttp.ClientSession",
+        lambda *a, **kw: session,
+    )
+    return session
+
+
+@pytest.mark.anyio
+async def test_error_code_with_http_200_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """1Payment отдаёт отказы с кодом 200 — иначе отклонённое списание
+    записалось бы как PENDING и заблокировало повтор на сутки."""
+    service = _service(monkeypatch)
+    _patch_session(monkeypatch, 200, '{"error_code":8}')
+
+    with pytest.raises(OnePaymentAPIError) as excinfo:
+        await service.charge_token(
+            token="t", amount_kopeks=5000, user_data="dup", description="x"
+        )
+    assert excinfo.value.error_code == 8
+
+
+@pytest.mark.anyio
+async def test_transaction_not_found_carries_code_10(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _service(monkeypatch)
+    _patch_session(monkeypatch, 200, '{"error_code":10}')
+
+    with pytest.raises(OnePaymentAPIError) as excinfo:
+        await service.get_payment_status(user_data="1p_1_abc")
+    assert excinfo.value.error_code == 10
+
+
+@pytest.mark.anyio
+async def test_successful_response_returns_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _service(monkeypatch)
+    session = _patch_session(monkeypatch, 200, '{"url":"https://go.example/abc"}')
+
+    result = await service.create_payment(
+        amount_kopeks=5_000, user_data="ud1", description="d", language="ru", user_id=1
+    )
+    assert result["url"] == "https://go.example/abc"
+    # Подпись уходит ровно теми строками, по которым посчитана.
+    assert session.sent["data"]["subscribe"] == "1"
+    assert session.sent["data"]["amount"] == "50.00"
