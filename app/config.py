@@ -430,6 +430,34 @@ class Settings(BaseSettings):
     WATA_PUBLIC_KEY_URL: Optional[str] = None
     WATA_PUBLIC_KEY_CACHE_SECONDS: int = 3600
 
+    # --- 1Payment (СБП с рекуррентами по токену) ---
+    # Подключается ТОЛЬКО через роутер платежей и только на поверхностях оплаты
+    # тарифа (ONEPAYMENT_ROUTER_SOURCES). Пополнение баланса не трогает.
+    ONEPAYMENT_ENABLED: bool = False
+    ONEPAYMENT_PARTNER_ID: Optional[str] = None
+    ONEPAYMENT_PROJECT_ID: Optional[str] = None
+    ONEPAYMENT_API_KEY: Optional[str] = None
+    ONEPAYMENT_BASE_URL: str = "https://api.1payment.com"
+    ONEPAYMENT_SHOP_URL: Optional[str] = None
+    ONEPAYMENT_DISPLAY_NAME: str = "1Payment"
+    # form — init_form (хостед-страница выбора банка), gate — init_payment (прямая ссылка СБП)
+    ONEPAYMENT_INIT_METHOD: str = "form"
+    ONEPAYMENT_SUCCESS_URL: Optional[str] = None
+    ONEPAYMENT_FAILURE_URL: Optional[str] = None
+    ONEPAYMENT_MIN_AMOUNT_KOPEKS: int = 10000
+    ONEPAYMENT_MAX_AMOUNT_KOPEKS: int = 100000000
+    ONEPAYMENT_REQUEST_TIMEOUT: int = 30
+    ONEPAYMENT_WEBHOOK_PATH: str = "/onepayment-webhook"
+    ONEPAYMENT_WEBHOOK_HOST: str = "0.0.0.0"
+    ONEPAYMENT_WEBHOOK_PORT: int = 8088
+    ONEPAYMENT_ACCEPT_TEST_PAYMENTS: bool = False
+    ONEPAYMENT_ROUTER_SOURCES: str = "subscription_cart,tariff_partial,simple_pay"
+    # Рубильник автосписаний. Как и PAYMENT_ROUTER_*, НЕ класть в .env — иначе
+    # значение заморозится и админка перестанет его переключать.
+    ONEPAYMENT_RECURRING_ENABLED: bool = True
+    ONEPAYMENT_RECURRING_DAYS_BEFORE: int = 1
+    ONEPAYMENT_RECURRING_MAX_ATTEMPTS: int = 3
+
     # --- Роутер платежей: единая кнопка «Оплатить» со взвешенным выбором шлюза ---
     # ВАЖНО: эти ключи НЕ должны попадать в .env — иначе BotConfigurationService
     # перестанет их применять (ENV_OVERRIDE_KEYS) и рубильник «замёрзнет».
@@ -440,6 +468,7 @@ class Settings(BaseSettings):
     PAYMENT_ROUTER_WEIGHT_PLATEGA: int = 1
     PAYMENT_ROUTER_WEIGHT_WATA: int = 0
     PAYMENT_ROUTER_WEIGHT_YOOKASSA: int = 0
+    PAYMENT_ROUTER_WEIGHT_ONEPAYMENT: int = 0
     PAYMENT_ROUTER_FALLBACK_ENABLED: bool = True
     PAYMENT_ROUTER_LOG_ENABLED: bool = True
 
@@ -1489,6 +1518,69 @@ class Settings(BaseSettings):
             and self.YOOKASSA_SECRET_KEY is not None
         )
 
+    # --- 1Payment ---
+
+    def is_onepayment_configured(self) -> bool:
+        return (
+            self.ONEPAYMENT_PARTNER_ID is not None
+            and self.ONEPAYMENT_PROJECT_ID is not None
+            and self.ONEPAYMENT_API_KEY is not None
+        )
+
+    def is_onepayment_enabled(self) -> bool:
+        return bool(self.ONEPAYMENT_ENABLED) and self.is_onepayment_configured()
+
+    def is_onepayment_recurring_enabled(self) -> bool:
+        return self.is_onepayment_enabled() and bool(self.ONEPAYMENT_RECURRING_ENABLED)
+
+    def get_onepayment_display_name(self) -> str:
+        name = (self.ONEPAYMENT_DISPLAY_NAME or "").strip()
+        return name or "1Payment"
+
+    def get_onepayment_init_method(self) -> str:
+        value = (self.ONEPAYMENT_INIT_METHOD or "form").strip().lower()
+        return "gate" if value == "gate" else "form"
+
+    def get_onepayment_router_sources(self) -> set:
+        raw = self.ONEPAYMENT_ROUTER_SOURCES or ""
+        return {part.strip() for part in raw.split(",") if part.strip()}
+
+    def get_onepayment_webhook_url(self) -> Optional[str]:
+        if self.WEBHOOK_URL:
+            return f"{self.WEBHOOK_URL}{self.ONEPAYMENT_WEBHOOK_PATH}"
+        return None
+
+    def get_onepayment_shop_url(self) -> Optional[str]:
+        if self.ONEPAYMENT_SHOP_URL:
+            return self.ONEPAYMENT_SHOP_URL
+        return self.WEBHOOK_URL or None
+
+    def get_onepayment_success_url(self) -> Optional[str]:
+        if self.ONEPAYMENT_SUCCESS_URL:
+            return self.ONEPAYMENT_SUCCESS_URL
+        if self.WEBHOOK_URL:
+            return f"{self.WEBHOOK_URL}/payment-success"
+        return None
+
+    def get_onepayment_failure_url(self) -> Optional[str]:
+        if self.ONEPAYMENT_FAILURE_URL:
+            return self.ONEPAYMENT_FAILURE_URL
+        if self.WEBHOOK_URL:
+            return f"{self.WEBHOOK_URL}/payment-failed"
+        return None
+
+    def get_onepayment_recurring_days_before(self) -> int:
+        try:
+            return max(0, int(self.ONEPAYMENT_RECURRING_DAYS_BEFORE))
+        except (TypeError, ValueError):
+            return 1
+
+    def get_onepayment_recurring_max_attempts(self) -> int:
+        try:
+            return max(1, int(self.ONEPAYMENT_RECURRING_MAX_ATTEMPTS))
+        except (TypeError, ValueError):
+            return 3
+
     def is_yookassa_receipt_required(self) -> bool:
         """Нужно ли собирать объект чека 54-ФЗ при создании платежа.
 
@@ -1526,6 +1618,7 @@ class Settings(BaseSettings):
             "platega": self.PAYMENT_ROUTER_WEIGHT_PLATEGA,
             "wata": self.PAYMENT_ROUTER_WEIGHT_WATA,
             "yookassa": self.PAYMENT_ROUTER_WEIGHT_YOOKASSA,
+            "onepayment": self.PAYMENT_ROUTER_WEIGHT_ONEPAYMENT,
         }
         weights = {}
         for gateway, value in raw.items():

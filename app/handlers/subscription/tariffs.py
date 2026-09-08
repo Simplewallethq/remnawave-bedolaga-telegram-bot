@@ -194,7 +194,9 @@ async def _start_tariff_platega_checkout(
 
     router_available = payment_gateway_router.is_enabled(
         SOURCE_PARTIAL
-    ) and bool(payment_gateway_router.eligible_gateways(invoice_kopeks))
+    ) and bool(
+        payment_gateway_router.eligible_gateways(invoice_kopeks, source=SOURCE_PARTIAL)
+    )
 
     if not router_available and not settings.is_platega_universal_enabled():
         await callback.answer(
@@ -1304,6 +1306,7 @@ async def show_tariff_partial_payment_methods(
     )
 
     from app.keyboards.inline import get_partial_payment_methods_keyboard
+    from app.services.payment_gateway_router import SOURCE_PARTIAL
     from app.services.tariff_partial_payment_service import get_provider_min_kopeks
 
     shortfall = price_kopeks - db_user.balance_kopeks
@@ -1323,8 +1326,8 @@ async def show_tariff_partial_payment_methods(
         balance=_format_rub_short(db_user.balance_kopeks),
     )
     if any(
-        get_provider_min_kopeks(m) > shortfall
-        for m in ("auto", "yookassa", "mulenpay", "pal24", "platega", "wata", "cloudpayments", "cryptobot", "heleket")
+        get_provider_min_kopeks(m, SOURCE_PARTIAL) > shortfall
+        for m in ("auto_partial", "yookassa", "mulenpay", "pal24", "platega", "wata", "cloudpayments", "cryptobot", "heleket")
     ):
         message_text += "\n\n" + texts.t(
             "TARIFF_PARTIAL_MIN_NOTE",

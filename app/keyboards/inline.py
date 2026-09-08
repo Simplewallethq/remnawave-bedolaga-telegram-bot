@@ -1613,7 +1613,9 @@ def _auto_route_available(amount_kopeks: int, source: str) -> bool:
 
         if not payment_gateway_router.is_enabled(source):
             return False
-        return bool(payment_gateway_router.eligible_gateways(int(amount_kopeks or 0)))
+        return bool(
+            payment_gateway_router.eligible_gateways(int(amount_kopeks or 0), source=source)
+        )
     except Exception:  # pragma: no cover - клавиатура не должна падать
         return False
 
@@ -1702,11 +1704,22 @@ def get_balance_topup_payment_methods_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
+# Поверхность роутера → метод в callback единой кнопки «Оплатить».
+# handle_topup_amount_callback маппит метод обратно в SOURCE_* — так роутер
+# при выставлении счёта знает ту же поверхность, по которой кнопка показана.
+_AUTO_METHOD_BY_SOURCE = {
+    "balance_topup": "auto",
+    "subscription_cart": "auto_cart",
+    "tariff_partial": "auto_partial",
+}
+
+
 def get_payment_methods_keyboard(
     amount_kopeks: int,
     language: str = DEFAULT_LANGUAGE,
     *,
     include_tribute: bool = True,
+    router_source: str = "subscription_cart",
 ) -> InlineKeyboardMarkup:
     texts = get_texts(language)
     keyboard = []
@@ -1719,12 +1732,13 @@ def get_payment_methods_keyboard(
             return f"topup_amount|{method}|{amount_kopeks}"
         return f"topup_{method}"
 
-    # При включённом роутере три универсальных шлюза схлопываются в одну
-    # кнопку; остальные способы (Stars, крипта, прочие) остаются как есть.
-    auto_route = _auto_route_available(amount_kopeks, "subscription_cart")
+    # При включённом роутере универсальные шлюзы схлопываются в одну кнопку;
+    # остальные способы (Stars, крипта, прочие) остаются как есть.
+    auto_route = _auto_route_available(amount_kopeks, router_source)
     if auto_route:
+        auto_method = _AUTO_METHOD_BY_SOURCE.get(router_source, "auto_cart")
         keyboard.append(
-            [_build_auto_pay_button(amount_kopeks, language, _build_callback("auto"))]
+            [_build_auto_pay_button(amount_kopeks, language, _build_callback(auto_method))]
         )
         has_direct_payment_methods = True
 
@@ -1870,7 +1884,9 @@ def get_partial_payment_methods_keyboard(
     from app.services.tariff_partial_payment_service import clamp_invoice_amount
 
     texts = get_texts(language)
-    base = get_payment_methods_keyboard(max(1, int(shortfall_kopeks)), language)
+    base = get_payment_methods_keyboard(
+        max(1, int(shortfall_kopeks)), language, router_source="tariff_partial"
+    )
 
     rows = []
     for row in base.inline_keyboard:
@@ -1889,7 +1905,7 @@ def get_partial_payment_methods_keyboard(
                 continue
             if method == "tribute":
                 continue
-            invoice_kopeks = clamp_invoice_amount(method, shortfall_kopeks)
+            invoice_kopeks = clamp_invoice_amount(method, shortfall_kopeks, "tariff_partial")
             text = button.text
             if invoice_kopeks != shortfall_kopeks:
                 text += texts.t(
@@ -3762,11 +3778,28 @@ def get_platega_autopay_keyboard(
     language: str = DEFAULT_LANGUAGE,
     has_active_subscription: bool = False,
     can_connect: bool = True,
+    onepayment_binding_active: bool = False,
 ) -> InlineKeyboardMarkup:
+    """Меню «Автоплатеж»: рекуррент Platega (пополнение) и СБП-привязка 1Payment
+    (автопродление подписки). У последней своя кнопка отключения."""
     texts = get_texts(language)
+    onepayment_rows: list[list[InlineKeyboardButton]] = []
+    if onepayment_binding_active:
+        onepayment_rows.append(
+            [
+                InlineKeyboardButton(
+                    text=texts.t(
+                        "ONEPAYMENT_AUTOPAY_CANCEL_BUTTON",
+                        "❌ Отключить автоплатёж СБП",
+                    ),
+                    callback_data="subscription_onepayment_autopay_cancel",
+                )
+            ]
+        )
     if not has_active_subscription and not can_connect:
         return InlineKeyboardMarkup(
             inline_keyboard=[
+                *onepayment_rows,
                 [InlineKeyboardButton(text=texts.BACK, callback_data="subscription")],
             ]
         )
@@ -3787,6 +3820,7 @@ def get_platega_autopay_keyboard(
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [action_button],
+            *onepayment_rows,
             [InlineKeyboardButton(text=texts.BACK, callback_data="subscription")],
         ]
     )

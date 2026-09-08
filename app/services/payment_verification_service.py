@@ -21,6 +21,7 @@ from app.database.models import (
     CryptoBotPayment,
     HeleketPayment,
     MulenPayPayment,
+    OnePaymentPayment,
     Pal24Payment,
     PlategaPayment,
     PaymentMethod,
@@ -66,6 +67,7 @@ SUPPORTED_MANUAL_CHECK_METHODS: frozenset[PaymentMethod] = frozenset(
         PaymentMethod.CRYPTOBOT,
         PaymentMethod.PLATEGA,
         PaymentMethod.CLOUDPAYMENTS,
+        PaymentMethod.ONEPAYMENT,
     }
 )
 
@@ -79,6 +81,7 @@ SUPPORTED_AUTO_CHECK_METHODS: frozenset[PaymentMethod] = frozenset(
         PaymentMethod.CRYPTOBOT,
         PaymentMethod.PLATEGA,
         PaymentMethod.CLOUDPAYMENTS,
+        PaymentMethod.ONEPAYMENT,
     }
 )
 
@@ -94,6 +97,8 @@ def method_display_name(method: PaymentMethod) -> str:
         return "WATA"
     if method == PaymentMethod.PLATEGA:
         return settings.get_platega_display_name()
+    if method == PaymentMethod.ONEPAYMENT:
+        return settings.get_onepayment_display_name()
     if method == PaymentMethod.CRYPTOBOT:
         return "CryptoBot"
     if method == PaymentMethod.HELEKET:
@@ -116,6 +121,8 @@ def _method_is_enabled(method: PaymentMethod) -> bool:
         return settings.is_wata_enabled()
     if method == PaymentMethod.PLATEGA:
         return settings.is_platega_enabled()
+    if method == PaymentMethod.ONEPAYMENT:
+        return settings.is_onepayment_enabled()
     if method == PaymentMethod.CRYPTOBOT:
         return settings.is_cryptobot_enabled()
     if method == PaymentMethod.HELEKET:
@@ -336,6 +343,13 @@ def _is_platega_pending(payment: PlategaPayment) -> bool:
     return status in {"pending", "inprogress", "in_progress"}
 
 
+def _is_onepayment_pending(payment: OnePaymentPayment) -> bool:
+    if payment.is_paid:
+        return False
+    status = (payment.status or "").upper()
+    return status in {"INIT", "PENDING"}
+
+
 def _is_heleket_pending(payment: HeleketPayment) -> bool:
     if payment.is_paid:
         return False
@@ -477,6 +491,32 @@ async def _fetch_wata_payments(db: AsyncSession, cutoff: datetime) -> List[Pendi
             PaymentMethod.WATA,
             payment,
             identifier=payment.payment_link_id,
+            amount_kopeks=payment.amount_kopeks,
+            status=payment.status or "",
+            is_paid=bool(payment.is_paid),
+            expires_at=getattr(payment, "expires_at", None),
+        )
+        if record:
+            records.append(record)
+    return records
+
+
+async def _fetch_onepayment_payments(db: AsyncSession, cutoff: datetime) -> List[PendingPayment]:
+    stmt = (
+        select(OnePaymentPayment)
+        .options(selectinload(OnePaymentPayment.user))
+        .where(OnePaymentPayment.created_at >= cutoff)
+        .order_by(desc(OnePaymentPayment.created_at))
+    )
+    result = await db.execute(stmt)
+    records: List[PendingPayment] = []
+    for payment in result.scalars().all():
+        if not _is_onepayment_pending(payment):
+            continue
+        record = _build_record(
+            PaymentMethod.ONEPAYMENT,
+            payment,
+            identifier=payment.user_data,
             amount_kopeks=payment.amount_kopeks,
             status=payment.status or "",
             is_paid=bool(payment.is_paid),
@@ -663,6 +703,7 @@ async def list_recent_pending_payments(
         await _fetch_mulenpay_payments(db, cutoff),
         await _fetch_wata_payments(db, cutoff),
         await _fetch_platega_payments(db, cutoff),
+        await _fetch_onepayment_payments(db, cutoff),
         await _fetch_heleket_payments(db, cutoff),
         await _fetch_cryptobot_payments(db, cutoff),
         await _fetch_cloudpayments_payments(db, cutoff),
@@ -713,6 +754,21 @@ async def get_payment_record(
             amount_kopeks=payment.amount_kopeks,
             status=payment.status or "",
             is_paid=bool(payment.is_paid),
+        )
+
+    if method == PaymentMethod.ONEPAYMENT:
+        payment = await db.get(OnePaymentPayment, local_payment_id)
+        if not payment:
+            return None
+        await db.refresh(payment, attribute_names=["user"])
+        return _build_record(
+            method,
+            payment,
+            identifier=payment.user_data,
+            amount_kopeks=payment.amount_kopeks,
+            status=payment.status or "",
+            is_paid=bool(payment.is_paid),
+            expires_at=getattr(payment, "expires_at", None),
         )
 
     if method == PaymentMethod.WATA:
@@ -846,6 +902,9 @@ async def run_manual_check(
             payment = result.get("payment") if result else None
         elif method == PaymentMethod.PLATEGA:
             result = await payment_service.get_platega_payment_status(db, local_payment_id)
+            payment = result.get("payment") if result else None
+        elif method == PaymentMethod.ONEPAYMENT:
+            result = await payment_service.get_onepayment_payment_status(db, local_payment_id)
             payment = result.get("payment") if result else None
         elif method == PaymentMethod.HELEKET:
             payment = await payment_service.sync_heleket_payment_status(

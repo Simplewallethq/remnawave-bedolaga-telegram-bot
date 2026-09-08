@@ -1,9 +1,12 @@
 """Взвешенная маршрутизация счетов между универсальными шлюзами.
 
 Пользователь видит одну кнопку «Оплатить N ₽»; конкретный шлюз (Platega /
-WATA / YooKassa) выбирается здесь в момент формирования счёта по настраиваемым
-весам. Все три шлюза универсальны — карты и СБП показываются на их собственной
-странице, поэтому подмена шлюза для пользователя прозрачна.
+WATA / YooKassa / 1Payment) выбирается здесь в момент формирования счёта по
+настраиваемым весам. Platega, WATA и YooKassa универсальны — карты и СБП
+показываются на их собственной странице, поэтому подмена шлюза для пользователя
+прозрачна. 1Payment — только СБП и только на поверхностях оплаты тарифа
+(ONEPAYMENT_ROUTER_SOURCES): каждый его счёт привязывает пользователя к
+автосписанию за продление, поэтому на пополнение баланса он не выпадает.
 
 Модуль намеренно не является миксином PaymentService: это кросс-провайдерная
 политика, её вызывают и хендлеры, и FastAPI-роуты, и админка, а тесты должны
@@ -29,8 +32,14 @@ logger = logging.getLogger(__name__)
 GATEWAY_PLATEGA = "platega"
 GATEWAY_WATA = "wata"
 GATEWAY_YOOKASSA = "yookassa"
+GATEWAY_ONEPAYMENT = "onepayment"
 
-ROUTED_GATEWAYS: tuple = (GATEWAY_PLATEGA, GATEWAY_WATA, GATEWAY_YOOKASSA)
+ROUTED_GATEWAYS: tuple = (
+    GATEWAY_PLATEGA,
+    GATEWAY_WATA,
+    GATEWAY_YOOKASSA,
+    GATEWAY_ONEPAYMENT,
+)
 
 # Поверхности — используются и для поэтапного выката, и для сегментации статистики.
 SOURCE_BALANCE = "balance_topup"
@@ -79,6 +88,7 @@ class PaymentGatewayRouter:
             "yookassa_payment_id",
             "check_yookassa_",
         ),
+        GATEWAY_ONEPAYMENT: ("payment_url", "order_id", "check_onepayment_"),
     }
 
     # ------------------------------------------------------------------ состояние
@@ -108,7 +118,31 @@ class PaymentGatewayRouter:
                 int(settings.YOOKASSA_MIN_AMOUNT_KOPEKS),
                 int(settings.YOOKASSA_MAX_AMOUNT_KOPEKS),
             )
+        if gateway == GATEWAY_ONEPAYMENT:
+            return GatewayLimits(
+                gateway,
+                int(settings.ONEPAYMENT_MIN_AMOUNT_KOPEKS),
+                int(settings.ONEPAYMENT_MAX_AMOUNT_KOPEKS),
+            )
         raise ValueError(f"Неизвестный шлюз: {gateway}")
+
+    def gateway_sources(self, gateway: str) -> Optional[set]:
+        """Поверхности, на которых шлюз разрешён. None — без ограничений."""
+        if gateway == GATEWAY_ONEPAYMENT:
+            return set(settings.get_onepayment_router_sources())
+        return None
+
+    def _gateway_allowed_for_source(self, gateway: str, source: Optional[str]) -> bool:
+        """Шлюз с ограниченным списком поверхностей без известного source
+        считается недоступным: неизвестная поверхность — это скорее пополнение
+        баланса, чем оплата тарифа, а `combined_min_kopeks` не должен менять
+        минимум там, где шлюз никогда не выпадет."""
+        allowed = self.gateway_sources(gateway)
+        if allowed is None:
+            return True
+        if source is None:
+            return False
+        return source in allowed
 
     def _gateway_usable(self, gateway: str) -> bool:
         """Шлюз в принципе может выставить счёт (без учёта суммы)."""
@@ -128,20 +162,27 @@ class PaymentGatewayRouter:
                 settings.is_yookassa_enabled()
                 and settings.is_yookassa_receipt_satisfiable()
             )
+        if gateway == GATEWAY_ONEPAYMENT:
+            return settings.is_onepayment_enabled()
         return False
 
-    def enabled_gateways(self) -> List[str]:
-        return [g for g in ROUTED_GATEWAYS if self._gateway_usable(g)]
+    def enabled_gateways(self, source: Optional[str] = None) -> List[str]:
+        return [
+            g
+            for g in ROUTED_GATEWAYS
+            if self._gateway_usable(g) and self._gateway_allowed_for_source(g, source)
+        ]
 
     def eligible_gateways(
         self,
         amount_kopeks: int,
         *,
         bypass_minimum: bool = False,
+        source: Optional[str] = None,
     ) -> List[str]:
         amount = int(amount_kopeks)
         result = []
-        for gateway in self.enabled_gateways():
+        for gateway in self.enabled_gateways(source):
             limits = self.gateway_limits(gateway)
             if not bypass_minimum and amount < limits.min_kopeks:
                 continue
@@ -150,21 +191,21 @@ class PaymentGatewayRouter:
             result.append(gateway)
         return result
 
-    def combined_min_kopeks(self) -> int:
+    def combined_min_kopeks(self, source: Optional[str] = None) -> int:
         """Минимум для метода `auto`.
 
         Именно МАКСИМУМ из минимумов: счёт должен быть оплатим любым шлюзом,
         который может выпасть. Если взять минимум, пользователь, которому
         выпала WATA, получит отказ.
         """
-        gateways = self.enabled_gateways()
+        gateways = self.enabled_gateways(source)
         if not gateways:
             return 0
         return max(self.gateway_limits(g).min_kopeks for g in gateways)
 
-    def combined_max_kopeks(self) -> int:
+    def combined_max_kopeks(self, source: Optional[str] = None) -> int:
         """Максимум для `auto` — симметрично, минимум из максимумов."""
-        gateways = self.enabled_gateways()
+        gateways = self.enabled_gateways(source)
         if not gateways:
             return 0
         return min(self.gateway_limits(g).max_kopeks for g in gateways)
@@ -177,6 +218,7 @@ class PaymentGatewayRouter:
         *,
         bypass_minimum: bool = False,
         rng: Optional[random.Random] = None,
+        source: Optional[str] = None,
     ) -> List[str]:
         """Взвешенная выборка БЕЗ возвращения.
 
@@ -184,7 +226,7 @@ class PaymentGatewayRouter:
         для аналитики, остальные — цепочка фолбэка.
         """
         candidates = self.eligible_gateways(
-            amount_kopeks, bypass_minimum=bypass_minimum
+            amount_kopeks, bypass_minimum=bypass_minimum, source=source
         )
         if not candidates:
             return []
@@ -273,6 +315,18 @@ class PaymentGatewayRouter:
             )[:512]
         return result
 
+    async def _create_onepayment(
+        self, payment_service, db, user, amount_kopeks, description, language, metadata
+    ):
+        return await payment_service.create_onepayment_payment(
+            db,
+            user_id=user.id,
+            amount_kopeks=amount_kopeks,
+            description=description,
+            language=language,
+            metadata=metadata,
+        )
+
     async def _create_yookassa(
         self, payment_service, db, user, amount_kopeks, description, language, metadata
     ):
@@ -297,6 +351,7 @@ class PaymentGatewayRouter:
             GATEWAY_PLATEGA: self._create_platega,
             GATEWAY_WATA: self._create_wata,
             GATEWAY_YOOKASSA: self._create_yookassa,
+            GATEWAY_ONEPAYMENT: self._create_onepayment,
         }[gateway]
 
     # ------------------------------------------------------------ создание счёта
@@ -322,7 +377,7 @@ class PaymentGatewayRouter:
         language = language or getattr(user, "language", None) or settings.DEFAULT_LANGUAGE
 
         order = self.pick_order(
-            amount_kopeks, bypass_minimum=bypass_minimum, rng=rng
+            amount_kopeks, bypass_minimum=bypass_minimum, rng=rng, source=source
         )
         if not order:
             logger.warning(
@@ -569,12 +624,13 @@ class PaymentGatewayRouter:
     ) -> None:
         """Записывает координаты сообщения со счётом в metadata провайдера.
 
-        Нужно, чтобы finalize смог удалить сообщение после оплаты. Все три
-        модели имеют metadata_json и updated_at, поэтому запись единообразна.
+        Нужно, чтобы finalize смог удалить сообщение после оплаты. Все модели
+        шлюзов имеют metadata_json и updated_at, поэтому запись единообразна.
         """
         from sqlalchemy import update as sa_update
 
         from app.database.models import (
+            OnePaymentPayment,
             PlategaPayment,
             WataPayment,
             YooKassaPayment,
@@ -584,6 +640,7 @@ class PaymentGatewayRouter:
             GATEWAY_PLATEGA: PlategaPayment,
             GATEWAY_WATA: WataPayment,
             GATEWAY_YOOKASSA: YooKassaPayment,
+            GATEWAY_ONEPAYMENT: OnePaymentPayment,
         }.get(routed.gateway)
 
         if model is None or routed.local_payment_id is None:

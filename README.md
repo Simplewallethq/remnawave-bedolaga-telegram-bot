@@ -35,7 +35,7 @@
 
 ### ⚡ **Полная автоматизация VPN бизнеса**
 - 🎯 **Готовое решение** - разверни за 5 минут, начни продавать сегодня
-- 💰 **Многоканальные платежи** - Telegram Stars + Tribute + CryptoBot + Heleket + YooKassa (СБП + карты) + MulenPay + PayPalych (СБП + карты) + Platega (карты + СБП) + WATA
+- 💰 **Многоканальные платежи** - Telegram Stars + Tribute + CryptoBot + Heleket + YooKassa (СБП + карты) + MulenPay + PayPalych (СБП + карты) + Platega (карты + СБП) + WATA + 1Payment (СБП с автопродлением)
 - 🔄 **Автоматизация 99%** - от регистрации до продления подписок
 - 📱 **MiniApp лк** - личный кабинет с возможностью покупки/продления подписки
 - 📊 **Детальная аналитика** - полная картина вашего бизнеса
@@ -479,6 +479,15 @@ hooks.domain.com {
             }
         }
     }
+    handle /onepayment-webhook {
+        reverse_proxy remnawave_bot:8080 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            transport http {
+                read_buffer 0
+            }
+        }
+    }
     
     handle /cryptobot-webhook {
         reverse_proxy remnawave_bot:8080 {
@@ -641,6 +650,18 @@ http {
         }
         
         location = /platega-webhook {
+            proxy_pass http://remnawave_bot_unified;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 120s;
+            proxy_send_timeout 120s;
+            proxy_buffering off;
+            proxy_request_buffering off;
+        }
+
+        location = /onepayment-webhook {
             proxy_pass http://remnawave_bot_unified;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
@@ -986,6 +1007,38 @@ PLATEGA_UNIVERSAL_ENABLED=true
 
 Остальные параметры (`PLATEGA_BASE_URL`, `PLATEGA_WEBHOOK_HOST`, `PLATEGA_WEBHOOK_PORT`) оставьте по умолчанию, если работаете через встроенный FastAPI сервер.
 
+### 🏦 1Payment (СБП с автопродлением)
+
+[1Payment](https://docs.1payment.com) принимает оплату по СБП и умеет рекуррентные списания по токену. В боте он подключается **только через роутер платежей** и только на оплате тарифа (корзина, доплата, простое продление) — на пополнение баланса он не выпадает.
+
+Как это работает:
+
+1. Каждый счёт 1Payment выставляется с `subscribe=1`. Оплачивая, пользователь подтверждает в банке привязку счёта СБП; из колбека мы сохраняем `token` (таблица `onepayment_bindings`).
+2. За `ONEPAYMENT_RECURRING_DAYS_BEFORE` дней до окончания подписки бот считает стоимость продления, вычитает баланс и списывает недостачу по токену. Если баланса хватает — продлевает с баланса без обращения к 1Payment.
+3. Колбек `SUCCESS` зачисляет деньги на баланс и сразу продлевает подписку. Колбек `FAILURE` — уведомление пользователю; после `ONEPAYMENT_RECURRING_MAX_ATTEMPTS` неудач привязка помечается как требующая переподключения.
+4. Пользователь видит привязку в разделе «Управление подпиской → 🔄 Автоплатеж» и может отключить её. Администратор глобально включает/выключает автосписания флагом `ONEPAYMENT_RECURRING_ENABLED` в админке (⚙️ Настройки → 🧩 Конфигурация бота → 💳 Платежные системы → 🏦 1Payment).
+
+Настройка:
+
+1. Получите у 1Payment `partner_id`, `project_id` и **ключ проекта** (им подписываются запросы и колбеки). Попросите менеджера включить рекурренты на проекте.
+2. В кабинете 1Payment укажите `notify_url` = `https://your-domain.com/onepayment-webhook` и добавьте домен из `ONEPAYMENT_SHOP_URL` в разрешённые источники.
+3. Включите шлюз и выставьте ему вес в админке роутера (`PAYMENT_ROUTER_WEIGHT_ONEPAYMENT`). Рубильники `ONEPAYMENT_RECURRING_ENABLED` и веса роутера **не кладите в `.env`** — иначе админка перестанет их применять.
+
+```env
+ONEPAYMENT_ENABLED=true
+ONEPAYMENT_PARTNER_ID=1234
+ONEPAYMENT_PROJECT_ID=5678
+ONEPAYMENT_API_KEY=project_secret_key
+ONEPAYMENT_SHOP_URL=https://your-domain.com
+ONEPAYMENT_INIT_METHOD=form
+ONEPAYMENT_MIN_AMOUNT_KOPEKS=10000
+ONEPAYMENT_MAX_AMOUNT_KOPEKS=100000000
+ONEPAYMENT_WEBHOOK_PATH=/onepayment-webhook
+ONEPAYMENT_ROUTER_SOURCES=subscription_cart,tariff_partial,simple_pay
+```
+
+`ONEPAYMENT_INIT_METHOD=form` — хостед-страница 1Payment с выбором банка; `gate` — прямая ссылка СБП (`init_payment`). Для отладки на тестовом проекте колбеки с `test=1` принимаются только при `ONEPAYMENT_ACCEPT_TEST_PAYMENTS=true`.
+
 ### 📊 Режимы продажи трафика
 
 #### **Выбираемые пакеты** (по умолчанию)
@@ -1324,6 +1377,7 @@ REDIS_URL=redis://redis:6379/0
    - **PayPalych**: Укажи Result URL `https://your-domain.com/pal24-webhook` в кабинете Pal24
    - **Platega**: Настрой webhook на `https://your-domain.com/platega-webhook`
    - **WATA**: Настрой webhook на `https://your-domain.com/wata-webhook`
+   - **1Payment**: Укажи `notify_url` `https://your-domain.com/onepayment-webhook` в кабинете 1Payment
 
 4. **🔄 Настройка автосинхронизации** (опционально)
    - В `.env` установи `REMNAWAVE_AUTO_SYNC_ENABLED=true`

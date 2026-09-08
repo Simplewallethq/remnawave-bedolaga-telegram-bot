@@ -717,7 +717,7 @@ async def get_payment_methods(
     )
 
     auto_route = payment_gateway_router.is_enabled(SOURCE_MINIAPP) and bool(
-        payment_gateway_router.enabled_gateways()
+        payment_gateway_router.enabled_gateways(SOURCE_MINIAPP)
     )
     if auto_route:
         methods.append(
@@ -726,8 +726,8 @@ async def get_payment_methods(
                 icon="\U0001f4b3",
                 requires_amount=True,
                 currency="RUB",
-                min_amount_kopeks=payment_gateway_router.combined_min_kopeks(),
-                max_amount_kopeks=payment_gateway_router.combined_max_kopeks(),
+                min_amount_kopeks=payment_gateway_router.combined_min_kopeks(SOURCE_MINIAPP),
+                max_amount_kopeks=payment_gateway_router.combined_max_kopeks(SOURCE_MINIAPP),
                 integration_type=MiniAppPaymentIntegrationType.REDIRECT,
             )
         )
@@ -4265,6 +4265,7 @@ def _format_payment_method_title(method: str) -> str:
         "mulenpay": "MulenPay",
         "pal24": "Pal24",
         "wata": "WataPay",
+        "onepayment": "1Payment (СБП)",
         "heleket": "Heleket",
         "tribute": "Tribute",
         "stars": "Telegram Stars",

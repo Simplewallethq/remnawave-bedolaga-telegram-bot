@@ -83,11 +83,11 @@ async def process_auto_payment_amount(
     bypass_minimum = should_bypass_minimum(state_data, amount_kopeks)
 
     eligible = payment_gateway_router.eligible_gateways(
-        amount_kopeks, bypass_minimum=bypass_minimum
+        amount_kopeks, bypass_minimum=bypass_minimum, source=source
     )
     if not eligible:
-        min_kopeks = payment_gateway_router.combined_min_kopeks()
-        max_kopeks = payment_gateway_router.combined_max_kopeks()
+        min_kopeks = payment_gateway_router.combined_min_kopeks(source)
+        max_kopeks = payment_gateway_router.combined_max_kopeks(source)
         if min_kopeks and amount_kopeks < min_kopeks and not bypass_minimum:
             await message.answer(
                 texts.t(
@@ -243,6 +243,17 @@ async def _render_invoice(
                 "Обычно занимает до 10 секунд"
             ),
         ).format(amount=amount_label)
+
+    # 1Payment (СБП): оплата привязывает счёт к автопродлению — предупреждаем
+    # заранее и говорим, где отключить.
+    if getattr(routed, "gateway", None) == "onepayment":
+        instructions += "\n\n" + texts.t(
+            "ONEPAYMENT_INVOICE_NOTE",
+            "\U0001f501 Оплатив по СБП, вы подключаете автопродление подписки: "
+            "перед окончанием срока стоимость продления (за вычетом баланса) "
+            "списывается автоматически. Отключить можно в разделе "
+            "«Управление подпиской → Автоплатеж».",
+        )
 
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=rows)
 

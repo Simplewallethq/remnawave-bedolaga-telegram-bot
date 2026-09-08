@@ -39,6 +39,11 @@ async def show_platega_autopay_menu(
     """Show and manage the user's recurring Platega balance top-up."""
     from app.services import payment_service as payment_module
 
+    from .onepayment import (
+        build_onepayment_autopay_status_line,
+        get_onepayment_autopay_binding,
+    )
+
     texts = get_texts(db_user.language)
     subscription = await payment_module.get_active_platega_subscription_for_user(
         db, db_user.id
@@ -55,6 +60,15 @@ async def show_platega_autopay_menu(
         "Здесь вы можете настроить автоплатеж чтобы всегда оставаться на связи.\n\n"
         "Текущий автоплатеж: {amount}",
     ).format(amount=amount)
+
+    # Привязка СБП (1Payment): показываем отдельной строкой и даём отключить.
+    onepayment_binding = await get_onepayment_autopay_binding(db, db_user)
+    onepayment_line = await build_onepayment_autopay_status_line(
+        db, db_user, onepayment_binding
+    )
+    if onepayment_line:
+        text = f"{text}\n\n{onepayment_line}"
+
     await edit_or_answer_photo(
         callback,
         text,
@@ -64,6 +78,9 @@ async def show_platega_autopay_menu(
             can_connect=(
                 settings.is_platega_enabled()
                 and can_use_platega_subscription(db_user.username)
+            ),
+            onepayment_binding_active=(
+                onepayment_binding is not None and onepayment_binding.is_active
             ),
         ),
         photo_path="images/pay.webp" if os.path.exists("images/pay.webp") else None,

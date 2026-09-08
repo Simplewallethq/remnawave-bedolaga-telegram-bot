@@ -801,7 +801,7 @@ async def _create_cabinet_tariff_payment(
         return {"subscription": cabinet_service.build_subscription(refreshed)}
 
     invoice_method = "heleket" if payment_method == "crypto" else "auto"
-    invoice_amount_kopeks = clamp_invoice_amount(invoice_method, shortfall_kopeks)
+    invoice_amount_kopeks = clamp_invoice_amount(invoice_method, shortfall_kopeks, "cabinet")
     try:
         return await _create_topup_payment(
             db,

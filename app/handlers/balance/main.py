@@ -417,6 +417,7 @@ async def show_vpn_deposit_bonus_payment_methods(
         vpn_deposit_bonus_service.INVOICE_AMOUNT_KOPEKS,
         db_user.language,
         include_tribute=False,
+        router_source="balance_topup",
     )
 
     try:
@@ -634,7 +635,9 @@ async def process_topup_amount(
 
                 if payment_gateway_router.is_enabled(
                     SOURCE_BALANCE
-                ) and payment_gateway_router.eligible_gateways(amount_kopeks):
+                ) and payment_gateway_router.eligible_gateways(
+                    amount_kopeks, source=SOURCE_BALANCE
+                ):
                     from .auto import process_auto_payment_amount
 
                     created = await process_auto_payment_amount(
@@ -914,10 +917,22 @@ async def handle_topup_amount_callback(
         return
 
     try:
-        if method == "auto":
+        if method in ("auto", "auto_cart", "auto_partial"):
             from app.database.database import AsyncSessionLocal
-            from app.services.payment_gateway_router import SOURCE_BALANCE
+            from app.services.payment_gateway_router import (
+                SOURCE_BALANCE,
+                SOURCE_CART,
+                SOURCE_PARTIAL,
+            )
             from .auto import process_auto_payment_amount
+
+            # auto_cart / auto_partial — кнопка из клавиатуры корзины или доплаты
+            # за тариф: это оплата подписки, а не пополнение баланса, и роутер
+            # должен знать поверхность (1Payment выпадает только на оплате тарифа).
+            routed_source = {
+                "auto_cart": SOURCE_CART,
+                "auto_partial": SOURCE_PARTIAL,
+            }.get(method, SOURCE_BALANCE)
 
             async with AsyncSessionLocal() as db:
                 created = await process_auto_payment_amount(
@@ -926,7 +941,7 @@ async def handle_topup_amount_callback(
                     db,
                     amount_kopeks,
                     state,
-                    source=SOURCE_BALANCE,
+                    source=routed_source,
                 )
             if not created:
                 await callback.answer()
@@ -1133,6 +1148,24 @@ def register_balance_handlers(dp: Dispatcher):
     dp.callback_query.register(
         confirm_platega_autopay_cancellation,
         F.data.startswith("subscription_platega_autopay_confirm_cancel:"),
+    )
+
+    from .onepayment import (
+        check_onepayment_payment_status,
+        confirm_onepayment_autopay_cancellation,
+        request_onepayment_autopay_cancellation,
+    )
+    dp.callback_query.register(
+        request_onepayment_autopay_cancellation,
+        F.data == "subscription_onepayment_autopay_cancel",
+    )
+    dp.callback_query.register(
+        confirm_onepayment_autopay_cancellation,
+        F.data.startswith("subscription_onepayment_autopay_confirm_cancel:"),
+    )
+    dp.callback_query.register(
+        check_onepayment_payment_status,
+        F.data.startswith("check_onepayment_"),
     )
     dp.callback_query.register(
         start_platega_payment,

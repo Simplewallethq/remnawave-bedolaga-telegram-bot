@@ -16,6 +16,7 @@ from app.external.telegram_stars import TelegramStarsService
 from app.services.mulenpay_service import MulenPayService
 from app.services.pal24_service import Pal24Service
 from app.services.platega_service import PlategaService
+from app.services.onepayment_service import OnePaymentService
 from app.services.payment import (
     CryptoBotPaymentMixin,
     HeleketPaymentMixin,
@@ -27,6 +28,7 @@ from app.services.payment import (
     TributePaymentMixin,
     YooKassaPaymentMixin,
     WataPaymentMixin,
+    OnePaymentPaymentMixin,
 )
 from app.services.payment.cloudpayments import CloudPaymentsPaymentMixin
 from app.services.yookassa_service import YooKassaService
@@ -188,6 +190,90 @@ async def link_wata_payment_to_transaction(*args, **kwargs):
 async def create_platega_payment(*args, **kwargs):
     platega_crud = import_module("app.database.crud.platega")
     return await platega_crud.create_platega_payment(*args, **kwargs)
+async def create_onepayment_payment(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.create_onepayment_payment(*args, **kwargs)
+
+
+async def get_onepayment_payment_by_id(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.get_onepayment_payment_by_id(*args, **kwargs)
+
+
+async def get_onepayment_payment_by_id_for_update(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.get_onepayment_payment_by_id_for_update(*args, **kwargs)
+
+
+async def get_onepayment_payment_by_user_data(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.get_onepayment_payment_by_user_data(*args, **kwargs)
+
+
+async def get_onepayment_payment_by_provider_order_id(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.get_onepayment_payment_by_provider_order_id(*args, **kwargs)
+
+
+async def mark_onepayment_payment_paid_cas(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.mark_onepayment_payment_paid_cas(*args, **kwargs)
+
+
+async def update_onepayment_payment(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.update_onepayment_payment(*args, **kwargs)
+
+
+async def link_onepayment_payment_to_transaction(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.link_onepayment_payment_to_transaction(*args, **kwargs)
+
+
+async def get_pending_recurring_payment_for_binding(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.get_pending_recurring_payment_for_binding(*args, **kwargs)
+
+
+async def get_active_onepayment_binding_for_user(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.get_active_onepayment_binding_for_user(*args, **kwargs)
+
+
+async def get_latest_onepayment_binding_for_user(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.get_latest_onepayment_binding_for_user(*args, **kwargs)
+
+
+async def get_onepayment_binding_by_id(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.get_onepayment_binding_by_id(*args, **kwargs)
+
+
+async def get_onepayment_binding_by_id_for_update(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.get_onepayment_binding_by_id_for_update(*args, **kwargs)
+
+
+async def upsert_active_onepayment_binding(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.upsert_active_onepayment_binding(*args, **kwargs)
+
+
+async def update_onepayment_binding(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.update_onepayment_binding(*args, **kwargs)
+
+
+async def deactivate_onepayment_binding(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.deactivate_onepayment_binding(*args, **kwargs)
+
+
+async def list_onepayment_bindings_due(*args, **kwargs):
+    onepayment_crud = import_module("app.database.crud.onepayment")
+    return await onepayment_crud.list_onepayment_bindings_due(*args, **kwargs)
+
 
 
 async def get_platega_payment_by_id(*args, **kwargs):
@@ -336,6 +422,7 @@ class PaymentService(
     Pal24PaymentMixin,
     PlategaPaymentMixin,
     WataPaymentMixin,
+    OnePaymentPaymentMixin,
     CloudPaymentsPaymentMixin,
 ):
     """Основной интерфейс платежей, делегирующий работу специализированным mixin-ам."""
@@ -364,6 +451,9 @@ class PaymentService(
             PlategaService() if settings.is_platega_enabled() else None
         )
         self.wata_service = WataService() if settings.is_wata_enabled() else None
+        self.onepayment_service = (
+            OnePaymentService() if settings.is_onepayment_enabled() else None
+        )
         self.cloudpayments_service = (
             CloudPaymentsService() if settings.is_cloudpayments_enabled() else None
         )

@@ -102,6 +102,10 @@ class MonitoringService:
         # неудачном автоплатеже. Живет дольше _notified_users (тот чистится
         # раз в час), чтобы не слать по сообщению каждый цикл мониторинга.
         self._autopay_failed_notified: Dict[int, datetime] = {}
+        # binding_id -> end_date периода, за который уже уходило сообщение о
+        # неудачном СБП-списании 1Payment. Отдельно от баланс-автоплатежа,
+        # чтобы один поток не глушил уведомления другого.
+        self._onepayment_failed_notified: Dict[int, datetime] = {}
         self._last_cleanup = datetime.utcnow()
         self._last_cabinet_notifications_cleanup = datetime.min
         self._sla_task = None
@@ -294,6 +298,8 @@ class MonitoringService:
                 await self._process_expired_subscription_feedbacks(db)
                 if settings.ENABLE_AUTOPAY:
                     await self._process_autopayments(db)
+                if settings.is_onepayment_recurring_enabled():
+                    await self._process_onepayment_recurring(db)
                 await self._cleanup_inactive_users(db)
                 await self._collect_daily_subscription_metrics(db)
                 await self._collect_user_daily_metrics(db)
@@ -330,6 +336,11 @@ class MonitoringService:
             self._autopay_failed_notified = {
                 subscription_id: end_date
                 for subscription_id, end_date in self._autopay_failed_notified.items()
+                if end_date > current_time
+            }
+            self._onepayment_failed_notified = {
+                binding_id: end_date
+                for binding_id, end_date in self._onepayment_failed_notified.items()
                 if end_date > current_time
             }
             self._last_cleanup = current_time
@@ -495,7 +506,10 @@ class MonitoringService:
                         continue
 
                     if self.bot:
-                        success = await self._send_subscription_expiring_notification(user, subscription, days)
+                        onepayment_autopay = await self._has_active_onepayment_binding(db, user.id)
+                        success = await self._send_subscription_expiring_notification(
+                            user, subscription, days, onepayment_autopay=onepayment_autopay
+                        )
                         if success:
                             await record_notification(db, user.id, subscription.id, "expiring", days)
                             await self._notify_cabinet(
@@ -1189,6 +1203,14 @@ class MonitoringService:
 
                 if user.balance_kopeks < charge_amount:
                     failed_count += 1
+                    if await self._has_active_onepayment_binding(db, user.id):
+                        # Нехватку баланса покроет СБП-списание 1Payment —
+                        # не пугаем пользователя «недостаточно средств».
+                        logger.info(
+                            "💳 Автоплатёж с баланса пропущен для %s: есть активная привязка 1Payment",
+                            user.telegram_id,
+                        )
+                        continue
                     await self._notify_autopay_failed(db, user, subscription, charge_amount)
                     logger.warning(f"💳 Недостаточно средств для автопродления у пользователя {user.telegram_id}")
                     continue
@@ -1285,6 +1307,294 @@ class MonitoringService:
         except Exception as e:
             logger.error(f"Ошибка обработки автоплатежей: {e}")
     
+    # ------------------------------------------------------------ 1Payment (СБП)
+
+    async def _has_active_onepayment_binding(self, db: AsyncSession, user_id: int) -> bool:
+        if not settings.is_onepayment_recurring_enabled():
+            return False
+        try:
+            from app.services import payment_service as payment_module
+
+            binding = await payment_module.get_active_onepayment_binding_for_user(db, user_id)
+            return binding is not None
+        except Exception as error:
+            logger.debug("Не удалось проверить привязку 1Payment пользователя %s: %s", user_id, error)
+            return False
+
+    async def _process_onepayment_recurring(self, db: AsyncSession):
+        """Автосписание за продление по токенам 1Payment.
+
+        Идёт после `_process_autopayments`: баланс-автоплатёж имеет приоритет.
+        Для каждой активной привязки с подпиской, истекающей в окне
+        ONEPAYMENT_RECURRING_DAYS_BEFORE: баланс покрывает цену — продлеваем
+        с баланса; иначе списываем недостачу по токену, а продление проведёт
+        колбек SUCCESS по снимку `renewal`.
+        """
+        try:
+            from app.services import payment_service as payment_module
+
+            now = datetime.utcnow()
+            window_end = now + timedelta(days=settings.get_onepayment_recurring_days_before())
+            bindings = await payment_module.list_onepayment_bindings_due(db, before=window_end)
+            if not bindings:
+                return
+
+            payment_service = PaymentService(self.bot)
+            counters = {"renewed_from_balance": 0, "charged": 0, "failed": 0, "skipped": 0}
+
+            for binding in bindings:
+                try:
+                    outcome = await self._process_onepayment_binding(db, payment_service, binding, now)
+                except Exception as error:
+                    outcome = "failed"
+                    logger.error(
+                        "🏦 Ошибка обработки привязки 1Payment #%s: %s",
+                        binding.id,
+                        error,
+                        exc_info=True,
+                    )
+                    try:
+                        await db.rollback()
+                    except Exception:  # pragma: no cover - диагностический лог
+                        pass
+                counters[outcome] = counters.get(outcome, 0) + 1
+
+            if any(counters.values()):
+                await self._log_monitoring_event(
+                    db,
+                    "onepayment_recurring_processed",
+                    "Автосписания 1Payment: с баланса {renewed_from_balance}, списаний {charged}, "
+                    "неудачно {failed}, пропущено {skipped}".format(**counters),
+                    counters,
+                )
+        except Exception as error:
+            logger.error(f"Ошибка обработки автосписаний 1Payment: {error}")
+
+    async def _process_onepayment_binding(
+        self,
+        db: AsyncSession,
+        payment_service: PaymentService,
+        binding,
+        now: datetime,
+    ) -> str:
+        from app.database.crud.onepayment import truncate_seconds
+        from app.services import payment_service as payment_module
+
+        result = await db.execute(
+            select(User)
+            .options(
+                selectinload(User.subscription),
+                selectinload(User.promo_group),
+                selectinload(User.user_promo_groups).selectinload(UserPromoGroup.promo_group),
+            )
+            .where(User.id == binding.user_id)
+        )
+        user = result.scalar_one_or_none()
+        if not user or not user.subscription:
+            return "skipped"
+
+        subscription: Subscription = user.subscription
+        if (
+            subscription.status != SubscriptionStatus.ACTIVE.value
+            or subscription.is_trial
+            or not subscription.end_date
+        ):
+            return "skipped"
+
+        period_end = truncate_seconds(subscription.end_date)
+        if binding.last_charged_period_end and truncate_seconds(binding.last_charged_period_end) == period_end:
+            return "skipped"
+
+        pending = await payment_module.get_pending_recurring_payment_for_binding(db, binding.id, now=now)
+        if pending is not None:
+            logger.debug("🏦 1Payment: по привязке #%s уже есть ожидающее списание %s", binding.id, pending.user_data)
+            return "skipped"
+
+        # Цена и период — те же, что у баланс-автоплатежа.
+        is_tariff = not subscription.is_legacy
+        plan = None
+        if is_tariff:
+            tariff_charge = await self._resolve_tariff_autopay_charge(db, subscription, user)
+            if tariff_charge is None:
+                return "skipped"
+            plan, period_days, price_kopeks = tariff_charge
+        else:
+            period_days = 30
+            price_kopeks = int(
+                await self.subscription_service.calculate_renewal_price(
+                    subscription, period_days, db, user=user
+                )
+            )
+        if price_kopeks <= 0:
+            return "skipped"
+
+        shortfall = price_kopeks - user.balance_kopeks
+
+        if shortfall <= 0:
+            # Страховочная ветка (в т.ч. после потерянного продления по колбеку):
+            # правило «одна попытка в сутки» здесь не применяется.
+            old_end_date = subscription.end_date
+            transaction_id = None
+            try:
+                if is_tariff:
+                    from app.handlers.subscription.tariffs import finalize_tariff_renewal
+
+                    renewal = await finalize_tariff_renewal(
+                        db, user, subscription, plan, period_days, price_kopeks
+                    )
+                    success = renewal is not None
+                    if success:
+                        subscription, transaction, old_end_date = renewal
+                        transaction_id = transaction.id
+                else:
+                    success = await subtract_user_balance(
+                        db, user, price_kopeks, "Автопродление подписки (СБП 1Payment)"
+                    )
+                    if success:
+                        await extend_subscription(db, subscription, period_days)
+                        await self.subscription_service.update_remnawave_user(
+                            db,
+                            subscription,
+                            reset_traffic=settings.RESET_TRAFFIC_ON_PAYMENT,
+                            reset_reason="автопродление подписки (1Payment)",
+                        )
+            except Exception as charge_error:
+                success = False
+                logger.error(
+                    "🏦 Ошибка продления с баланса по привязке 1Payment #%s: %s",
+                    binding.id,
+                    charge_error,
+                    exc_info=True,
+                )
+            if not success:
+                return "failed"
+
+            await record_subscription_renewal_event(
+                db,
+                user_id=user.id,
+                subscription_id=subscription.id,
+                transaction_id=transaction_id,
+                amount_kopeks=price_kopeks,
+                period_days=period_days,
+                previous_end_date=old_end_date,
+                new_end_date=subscription.end_date,
+                balance_after=user.balance_kopeks,
+                source="onepayment_recurring",
+            )
+            await payment_module.update_onepayment_binding(
+                db,
+                binding,
+                last_charge_at=now,
+                last_charge_status="BALANCE",
+                last_charged_period_end=old_end_date,
+                set_last_charged_period_end=True,
+                failed_attempts=0,
+            )
+            await self._send_onepayment_balance_renewal_notification(user, price_kopeks, period_days, subscription)
+            logger.info(
+                "🏦 1Payment: подписка %s пользователя %s продлена с баланса (%s дн., %s коп.)",
+                subscription.id,
+                user.telegram_id,
+                period_days,
+                price_kopeks,
+            )
+            return "renewed_from_balance"
+
+        if binding.last_charge_at and (now - binding.last_charge_at) < timedelta(hours=24):
+            return "skipped"
+
+        charge_kopeks = max(shortfall, int(settings.ONEPAYMENT_MIN_AMOUNT_KOPEKS))
+        if settings.ONEPAYMENT_MAX_AMOUNT_KOPEKS and charge_kopeks > int(settings.ONEPAYMENT_MAX_AMOUNT_KOPEKS):
+            logger.warning(
+                "🏦 1Payment: сумма списания %s превышает максимум, привязка #%s пропущена",
+                charge_kopeks,
+                binding.id,
+            )
+            return "skipped"
+
+        snapshot = {
+            "v": 1,
+            "subscription_id": subscription.id,
+            "plan_id": getattr(plan, "id", None) if plan is not None else subscription.plan_id,
+            "period_days": period_days,
+            "price_kopeks": price_kopeks,
+            "balance_planned_kopeks": max(0, user.balance_kopeks),
+            "shortfall_kopeks": shortfall,
+            "charge_kopeks": charge_kopeks,
+            "period_end": period_end.isoformat() if period_end else None,
+            "is_legacy": not is_tariff,
+        }
+        texts = get_texts(user.language)
+        description = texts.t(
+            "ONEPAYMENT_RECURRING_DESCRIPTION",
+            "Автопродление подписки на {days} дн.",
+        ).format(days=period_days)
+
+        payment = await payment_service.charge_onepayment_binding(
+            db,
+            binding,
+            amount_kopeks=charge_kopeks,
+            description=description,
+            renewal_snapshot=snapshot,
+            language=user.language,
+        )
+        if payment is None:
+            refreshed = await payment_module.get_onepayment_binding_by_id(db, binding.id) or binding
+            if self._onepayment_failed_notified.get(binding.id) != period_end:
+                self._onepayment_failed_notified[binding.id] = period_end
+                await payment_service._notify_onepayment_recurring_failed(
+                    user,
+                    charge_kopeks,
+                    binding_failed=refreshed.status == "FAILED",
+                )
+            return "failed"
+
+        logger.info(
+            "🏦 1Payment: инициировано списание %s коп. по привязке #%s (платёж %s)",
+            charge_kopeks,
+            binding.id,
+            payment.user_data,
+        )
+        return "charged"
+
+    async def _send_onepayment_balance_renewal_notification(
+        self, user: User, amount: int, days: int, subscription: Subscription
+    ) -> None:
+        if not self.bot:
+            return
+        try:
+            texts = get_texts(user.language)
+            message = texts.t(
+                "ONEPAYMENT_RECURRING_SUCCESS_BALANCE",
+                "✅ <b>Подписка продлена автоматически</b>\n\n"
+                "С баланса списано {amount}. Подписка продлена на {days} дн. — до {end_date}.\n\n"
+                "Отключить автоплатёж можно в разделе «Управление подпиской → Автоплатеж».",
+            ).format(
+                amount=settings.format_price(amount),
+                days=days,
+                end_date=format_local_datetime(subscription.end_date, "%d.%m.%Y %H:%M")
+                if subscription.end_date
+                else "—",
+            )
+            await self._send_message_with_logo(
+                chat_id=user.telegram_id,
+                text=message,
+                parse_mode="HTML",
+            )
+        except (TelegramForbiddenError, TelegramBadRequest) as exc:
+            if not self._handle_unreachable_user(user, exc, "уведомление об автопродлении 1Payment"):
+                logger.error(
+                    "Ошибка Telegram API при уведомлении об автопродлении 1Payment пользователя %s: %s",
+                    user.telegram_id,
+                    exc,
+                )
+        except Exception as e:
+            logger.error(
+                "Ошибка отправки уведомления об автопродлении 1Payment пользователю %s: %s",
+                user.telegram_id,
+                e,
+            )
+
     async def _notify_cabinet(
         self,
         db: AsyncSession,
@@ -1405,14 +1715,24 @@ class MonitoringService:
             )
             return False
     
-    async def _send_subscription_expiring_notification(self, user: User, subscription: Subscription, days: int) -> bool:
+    async def _send_subscription_expiring_notification(
+        self,
+        user: User,
+        subscription: Subscription,
+        days: int,
+        *,
+        onepayment_autopay: bool = False,
+    ) -> bool:
         try:
             from app.utils.formatters import format_days_declension
             
             texts = get_texts(user.language)
             days_text = format_days_declension(days, user.language)
             
-            if settings.ENABLE_AUTOPAY:
+            if onepayment_autopay:
+                autopay_status = "✅ СБП — стоимость продления (за вычетом баланса) списывается автоматически"
+                action_text = "💡 Отключить автоплатёж можно в разделе «Управление подпиской → Автоплатеж»"
+            elif settings.ENABLE_AUTOPAY:
                 if subscription.autopay_enabled:
                     autopay_status = "✅ Включен - подписка продлится автоматически"
                     action_text = f"💰 Убедитесь, что на балансе достаточно средств: {texts.format_price(user.balance_kopeks)}"

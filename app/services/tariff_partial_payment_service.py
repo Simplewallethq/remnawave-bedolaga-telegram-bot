@@ -31,25 +31,38 @@ _STARS_SNAPSHOT_KEY = "tariff_checkout_stars:{user_id}:{token}"
 _STARS_SNAPSHOT_TTL = 86400
 
 
-def get_auto_min_kopeks() -> int:
+def get_auto_min_kopeks(source: Optional[str] = None) -> int:
     """Минимум для метода `auto` — МАКСИМУМ из минимумов доступных шлюзов.
 
     Счёт должен быть оплатим любым шлюзом, который может выпасть. Если взять
     минимум, пользователь, которому выпала WATA, получит отказ на сумме,
-    подходящей только для YooKassa.
+    подходящей только для YooKassa. `source` — поверхность роутера: шлюзы с
+    ограниченным списком поверхностей (1Payment) учитываются только на своих.
     """
     try:
         from app.services.payment_gateway_router import payment_gateway_router
 
-        return payment_gateway_router.combined_min_kopeks()
+        return payment_gateway_router.combined_min_kopeks(source)
     except Exception:  # pragma: no cover - не должно ломать построение клавиатуры
         return 0
 
 
-def get_provider_min_kopeks(method: str) -> int:
+def get_provider_min_kopeks(method: str, source: Optional[str] = None) -> int:
     """Минимальная сумма счёта провайдера по коду метода из callback topup_amount|{method}|…"""
-    if method == "auto":
-        return get_auto_min_kopeks()
+    if method in ("auto", "auto_cart", "auto_partial"):
+        if source is None:
+            from app.services.payment_gateway_router import (
+                SOURCE_BALANCE,
+                SOURCE_CART,
+                SOURCE_PARTIAL,
+            )
+
+            source = {
+                "auto": SOURCE_BALANCE,
+                "auto_cart": SOURCE_CART,
+                "auto_partial": SOURCE_PARTIAL,
+            }[method]
+        return get_auto_min_kopeks(source)
     mins = {
         "yookassa": settings.YOOKASSA_MIN_AMOUNT_KOPEKS,
         "yookassa_sbp": settings.YOOKASSA_MIN_AMOUNT_KOPEKS,
@@ -66,9 +79,11 @@ def get_provider_min_kopeks(method: str) -> int:
     return int(mins.get(method, 0))
 
 
-def clamp_invoice_amount(method: str, shortfall_kopeks: int) -> int:
+def clamp_invoice_amount(
+    method: str, shortfall_kopeks: int, source: Optional[str] = None
+) -> int:
     """Сумма счёта на доплату: не меньше минимума провайдера; излишек ляжет на баланс."""
-    return max(int(shortfall_kopeks), get_provider_min_kopeks(method))
+    return max(int(shortfall_kopeks), get_provider_min_kopeks(method, source))
 
 
 def build_partial_breakdown(

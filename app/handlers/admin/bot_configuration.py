@@ -63,7 +63,7 @@ CATEGORY_GROUP_METADATA: Dict[str, Dict[str, object]] = {
     },
     "payments": {
         "title": "💳 Платежные системы",
-        "description": "YooKassa, CryptoBot, Heleket, CloudPayments, MulenPay, PAL24, Wata, Platega, Tribute и Telegram Stars.",
+        "description": "YooKassa, CryptoBot, Heleket, CloudPayments, MulenPay, PAL24, Wata, Platega, 1Payment, Tribute и Telegram Stars.",
         "icon": "💳",
         "categories": (
             "PAYMENT_ROUTER",
@@ -77,6 +77,7 @@ CATEGORY_GROUP_METADATA: Dict[str, Dict[str, object]] = {
             "PAL24",
             "WATA",
             "PLATEGA",
+            "ONEPAYMENT",
             "TRIBUTE",
             "TELEGRAM",
         ),
@@ -262,6 +263,7 @@ def _get_group_status(group_key: str) -> Tuple[str, str]:
             "MulenPay": settings.is_mulenpay_enabled(),
             "PAL24": settings.is_pal24_enabled(),
             "WATA": settings.is_wata_enabled(),
+            "1Payment": settings.is_onepayment_enabled(),
             "Heleket": settings.is_heleket_service_enabled(),
             "Tribute": settings.TRIBUTE_ENABLED,
             "Stars": settings.TELEGRAM_STARS_ENABLED,
@@ -1348,11 +1350,15 @@ def _build_settings_keyboard(
     elif category_key == "PLATEGA":
         label = settings.get_platega_display_name()
         test_payment_buttons.append([_test_button(f"💳 {label} · тест", "platega")])
+    elif category_key == "ONEPAYMENT":
+        label = settings.get_onepayment_display_name()
+        test_payment_buttons.append([_test_button(f"🏦 {label} · тест", "onepayment")])
     elif category_key == "PAYMENT_ROUTER":
         test_payment_buttons.append([_test_button("🎲 Роутер · тест", "router")])
         test_payment_buttons.append([_test_button("💳 Platega · тест", "platega")])
         test_payment_buttons.append([_test_button("💳 WATA · тест", "wata")])
         test_payment_buttons.append([_test_button("💳 YooKassa · тест", "yookassa")])
+        test_payment_buttons.append([_test_button("🏦 1Payment · тест", "onepayment")])
 
     if test_payment_buttons:
         rows.extend(test_payment_buttons)
@@ -2056,7 +2062,7 @@ async def test_payment_provider(
         )
 
         amount_kopeks = max(
-            10 * 100, payment_gateway_router.combined_min_kopeks()
+            10 * 100, payment_gateway_router.combined_min_kopeks(SOURCE_ADMIN)
         )
         routed = await payment_gateway_router.create_invoice(
             db,
@@ -2075,7 +2081,7 @@ async def test_payment_provider(
                 "🧪 <b>Тест роутера</b>\n\n"
                 "❌ Не удалось выставить счёт ни одним шлюзом.\n"
                 f"Веса: <code>{weights}</code>\n"
-                f"Доступные шлюзы: <code>{payment_gateway_router.eligible_gateways(amount_kopeks)}</code>",
+                f"Доступные шлюзы: <code>{payment_gateway_router.eligible_gateways(amount_kopeks, source=SOURCE_ADMIN)}</code>",
                 parse_mode="HTML",
             )
             await callback.answer("❌ Роутер не смог создать платеж", show_alert=True)
@@ -2165,6 +2171,49 @@ async def test_payment_provider(
         )
         await callback.message.answer(message_text, reply_markup=reply_markup, parse_mode="HTML")
         await callback.answer("✅ Ссылка на платеж YooKassa отправлена", show_alert=True)
+        await _refresh_markup()
+        return
+
+    if method == "onepayment":
+        if not settings.is_onepayment_enabled():
+            await callback.answer("❌ 1Payment отключён", show_alert=True)
+            return
+
+        amount_kopeks = _test_amount_kopeks(settings.ONEPAYMENT_MIN_AMOUNT_KOPEKS)
+        payment_result = await payment_service.create_onepayment_payment(
+            db,
+            user_id=db_user.id,
+            amount_kopeks=amount_kopeks,
+            description=f"Тестовый платеж (админ) на {texts.format_price(amount_kopeks)}",
+            language=language,
+            metadata={"purpose": "admin_test_payment", "provider": "onepayment"},
+        )
+
+        payment_url = (payment_result or {}).get("payment_url")
+        if not payment_url:
+            await callback.answer("❌ Не удалось создать тестовый платеж 1Payment", show_alert=True)
+            await _refresh_markup()
+            return
+
+        await callback.message.answer(
+            "🧪 <b>Тестовый платеж 1Payment (СБП)</b>\n\n"
+            f"💰 Сумма: {texts.format_price(amount_kopeks)}\n"
+            f"🆔 ID: {(payment_result or {}).get('order_id')}\n"
+            "⚠️ Оплата привяжет ваш счёт СБП к автопродлению (subscribe=1).",
+            reply_markup=types.InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [types.InlineKeyboardButton(text="🏦 Оплатить по СБП", url=payment_url)],
+                    [
+                        types.InlineKeyboardButton(
+                            text="📊 Проверить статус",
+                            callback_data=f"check_onepayment_{payment_result['local_payment_id']}",
+                        )
+                    ],
+                ]
+            ),
+            parse_mode="HTML",
+        )
+        await callback.answer("✅ Ссылка на платеж 1Payment отправлена", show_alert=True)
         await _refresh_markup()
         return
 

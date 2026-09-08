@@ -558,3 +558,123 @@ def test_routes_absent_when_not_configured(monkeypatch: pytest.MonkeyPatch) -> N
     assert not _has_route(router, "/yookassa")
     assert not _has_route(router, "/wata")
     assert not _has_route(router, "/platega")
+
+
+# --------------------------------------------------------------------- 1Payment
+
+
+def _onepayment_settings(monkeypatch: pytest.MonkeyPatch, *, enabled: bool = True) -> None:
+    monkeypatch.setattr(settings, "ONEPAYMENT_ENABLED", enabled, raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_PARTNER_ID", "1234", raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_PROJECT_ID", "5678", raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_API_KEY", "secret", raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_WEBHOOK_PATH", "/onepayment", raising=False)
+
+
+def test_onepayment_route_registered_when_configured_but_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _onepayment_settings(monkeypatch, enabled=False)
+    router = create_payment_router(DummyBot(), SimpleNamespace())
+    assert _has_route(router, "/onepayment")
+
+
+def test_onepayment_route_absent_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "ONEPAYMENT_PARTNER_ID", None, raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_PROJECT_ID", None, raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_API_KEY", None, raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_WEBHOOK_PATH", "/onepayment", raising=False)
+    router = create_payment_router(DummyBot(), SimpleNamespace())
+    assert not _has_route(router, "/onepayment")
+
+
+@pytest.mark.anyio
+async def test_onepayment_webhook_rejects_bad_signature(monkeypatch: pytest.MonkeyPatch) -> None:
+    _onepayment_settings(monkeypatch)
+    process_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.webserver.payments._process_payment_service_callback", process_mock)
+
+    router = create_payment_router(DummyBot(), SimpleNamespace())
+    route = _get_route(router, "/onepayment")
+    body = json.dumps({"status": 3, "user_data": "1p_1_a", "sign": "0" * 32}).encode("utf-8")
+    response = await route.endpoint(
+        _build_request("/onepayment", body=body, headers={"content-type": "application/json"})
+    )
+
+    assert response.status_code == 401
+    process_mock.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_onepayment_webhook_accepts_signed_json_with_numbers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Числа из JSON участвуют в подписи в исходном текстовом виде."""
+    from app.services.onepayment_service import build_callback_sign
+
+    _onepayment_settings(monkeypatch)
+    process_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.webserver.payments._process_payment_service_callback", process_mock)
+
+    fields = {
+        "payment_type": "sbp",
+        "order_id": "8p3b",
+        "project_id": "5678",
+        "status": "3",
+        "status_description": "SUCCESS",
+        "merchant_price": "100.50",
+        "user_price": "97.5",
+        "currency": "RUB",
+        "account": "sbp",
+        "user_data": "1p_1_abc",
+        "token": "sbp_t_1",
+        "test": "false",
+    }
+    sign = build_callback_sign(fields, "secret")
+    raw_json = (
+        '{"payment_type":"sbp","order_id":"8p3b","project_id":5678,"status":3,'
+        '"status_description":"SUCCESS","merchant_price":100.50,"user_price":97.5,'
+        '"currency":"RUB","account":"sbp","user_data":"1p_1_abc","token":"sbp_t_1",'
+        f'"test":false,"redirect_url":null,"sign":"{sign}"}}'
+    )
+
+    router = create_payment_router(DummyBot(), SimpleNamespace())
+    route = _get_route(router, "/onepayment")
+    response = await route.endpoint(
+        _build_request(
+            "/onepayment", body=raw_json.encode("utf-8"), headers={"content-type": "application/json"}
+        )
+    )
+
+    assert response.status_code == 200
+    process_mock.assert_awaited_once()
+    _, payload, method_name = process_mock.await_args.args
+    assert method_name == "process_onepayment_webhook"
+    assert payload["merchant_price"] == "100.50"
+    assert payload["status"] == "3"
+    assert payload["test"] == "false"
+    assert "redirect_url" not in payload
+
+
+@pytest.mark.anyio
+async def test_onepayment_webhook_accepts_form_urlencoded(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services.onepayment_service import build_callback_sign
+
+    _onepayment_settings(monkeypatch)
+    process_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.webserver.payments._process_payment_service_callback", process_mock)
+
+    fields = {"status": "4", "user_data": "1p_1_abc", "status_code": "05"}
+    fields["sign"] = build_callback_sign(fields, "secret")
+    body = "&".join(f"{k}={v}" for k, v in fields.items()).encode("utf-8")
+
+    router = create_payment_router(DummyBot(), SimpleNamespace())
+    route = _get_route(router, "/onepayment")
+    response = await route.endpoint(
+        _build_request(
+            "/onepayment", body=body, headers={"content-type": "application/x-www-form-urlencoded"}
+        )
+    )
+
+    assert response.status_code == 200
+    process_mock.assert_awaited_once()

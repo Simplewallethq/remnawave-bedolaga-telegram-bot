@@ -521,3 +521,133 @@ async def test_other_gateways_keep_structured_metadata(
     )
 
     assert isinstance(captured["payment_router"], dict)
+
+
+# ------------------------------------------------------ 1Payment и поверхности
+
+
+from app.services.payment_gateway_router import (  # noqa: E402
+    GATEWAY_ONEPAYMENT,
+    SOURCE_CART,
+    SOURCE_PARTIAL,
+)
+
+
+@pytest.fixture
+def onepayment_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "ONEPAYMENT_ENABLED", True, raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_PARTNER_ID", "1", raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_PROJECT_ID", "2", raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_API_KEY", "k", raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_MIN_AMOUNT_KOPEKS", 20_000, raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_MAX_AMOUNT_KOPEKS", 5_000_000, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_ROUTER_WEIGHT_ONEPAYMENT", 1, raising=False)
+    monkeypatch.setattr(
+        settings,
+        "ONEPAYMENT_ROUTER_SOURCES",
+        "subscription_cart,tariff_partial,simple_pay",
+        raising=False,
+    )
+
+
+def test_onepayment_excluded_without_source(
+    router: PaymentGatewayRouter, onepayment_settings
+) -> None:
+    """Неизвестная поверхность — скорее пополнение баланса, чем тариф."""
+    assert GATEWAY_ONEPAYMENT not in router.eligible_gateways(50_000)
+    assert GATEWAY_ONEPAYMENT not in router.enabled_gateways()
+
+
+def test_onepayment_excluded_for_balance_topup(
+    router: PaymentGatewayRouter, onepayment_settings
+) -> None:
+    assert GATEWAY_ONEPAYMENT not in router.eligible_gateways(50_000, source=SOURCE_BALANCE)
+    assert router.combined_min_kopeks(SOURCE_BALANCE) == 10_000
+
+
+def test_onepayment_included_for_tariff_surfaces(
+    router: PaymentGatewayRouter, onepayment_settings
+) -> None:
+    assert GATEWAY_ONEPAYMENT in router.eligible_gateways(50_000, source=SOURCE_PARTIAL)
+    assert GATEWAY_ONEPAYMENT in router.eligible_gateways(50_000, source=SOURCE_CART)
+    # Минимум auto на тарифных поверхностях учитывает минимум 1Payment.
+    assert router.combined_min_kopeks(SOURCE_CART) == 20_000
+    assert GATEWAY_ONEPAYMENT not in router.eligible_gateways(15_000, source=SOURCE_CART)
+
+
+def test_onepayment_disabled_by_zero_weight(
+    router: PaymentGatewayRouter, onepayment_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "PAYMENT_ROUTER_WEIGHT_ONEPAYMENT", 0, raising=False)
+    assert GATEWAY_ONEPAYMENT not in router.eligible_gateways(50_000, source=SOURCE_CART)
+
+
+def test_pick_order_respects_source(
+    router: PaymentGatewayRouter, onepayment_settings
+) -> None:
+    order_balance = router.pick_order(50_000, rng=random.Random(1), source=SOURCE_BALANCE)
+    assert GATEWAY_ONEPAYMENT not in order_balance
+    order_cart = router.pick_order(50_000, rng=random.Random(1), source=SOURCE_CART)
+    assert GATEWAY_ONEPAYMENT in order_cart
+
+
+class StubOnePaymentOnlyService(StubPaymentService):
+    async def create_onepayment_payment(self, db, **kwargs: Any) -> Any:
+        return self._result(
+            GATEWAY_ONEPAYMENT,
+            {
+                "local_payment_id": 44,
+                "order_id": "1p_7_abc",
+                "provider_order_id": None,
+                "payment_url": "https://merchant.1payment.com/pay",
+                "status": "INIT",
+            },
+        )
+
+
+@pytest.mark.anyio
+async def test_create_invoice_normalizes_onepayment_result(
+    router: PaymentGatewayRouter, onepayment_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Оставляем только 1Payment, чтобы выбор был детерминированным.
+    monkeypatch.setattr(settings, "PAYMENT_ROUTER_WEIGHT_PLATEGA", 0, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_ROUTER_WEIGHT_WATA", 0, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_ROUTER_WEIGHT_YOOKASSA", 0, raising=False)
+
+    service = StubOnePaymentOnlyService()
+    routed = await router.create_invoice(
+        DummySession(),
+        payment_service=service,
+        user=DummyUser(),
+        amount_kopeks=50_000,
+        source=SOURCE_CART,
+    )
+
+    assert routed is not None
+    assert routed.gateway == GATEWAY_ONEPAYMENT
+    assert routed.payment_url == "https://merchant.1payment.com/pay"
+    assert routed.local_payment_id == 44
+    assert routed.external_id == "1p_7_abc"
+    assert routed.check_callback == "check_onepayment_44"
+    assert service.calls == [GATEWAY_ONEPAYMENT]
+
+
+@pytest.mark.anyio
+async def test_create_invoice_balance_topup_never_hits_onepayment(
+    router: PaymentGatewayRouter, onepayment_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "PAYMENT_ROUTER_WEIGHT_PLATEGA", 0, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_ROUTER_WEIGHT_WATA", 0, raising=False)
+    monkeypatch.setattr(settings, "PAYMENT_ROUTER_WEIGHT_YOOKASSA", 0, raising=False)
+
+    service = StubOnePaymentOnlyService()
+    routed = await router.create_invoice(
+        DummySession(),
+        payment_service=service,
+        user=DummyUser(),
+        amount_kopeks=50_000,
+        source=SOURCE_BALANCE,
+    )
+
+    assert routed is None
+    assert service.calls == []

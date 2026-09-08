@@ -85,8 +85,11 @@ def test_balance_keyboard_falls_back_when_router_disabled(
 def test_payment_methods_keyboard_suppresses_routed_gateways(
     routed_settings,
 ) -> None:
+    # Клавиатура корзины эмитит auto_cart: роутер должен знать поверхность
+    # (1Payment выпадает только на оплате тарифа).
     callbacks = _callbacks(get_payment_methods_keyboard(50_000, "ru"))
-    assert "topup_amount|auto|50000" in callbacks
+    assert "topup_amount|auto_cart|50000" in callbacks
+    assert "topup_amount|auto|50000" not in callbacks
     for suppressed in ("yookassa", "wata", "platega", "platega_universal"):
         assert f"topup_amount|{suppressed}|50000" not in callbacks
 
@@ -96,8 +99,27 @@ def test_payment_methods_keyboard_keeps_other_methods(
 ) -> None:
     monkeypatch.setattr(settings, "TELEGRAM_STARS_ENABLED", True, raising=False)
     callbacks = _callbacks(get_payment_methods_keyboard(50_000, "ru"))
-    assert "topup_amount|auto|50000" in callbacks
+    assert "topup_amount|auto_cart|50000" in callbacks
     assert "topup_amount|stars|50000" in callbacks
+
+
+def test_payment_methods_keyboard_uses_balance_source_on_request(
+    routed_settings,
+) -> None:
+    callbacks = _callbacks(
+        get_payment_methods_keyboard(50_000, "ru", router_source="balance_topup")
+    )
+    assert "topup_amount|auto|50000" in callbacks
+    assert "topup_amount|auto_cart|50000" not in callbacks
+
+
+def test_partial_keyboard_emits_auto_partial(routed_settings) -> None:
+    from app.keyboards.inline import get_partial_payment_methods_keyboard
+
+    callbacks = _callbacks(get_partial_payment_methods_keyboard(15_000, "ru"))
+    # Поверхность — доплата за тариф: роутер получит source=tariff_partial.
+    assert "topup_amount|auto_partial|15000" in callbacks
+    assert "topup_amount|auto|15000" not in callbacks
 
 
 def test_auto_minimum_is_max_of_gateway_minimums(routed_settings) -> None:

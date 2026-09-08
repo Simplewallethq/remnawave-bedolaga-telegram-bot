@@ -19,6 +19,7 @@ from app.external import yookassa_webhook as yookassa_webhook_module
 from app.external.wata_webhook import WataWebhookHandler
 from app.external.heleket_webhook import HeleketWebhookHandler
 from app.external.pal24_client import Pal24APIError
+from app.services.onepayment_service import stringify_value as _onepayment_stringify
 from app.services.pal24_service import Pal24Service
 from app.services.payment_service import PaymentService
 from app.services.tribute_service import TributeService
@@ -127,6 +128,44 @@ def _verify_mulenpay_signature(request: Request, raw_body: bytes) -> bool:
 
     logger.error("Отсутствует подпись %s webhook", display_name)
     return False
+
+
+def _parse_onepayment_payload(raw_body: bytes) -> dict[str, str] | None:
+    """Колбек 1Payment → плоский dict строк для проверки MD5-подписи.
+
+    Подпись считается по значениям «как переданы», поэтому числа из JSON
+    оставляем в исходном текстовом виде (parse_int/parse_float=str), bool →
+    "true"/"false", null отбрасываем. Фолбэк — form-urlencoded (доку допускает
+    оба формата). request.form() не используем: тесты подают тело через
+    receive(), а multipart здесь не нужен.
+    """
+    text = raw_body.decode("utf-8", errors="replace").strip()
+    if not text:
+        return None
+
+    data: object = None
+    try:
+        data = json.loads(text, parse_int=str, parse_float=str)
+    except json.JSONDecodeError:
+        data = None
+
+    if isinstance(data, dict):
+        result: dict[str, str] = {}
+        for key, value in data.items():
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            normalized = _onepayment_stringify(value)
+            if normalized is None:
+                continue
+            result[str(key)] = normalized
+        return result
+
+    from urllib.parse import parse_qsl
+
+    pairs = parse_qsl(text, keep_blank_values=True)
+    if not pairs:
+        return None
+    return {str(k): str(v) for k, v in pairs}
 
 
 async def _process_payment_service_callback(
@@ -604,6 +643,58 @@ def create_payment_router(bot: Bot, payment_service: PaymentService) -> APIRoute
 
         routes_registered = True
 
+    if settings.is_onepayment_configured():
+        from app.services.onepayment_service import OnePaymentService
+
+        onepayment_service = OnePaymentService()
+
+        @router.options(settings.ONEPAYMENT_WEBHOOK_PATH)
+        async def onepayment_options() -> Response:
+            return _create_cors_response()
+
+        @router.get(settings.ONEPAYMENT_WEBHOOK_PATH)
+        async def onepayment_health() -> JSONResponse:
+            return JSONResponse(
+                {
+                    "status": "ok",
+                    "service": "onepayment_webhook",
+                    "enabled": settings.is_onepayment_enabled(),
+                    "recurring_enabled": settings.is_onepayment_recurring_enabled(),
+                }
+            )
+
+        @router.post(settings.ONEPAYMENT_WEBHOOK_PATH)
+        async def onepayment_webhook(request: Request) -> JSONResponse:
+            raw_body = await request.body()
+            payload = _parse_onepayment_payload(raw_body)
+            if not payload:
+                return JSONResponse(
+                    {"status": "error", "reason": "empty_body"},
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if not onepayment_service.verify_callback_sign(payload):
+                logger.error("1Payment webhook: неверная подпись (user_data=%s)", payload.get("user_data"))
+                return JSONResponse(
+                    {"status": "error", "reason": "invalid_signature"},
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                )
+
+            success = await _process_payment_service_callback(
+                payment_service,
+                payload,
+                "process_onepayment_webhook",
+            )
+            if success:
+                return JSONResponse({"status": "ok"})
+
+            return JSONResponse(
+                {"status": "error", "reason": "not_processed"},
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        routes_registered = True
+
     if settings.is_platega_configured():
 
         @router.get(settings.PLATEGA_WEBHOOK_PATH)
@@ -816,6 +907,8 @@ def create_payment_router(bot: Bot, payment_service: PaymentService) -> APIRoute
                     "pal24_enabled": settings.is_pal24_enabled(),
                     "platega_enabled": settings.is_platega_enabled(),
                     "cloudpayments_enabled": settings.is_cloudpayments_enabled(),
+                    "onepayment_enabled": settings.is_onepayment_enabled(),
+                    "onepayment_recurring_enabled": settings.is_onepayment_recurring_enabled(),
                 }
             )
 

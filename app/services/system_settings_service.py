@@ -91,6 +91,7 @@ class BotConfigurationService:
         "MULENPAY": "💰 {mulenpay_name}",
         "PAL24": "🏦 PAL24 / PayPalych",
         "WATA": "💠 Wata",
+        "ONEPAYMENT": "🏦 1Payment (СБП)",
         "EXTERNAL_ADMIN": "🛡️ Внешняя админка",
         "SUBSCRIPTIONS_CORE": "📅 Подписки и лимиты",
         "SIMPLE_SUBSCRIPTION": "⚡ Простая покупка",
@@ -155,6 +156,11 @@ class BotConfigurationService:
         "TRIBUTE": "Tribute и донат-сервисы.",
         "TELEGRAM": "Telegram Stars и их стоимость.",
         "WATA": "Wata: токен доступа, тип платежа и пределы сумм.",
+        "ONEPAYMENT": (
+            "1Payment (СБП с рекуррентами): ключи проекта, поверхности роутера и "
+            "рубильник автосписаний ONEPAYMENT_RECURRING_ENABLED. Как и веса роутера, "
+            "рубильник НЕ кладите в .env — иначе админка перестанет его переключать."
+        ),
         "EXTERNAL_ADMIN": "Токен внешней админки для проверки запросов.",
         "SUBSCRIPTIONS_CORE": "Лимиты устройств, трафика и базовые цены подписок.",
         "SIMPLE_SUBSCRIPTION": "Параметры упрощённой покупки: период, трафик, устройства и сквады.",
@@ -338,6 +344,7 @@ class BotConfigurationService:
         "PAYMENT_": "PAYMENT",
         "PAYMENT_VERIFICATION_": "PAYMENT_VERIFICATION",
         "WATA_": "WATA",
+        "ONEPAYMENT_": "ONEPAYMENT",
         "EXTERNAL_ADMIN_": "EXTERNAL_ADMIN",
         "SIMPLE_SUBSCRIPTION_": "SIMPLE_SUBSCRIPTION",
         "CONNECT_BUTTON_HAPP": "HAPP",

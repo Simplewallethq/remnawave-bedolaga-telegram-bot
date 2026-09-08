@@ -303,6 +303,7 @@ _METHOD_KIND = {
     "cloudpayments": "card",
     "wata": "card",
     "platega": "card",
+    "onepayment": "sbp",
     "mulenpay": "card",
     "pal24": "sbp",
     "cryptobot": "usdt",

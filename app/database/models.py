@@ -106,6 +106,7 @@ class PaymentMethod(Enum):
     WATA = "wata"
     PLATEGA = "platega"
     CLOUDPAYMENTS = "cloudpayments"
+    ONEPAYMENT = "onepayment"
     MANUAL = "manual"
     APPLE_IAP = "apple_iap"
 
@@ -553,6 +554,122 @@ class PlategaPayment(Base):
                 self.amount_rubles,
                 self.status,
                 self.payment_method_code,
+            )
+        )
+
+
+class OnePaymentBinding(Base):
+    """Привязка счёта СБП к пользователю (токен рекуррентов 1Payment).
+
+    Токен приходит в колбеке после успешного платежа с subscribe=1. Одна
+    активная привязка на пользователя — nullable-unique слот active_user_id,
+    как у PlategaSubscription.
+    """
+
+    __tablename__ = "onepayment_bindings"
+    __table_args__ = (
+        Index("ix_onepayment_bindings_user_status", "user_id", "status"),
+    )
+
+    STATUS_ACTIVE = "ACTIVE"
+    STATUS_CANCELLED = "CANCELLED"
+    STATUS_FAILED = "FAILED"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    active_user_id = Column(Integer, unique=True, nullable=True, index=True)
+
+    token = Column(String(255), nullable=False)
+    status = Column(String(20), nullable=False, default="ACTIVE")
+
+    source_payment_id = Column(
+        Integer,
+        ForeignKey("onepayment_payments.id", ondelete="SET NULL", use_alter=True),
+        nullable=True,
+    )
+
+    last_charge_at = Column(DateTime, nullable=True)
+    last_charge_status = Column(String(20), nullable=True)
+    # end_date подписки (без микросекунд), за которую продление уже проведено
+    last_charged_period_end = Column(DateTime, nullable=True)
+    failed_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    cancelled_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    user = relationship("User", backref="onepayment_bindings")
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == self.STATUS_ACTIVE and self.active_user_id is not None
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return "<OnePaymentBinding(id={0}, user_id={1}, status={2})>".format(
+            self.id, self.user_id, self.status
+        )
+
+
+class OnePaymentPayment(Base):
+    __tablename__ = "onepayment_payments"
+    __table_args__ = (
+        Index("ix_onepayment_payments_unpaid_created", "is_paid", "created_at"),
+    )
+
+    STATUS_INIT = "INIT"
+    STATUS_PENDING = "PENDING"
+    STATUS_SUCCESS = "SUCCESS"
+    STATUS_FAILURE = "FAILURE"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    # Наш идентификатор заказа (user_data в терминах 1Payment) — уникален в рамках партнёра
+    user_data = Column(String(255), unique=True, nullable=False, index=True)
+    # order_id на стороне 1Payment
+    provider_order_id = Column(String(255), unique=True, nullable=True, index=True)
+
+    amount_kopeks = Column(Integer, nullable=False)
+    currency = Column(String(10), nullable=False, default="RUB")
+    description = Column(Text, nullable=True)
+
+    status = Column(String(20), nullable=False, default="INIT")
+    status_code = Column(String(50), nullable=True)
+    is_paid = Column(Boolean, default=False, nullable=False, server_default="false")
+    paid_at = Column(DateTime, nullable=True)
+
+    url = Column(Text, nullable=True)
+    is_recurring = Column(Boolean, default=False, nullable=False, server_default="false")
+    binding_id = Column(
+        Integer,
+        ForeignKey("onepayment_bindings.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    metadata_json = Column(JSON, nullable=True)
+    callback_payload = Column(JSON, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+
+    transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    user = relationship("User", backref="onepayment_payments")
+    binding = relationship(
+        "OnePaymentBinding", backref="payments", foreign_keys=[binding_id]
+    )
+    transaction = relationship("Transaction", backref="onepayment_payment")
+
+    @property
+    def amount_rubles(self) -> float:
+        return self.amount_kopeks / 100
+
+    def __repr__(self) -> str:  # pragma: no cover - debug helper
+        return (
+            "<OnePaymentPayment(id={0}, user_data={1}, amount={2}₽, status={3}, recurring={4})>".format(
+                self.id, self.user_data, self.amount_rubles, self.status, self.is_recurring
             )
         )
 

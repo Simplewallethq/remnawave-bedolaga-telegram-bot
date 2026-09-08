@@ -4188,6 +4188,264 @@ async def create_platega_subscriptions_table() -> bool:
         return False
 
 
+async def create_onepayment_bindings_table() -> bool:
+    """Привязки СБП 1Payment (токены рекуррентов). ORM обычно создаёт таблицу
+    через create_all раньше — здесь идемпотентный фолбэк."""
+    if await check_table_exists("onepayment_bindings"):
+        logger.info("Таблица onepayment_bindings уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == "sqlite":
+                create_sql = """
+                CREATE TABLE onepayment_bindings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    active_user_id INTEGER NULL,
+                    token VARCHAR(255) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+                    source_payment_id INTEGER NULL,
+                    last_charge_at DATETIME NULL,
+                    last_charge_status VARCHAR(20) NULL,
+                    last_charged_period_end DATETIME NULL,
+                    failed_attempts INTEGER NOT NULL DEFAULT 0,
+                    cancelled_at DATETIME NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+            elif db_type == "postgresql":
+                create_sql = """
+                CREATE TABLE onepayment_bindings (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    active_user_id INTEGER NULL,
+                    token VARCHAR(255) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+                    source_payment_id INTEGER NULL,
+                    last_charge_at TIMESTAMP NULL,
+                    last_charge_status VARCHAR(20) NULL,
+                    last_charged_period_end TIMESTAMP NULL,
+                    failed_attempts INTEGER NOT NULL DEFAULT 0,
+                    cancelled_at TIMESTAMP NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            elif db_type == "mysql":
+                create_sql = """
+                CREATE TABLE onepayment_bindings (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    active_user_id INT NULL,
+                    token VARCHAR(255) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+                    source_payment_id INT NULL,
+                    last_charge_at DATETIME NULL,
+                    last_charge_status VARCHAR(20) NULL,
+                    last_charged_period_end DATETIME NULL,
+                    failed_attempts INT NOT NULL DEFAULT 0,
+                    cancelled_at DATETIME NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+            else:
+                logger.error(
+                    "Неподдерживаемый тип БД для создания onepayment_bindings: %s", db_type
+                )
+                return False
+
+            await conn.execute(text(create_sql))
+
+        logger.info("✅ Таблица onepayment_bindings успешно создана")
+        return True
+    except Exception as error:
+        logger.error("Ошибка создания таблицы onepayment_bindings: %s", error)
+        return False
+
+
+async def create_onepayment_payments_table() -> bool:
+    if await check_table_exists("onepayment_payments"):
+        logger.info("Таблица onepayment_payments уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == "sqlite":
+                create_sql = """
+                CREATE TABLE onepayment_payments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    user_data VARCHAR(255) NOT NULL,
+                    provider_order_id VARCHAR(255) NULL,
+                    amount_kopeks INTEGER NOT NULL,
+                    currency VARCHAR(10) NOT NULL DEFAULT 'RUB',
+                    description TEXT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'INIT',
+                    status_code VARCHAR(50) NULL,
+                    is_paid BOOLEAN NOT NULL DEFAULT 0,
+                    paid_at DATETIME NULL,
+                    url TEXT NULL,
+                    is_recurring BOOLEAN NOT NULL DEFAULT 0,
+                    binding_id INTEGER NULL,
+                    metadata_json JSON NULL,
+                    callback_payload JSON NULL,
+                    expires_at DATETIME NULL,
+                    transaction_id INTEGER NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id),
+                    FOREIGN KEY (binding_id) REFERENCES onepayment_bindings(id) ON DELETE SET NULL,
+                    FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+                )
+                """
+            elif db_type == "postgresql":
+                create_sql = """
+                CREATE TABLE onepayment_payments (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    user_data VARCHAR(255) NOT NULL,
+                    provider_order_id VARCHAR(255) NULL,
+                    amount_kopeks INTEGER NOT NULL,
+                    currency VARCHAR(10) NOT NULL DEFAULT 'RUB',
+                    description TEXT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'INIT',
+                    status_code VARCHAR(50) NULL,
+                    is_paid BOOLEAN NOT NULL DEFAULT FALSE,
+                    paid_at TIMESTAMP NULL,
+                    url TEXT NULL,
+                    is_recurring BOOLEAN NOT NULL DEFAULT FALSE,
+                    binding_id INTEGER NULL REFERENCES onepayment_bindings(id) ON DELETE SET NULL,
+                    metadata_json JSON NULL,
+                    callback_payload JSON NULL,
+                    expires_at TIMESTAMP NULL,
+                    transaction_id INTEGER NULL REFERENCES transactions(id),
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            elif db_type == "mysql":
+                create_sql = """
+                CREATE TABLE onepayment_payments (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    user_data VARCHAR(255) NOT NULL,
+                    provider_order_id VARCHAR(255) NULL,
+                    amount_kopeks INT NOT NULL,
+                    currency VARCHAR(10) NOT NULL DEFAULT 'RUB',
+                    description TEXT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'INIT',
+                    status_code VARCHAR(50) NULL,
+                    is_paid TINYINT(1) NOT NULL DEFAULT 0,
+                    paid_at DATETIME NULL,
+                    url TEXT NULL,
+                    is_recurring TINYINT(1) NOT NULL DEFAULT 0,
+                    binding_id INT NULL,
+                    metadata_json JSON NULL,
+                    callback_payload JSON NULL,
+                    expires_at DATETIME NULL,
+                    transaction_id INT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id),
+                    FOREIGN KEY (binding_id) REFERENCES onepayment_bindings(id) ON DELETE SET NULL,
+                    FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+                )
+                """
+            else:
+                logger.error(
+                    "Неподдерживаемый тип БД для создания onepayment_payments: %s", db_type
+                )
+                return False
+
+            await conn.execute(text(create_sql))
+
+        logger.info("✅ Таблица onepayment_payments успешно создана")
+        return True
+    except Exception as error:
+        logger.error("Ошибка создания таблицы onepayment_payments: %s", error)
+        return False
+
+
+async def ensure_onepayment_indexes() -> bool:
+    indexes = (
+        (
+            "onepayment_bindings",
+            "ix_onepayment_bindings_active_user_id",
+            "CREATE UNIQUE INDEX ix_onepayment_bindings_active_user_id "
+            "ON onepayment_bindings(active_user_id)",
+        ),
+        (
+            "onepayment_bindings",
+            "ix_onepayment_bindings_user_status",
+            "CREATE INDEX ix_onepayment_bindings_user_status "
+            "ON onepayment_bindings(user_id, status)",
+        ),
+        (
+            "onepayment_payments",
+            "ix_onepayment_payments_user_data",
+            "CREATE UNIQUE INDEX ix_onepayment_payments_user_data "
+            "ON onepayment_payments(user_data)",
+        ),
+        (
+            "onepayment_payments",
+            "ix_onepayment_payments_provider_order_id",
+            "CREATE UNIQUE INDEX ix_onepayment_payments_provider_order_id "
+            "ON onepayment_payments(provider_order_id)",
+        ),
+        (
+            "onepayment_payments",
+            "ix_onepayment_payments_binding_id",
+            "CREATE INDEX ix_onepayment_payments_binding_id "
+            "ON onepayment_payments(binding_id)",
+        ),
+        (
+            "onepayment_payments",
+            "ix_onepayment_payments_unpaid_created",
+            "CREATE INDEX ix_onepayment_payments_unpaid_created "
+            "ON onepayment_payments(is_paid, created_at)",
+        ),
+    )
+
+    try:
+        missing_tables = [
+            table_name
+            for table_name in {item[0] for item in indexes}
+            if not await check_table_exists(table_name)
+        ]
+        if missing_tables:
+            logger.warning(
+                "Таблицы %s не найдены, индексы 1Payment не созданы",
+                ", ".join(sorted(missing_tables)),
+            )
+            return False
+
+        missing_indexes = [
+            (index_name, create_sql)
+            for table_name, index_name, create_sql in indexes
+            if not await check_index_exists(table_name, index_name)
+        ]
+        if not missing_indexes:
+            return True
+
+        async with engine.begin() as conn:
+            for index_name, create_sql in missing_indexes:
+                await conn.execute(text(create_sql))
+                logger.info("✅ Создан индекс %s", index_name)
+        return True
+    except Exception as error:
+        logger.error("Ошибка создания индексов 1Payment: %s", error)
+        return False
+
+
 async def add_platega_payment_subscription_id() -> bool:
     if not await check_table_exists("platega_payments"):
         logger.warning(
@@ -8338,6 +8596,20 @@ async def run_universal_migration():
 
         if not await ensure_platega_subscription_indexes():
             logger.warning("⚠️ Проблемы с индексами регулярных подписок Platega")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦ 1PAYMENT (ONEPAYMENT_*) ===")
+        if await create_onepayment_bindings_table():
+            logger.info("✅ Таблица onepayment_bindings готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей onepayment_bindings")
+
+        if await create_onepayment_payments_table():
+            logger.info("✅ Таблица onepayment_payments готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей onepayment_payments")
+
+        if not await ensure_onepayment_indexes():
+            logger.warning("⚠️ Проблемы с индексами 1Payment")
 
         if not await create_subscription_short_uuid_index():
             logger.warning("⚠️ Проблемы с индексом subscriptions.remnawave_short_uuid")
