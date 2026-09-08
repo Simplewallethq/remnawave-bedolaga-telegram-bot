@@ -463,6 +463,27 @@ class OnePaymentPaymentMixin:
                 logger.error("Ошибка отправки админ уведомления 1Payment: %s", error)
 
         if payment.is_recurring:
+            # Отмечаем удачу самого списания отдельно от продления: деньги банк
+            # уже отдал, даже если продлевать нечего (подписку продлили вручную).
+            if binding is not None:
+                try:
+                    binding = (
+                        await payment_module.get_onepayment_binding_by_id_for_update(db, binding.id)
+                        or binding
+                    )
+                    await payment_module.update_onepayment_binding(
+                        db,
+                        binding,
+                        last_charge_status=OnePaymentPayment.STATUS_SUCCESS,
+                        failed_attempts=0,
+                    )
+                except Exception as error:
+                    logger.warning(
+                        "1Payment: не удалось отметить удачное списание в привязке #%s: %s",
+                        binding.id,
+                        error,
+                    )
+
             renewed = False
             try:
                 renewed = await self._apply_onepayment_recurring_renewal(db, payment, user, binding)

@@ -481,6 +481,13 @@ async def test_recurring_success_skips_renewal_when_period_changed(monkeypatch: 
     assert user.balance_kopeks == 20_000
     assert "subtracted" not in calls
     assert payment.metadata_json.get("renewal_applied") is None
+    # Само списание удалось, даже если продлевать было нечего.
+    binding_updates = calls.get("binding_updates") or []
+    assert any(
+        u.get("last_charge_status") == "SUCCESS" and u.get("failed_attempts") == 0
+        for u in binding_updates
+    )
+    assert not any(u.get("set_last_charged_period_end") for u in binding_updates)
 
 
 @pytest.mark.anyio
