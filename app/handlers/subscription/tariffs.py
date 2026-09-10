@@ -658,18 +658,27 @@ async def finalize_tariff_purchase(
     period_days: int,
     price_kopeks: int,
     bot: Bot = None,
+    *,
+    access_days: Optional[int] = None,
+    description: Optional[str] = None,
 ) -> Optional[Tuple[Subscription, object, bool]]:
     """Charge price, create/replace the subscription with the tariff, activate in Remnawave.
 
     Caller MUST verify balance >= price_kopeks first. Used by both the interactive purchase
     handler and the post-top-up auto-purchase. Returns (subscription, transaction,
     was_trial_conversion) or None if the balance deduction failed.
+
+    `access_days` — фактический срок доступа, если он отличается от оплачиваемого
+    периода `period_days` (A/B «сутки за 1 ₽»: доступ на день, `plan_period_days`
+    = 30, чтобы рекуррент списывал месяц). Такая подписка помечается
+    `is_paid_trial=True`.
     """
     texts = get_texts(db_user.language)
-    description = texts.t(
+    description = description or texts.t(
         "TARIFF_PURCHASE_INVOICE_DESCRIPTION",
         "Подписка {name} на {period}",
     ).format(name=plan.display_name, period=_period_label(period_days, texts))
+    is_paid_trial = access_days is not None and access_days != period_days
 
     # Charge, record the payment, and create the subscription in ONE DB
     # transaction. subtract_user_balance/create_transaction defer their commits
@@ -686,7 +695,7 @@ async def finalize_tariff_purchase(
     try:
         connected_squads = await _all_active_server_uuids(db)
         now = datetime.utcnow()
-        end_date = now + timedelta(days=period_days)
+        end_date = now + timedelta(days=access_days or period_days)
 
         # Subscription.user_id is UNIQUE — for trial / expired-legacy / expired-tier users
         # we replace the existing row in-place instead of creating a new one.
@@ -710,6 +719,7 @@ async def finalize_tariff_purchase(
             existing_sub.connected_squads = connected_squads
             existing_sub.plan_id = plan.id
             existing_sub.plan_period_days = period_days
+            existing_sub.is_paid_trial = is_paid_trial
             new_sub = existing_sub
         else:
             new_sub = Subscription(
@@ -725,6 +735,7 @@ async def finalize_tariff_purchase(
                 autopay_days_before=settings.DEFAULT_AUTOPAY_DAYS_BEFORE,
                 plan_id=plan.id,
                 plan_period_days=period_days,
+                is_paid_trial=is_paid_trial,
             )
             db.add(new_sub)
 
@@ -802,6 +813,8 @@ async def finalize_tariff_renewal(
         old_end_date = subscription.end_date
         subscription.extend_subscription(period_days)
         subscription.plan_period_days = period_days
+        # Суточный доступ «за 1 ₽» после первого продления — обычная подписка.
+        subscription.is_paid_trial = False
         await db.flush()
 
         transaction = await create_transaction(

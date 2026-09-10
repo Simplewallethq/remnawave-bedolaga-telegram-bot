@@ -689,3 +689,149 @@ async def test_status_check_tolerates_transaction_not_found(
     assert result["is_paid"] is False
     assert result["status"] == "INIT"
     assert result["remote"] is None
+
+
+# ---------------------------------------------- A/B «доступ за 1 ₽ вместо триала»
+
+
+@pytest.mark.anyio
+async def test_create_onepayment_payment_allows_below_minimum_only_when_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub = StubOnePaymentService({"url": "https://merchant.1payment.com/x", "order_id": "1", "status": 1, "raw": {}})
+    service = _make_service(stub)
+    monkeypatch.setattr(settings, "ONEPAYMENT_MIN_AMOUNT_KOPEKS", 10_000, raising=False)
+    monkeypatch.setattr(settings, "ONEPAYMENT_MAX_AMOUNT_KOPEKS", 5_000_000, raising=False)
+
+    async def fake_create_local(db: Any, **kwargs: Any) -> SimpleNamespace:
+        return SimpleNamespace(id=11, **kwargs)
+
+    async def fake_snapshot(user_id: int, amount: int) -> None:
+        return None
+
+    monkeypatch.setattr(payment_service_module, "create_onepayment_payment", fake_create_local, raising=False)
+    monkeypatch.setattr(onepayment_mixin_module, "build_invoice_checkout_snapshot", fake_snapshot)
+
+    assert await service.create_onepayment_payment(DummySession(), user_id=42, amount_kopeks=100, description="x") is None
+    assert not stub.calls
+
+    result = await service.create_onepayment_payment(
+        DummySession(), user_id=42, amount_kopeks=100, description="x", allow_below_min=True
+    )
+    assert result is not None and result["local_payment_id"] == 11
+    assert stub.calls[0]["amount_kopeks"] == 100
+    assert stub.calls[0]["subscribe"] is True
+
+    # Ноль и отрицательные суммы не проходят даже с allow_below_min.
+    assert await service.create_onepayment_payment(
+        DummySession(), user_id=42, amount_kopeks=0, description="x", allow_below_min=True
+    ) is None
+    # Максимум проверяется всегда.
+    assert await service.create_onepayment_payment(
+        DummySession(), user_id=42, amount_kopeks=6_000_000, description="x", allow_below_min=True
+    ) is None
+
+
+def _paid_trial_metadata() -> Dict[str, Any]:
+    return {
+        "paid_trial": {
+            "v": 1,
+            "kind": "paid_trial",
+            "user_id": 42,
+            "plan_id": 2,
+            "access_days": 1,
+            "renewal_period_days": 30,
+            "price_kopeks": 100,
+        }
+    }
+
+
+@pytest.mark.anyio
+async def test_webhook_paid_trial_snapshot_activates_and_skips_topup_notice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _make_service(StubOnePaymentService())
+    payment = DummyPayment(amount_kopeks=100, metadata_json=_paid_trial_metadata())
+    user = DummyUser(balance=0)
+    _lookup(monkeypatch, payment)
+    calls = _patch_finalize_deps(monkeypatch, payment=payment, user=user)
+
+    activation_calls: List[Dict[str, Any]] = []
+
+    async def fake_activate(db: Any, user_arg: Any, snapshot: Dict[str, Any], *, bot: Any = None) -> bool:
+        activation_calls.append({"user": user_arg, "snapshot": snapshot, "balance": user_arg.balance_kopeks})
+        return True
+
+    async def fail_auto_purchase(*_: Any, **__: Any) -> bool:
+        raise AssertionError("корзина не должна проверяться для оффера")
+
+    notices: List[int] = []
+
+    async def fake_notify(user_arg: Any, amount: int) -> None:
+        notices.append(amount)
+
+    monkeypatch.setattr(onepayment_mixin_module.trial_paid_offer_service, "activate_from_payment", fake_activate)
+    monkeypatch.setattr(onepayment_mixin_module, "auto_purchase_saved_cart_after_topup", fail_auto_purchase)
+    monkeypatch.setattr(service, "_notify_onepayment_topup", fake_notify)
+
+    payload = {"status": "3", "user_data": payment.user_data, "order_id": "o1", "token": "sbp_t_new"}
+    assert await service.process_onepayment_webhook(DummySession(), payload) is True
+
+    # Деньги зачислены и токен привязан ДО активации.
+    assert activation_calls[0]["balance"] == 100
+    assert activation_calls[0]["snapshot"]["kind"] == "paid_trial"
+    assert calls["bindings"][0]["token"] == "sbp_t_new"
+    assert notices == []
+
+
+@pytest.mark.anyio
+async def test_webhook_paid_trial_activation_failure_keeps_money_and_notifies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _make_service(StubOnePaymentService())
+    payment = DummyPayment(amount_kopeks=100, metadata_json=_paid_trial_metadata())
+    user = DummyUser(balance=0)
+    _lookup(monkeypatch, payment)
+    _patch_finalize_deps(monkeypatch, payment=payment, user=user)
+
+    async def fake_activate(*_: Any, **__: Any) -> bool:
+        return False
+
+    notices: List[int] = []
+
+    async def fake_notify(user_arg: Any, amount: int) -> None:
+        notices.append(amount)
+
+    monkeypatch.setattr(onepayment_mixin_module.trial_paid_offer_service, "activate_from_payment", fake_activate)
+    monkeypatch.setattr(service, "_notify_onepayment_topup", fake_notify)
+
+    payload = {"status": "3", "user_data": payment.user_data, "order_id": "o1"}
+    assert await service.process_onepayment_webhook(DummySession(), payload) is True
+    assert user.balance_kopeks == 100
+    assert notices == [100]
+
+
+@pytest.mark.anyio
+async def test_webhook_paid_trial_activation_exception_does_not_break_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _make_service(StubOnePaymentService())
+    payment = DummyPayment(amount_kopeks=100, metadata_json=_paid_trial_metadata())
+    user = DummyUser(balance=0)
+    _lookup(monkeypatch, payment)
+    _patch_finalize_deps(monkeypatch, payment=payment, user=user)
+
+    async def boom(*_: Any, **__: Any) -> bool:
+        raise RuntimeError("remnawave down")
+
+    notices: List[int] = []
+
+    async def fake_notify(user_arg: Any, amount: int) -> None:
+        notices.append(amount)
+
+    monkeypatch.setattr(onepayment_mixin_module.trial_paid_offer_service, "activate_from_payment", boom)
+    monkeypatch.setattr(service, "_notify_onepayment_topup", fake_notify)
+
+    payload = {"status": "3", "user_data": payment.user_data, "order_id": "o1"}
+    assert await service.process_onepayment_webhook(DummySession(), payload) is True
+    assert notices == [100]

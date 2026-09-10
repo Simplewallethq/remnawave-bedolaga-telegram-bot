@@ -52,6 +52,7 @@ from app.services.tariff_partial_payment_service import (
     build_invoice_checkout_snapshot,
     extract_checkout_snapshot,
 )
+from app.services.trial_paid_offer_service import trial_paid_offer_service
 from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
 
@@ -99,13 +100,22 @@ class OnePaymentPaymentMixin:
         *,
         language: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        allow_below_min: bool = False,
     ) -> Optional[Dict[str, Any]]:
+        """Первичный счёт с subscribe=1.
+
+        `allow_below_min` — пропустить проверку ONEPAYMENT_MIN_AMOUNT_KOPEKS
+        (оффер «доступ за 1 ₽»); максимум проверяется всегда.
+        """
         service = getattr(self, "onepayment_service", None)
         if not service or not service.is_configured:
             logger.error("1Payment сервис не инициализирован")
             return None
 
-        if amount_kopeks < settings.ONEPAYMENT_MIN_AMOUNT_KOPEKS:
+        if amount_kopeks <= 0:
+            logger.warning("Сумма 1Payment должна быть положительной: %s", amount_kopeks)
+            return None
+        if not allow_below_min and amount_kopeks < settings.ONEPAYMENT_MIN_AMOUNT_KOPEKS:
             logger.warning(
                 "Сумма 1Payment меньше минимальной: %s < %s",
                 amount_kopeks,
@@ -499,6 +509,26 @@ class OnePaymentPaymentMixin:
                 )
             if not renewed:
                 await self._notify_onepayment_topup(user, credit_amount_kopeks)
+            return payment
+
+        # Оффер «доступ за 1 ₽»: счёт самодостаточен — активируем по снимку.
+        paid_trial_snapshot = trial_paid_offer_service.extract_snapshot(existing_metadata)
+        if paid_trial_snapshot is not None:
+            activated = False
+            try:
+                activated = await trial_paid_offer_service.activate_from_payment(
+                    db, user, paid_trial_snapshot, bot=getattr(self, "bot", None)
+                )
+            except Exception as error:
+                logger.error(
+                    "1Payment: ошибка активации платного триала по счёту %s: %s",
+                    payment.user_data,
+                    error,
+                    exc_info=True,
+                )
+            if activated:
+                return payment
+            await self._notify_onepayment_topup(user, credit_amount_kopeks)
             return payment
 
         auto_purchase_success = False

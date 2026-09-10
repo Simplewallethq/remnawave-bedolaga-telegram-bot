@@ -53,6 +53,8 @@ from app.database.crud.partner_link import (
     attach_subscription_id,
 )
 from app.services.partner_link_service import decode_and_verify_partner_token
+from app.services.trial_paid_offer_service import trial_paid_offer_service
+from app.handlers.subscription.paid_trial_offer import render_paid_trial_offer
 from app.services.trial_activation_service import (
     charge_trial_activation_if_required,
     preview_trial_activation_charge,
@@ -1141,6 +1143,17 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
         _device_link_data = await state.get_data() or {}
         _pending_device_id = _device_link_data.get("device_id")
         if _pending_device_id and not user.subscription:
+            offer_shown = False
+            if trial_paid_offer_service.is_offer_available(user):
+                try:
+                    offer_shown = await render_paid_trial_offer(
+                        db, user, message, is_callback=False, language=user.language
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка показа оффера платного триала по диплинку: {e}")
+            if offer_shown:
+                await state.clear()
+                return
             await _activate_trial_or_deny_for_device(
                 message.bot, db, user, _pending_device_id, message,
                 is_callback=False, language=user.language,
@@ -1189,6 +1202,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             is_admin=is_admin,
             language=user.language,
             use_premium_emoji=is_primary_bot(message.bot.id if message.bot else None),
+            paid_trial_offer=trial_paid_offer_service.is_offer_available(user),
         )
 
         image_path = os.path.join("images", "main_menu.webp")
@@ -1951,6 +1965,12 @@ async def complete_registration_from_callback(
             referral_code=referral_code,
             bot_id=callback.bot.id if callback.bot else None,
         )
+        if trial_paid_offer_service.assign_variant(user) is not None:
+            try:
+                await db.commit()
+            except Exception as variant_error:
+                logger.error("Не удалось сохранить вариант A/B платного триала: %s", variant_error)
+                await db.rollback()
         await db.refresh(user, ['subscription'])
     else:
         logger.info(f"🔄 Обновляем существующего пользователя {callback.from_user.id}")
@@ -2048,6 +2068,15 @@ async def complete_registration_from_callback(
                     f"Ошибка авто-активации partner-подписки при регистрации (callback): {e}"
                 )
                 trial_success = False
+
+    if not trial_success and trial_paid_offer_service.is_offer_available(user):
+        try:
+            trial_success = await render_paid_trial_offer(
+                db, user, callback, is_callback=True, language=language
+            )
+        except Exception as e:
+            logger.error(f"Ошибка показа оффера платного триала при регистрации (callback): {e}")
+            trial_success = False
 
     if not trial_success:
         try:
@@ -2168,6 +2197,7 @@ async def complete_registration(
                 trial_used=trial_used,
                 trial_active=trial_active,
                 has_active_subscription=has_active_sub,
+                paid_trial_offer=trial_paid_offer_service.is_offer_available(existing_user),
                 is_admin=is_admin,
                 language=existing_user.language,
                 use_premium_emoji=is_primary_bot(message.bot.id if message.bot else None),
@@ -2250,6 +2280,14 @@ async def complete_registration(
             referral_code=referral_code,
             bot_id=message.bot.id if message.bot else None,
         )
+        # A/B «доступ за 1 ₽ вместо триала»: вариант назначается один раз при
+        # регистрации в боте и дальше не меняется.
+        if trial_paid_offer_service.assign_variant(user) is not None:
+            try:
+                await db.commit()
+            except Exception as variant_error:
+                logger.error("Не удалось сохранить вариант A/B платного триала: %s", variant_error)
+                await db.rollback()
         await db.refresh(user, ['subscription'])
     else:
         logger.info(f"🔄 Обновляем существующего пользователя {message.from_user.id}")
@@ -2369,6 +2407,17 @@ async def complete_registration(
                 logger.error(f"Ошибка авто-активации partner-подписки при регистрации: {e}")
                 trial_success = False
         # If partner activation didn't succeed (replay, etc.), fall back to trial below.
+
+    if not trial_success and trial_paid_offer_service.is_offer_available(user):
+        # A/B «доступ за 1 ₽»: вместо бесплатного триала — оффер. Если экран
+        # не показался (нет тарифа/цены), падаем в обычный триал ниже.
+        try:
+            trial_success = await render_paid_trial_offer(
+                db, user, message, is_callback=False, language=language
+            )
+        except Exception as e:
+            logger.error(f"Ошибка показа оффера платного триала при регистрации: {e}")
+            trial_success = False
 
     if not trial_success:
         # Default path or partner fallback: trial.
@@ -2634,6 +2683,12 @@ async def required_sub_channel_check(
                         referral_code=referral_code,
                         bot_id=query.bot.id if query.bot else None,
                     )
+                    if trial_paid_offer_service.assign_variant(user) is not None:
+                        try:
+                            await db.commit()
+                        except Exception as variant_error:
+                            logger.error("Не удалось сохранить вариант A/B платного триала: %s", variant_error)
+                            await db.rollback()
 
                     await bot.send_message(
                         chat_id=query.from_user.id,

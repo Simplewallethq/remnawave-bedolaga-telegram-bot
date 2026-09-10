@@ -1085,6 +1085,31 @@ DEFAULT_DEVICE_LIMIT=3
 MAX_DEVICES_LIMIT=15
 ```
 
+#### 🧪 A/B «доступ за 1 ₽ вместо триала»
+
+Только для Telegram-бота (кабинет и миниапп не участвуют). Часть новых пользователей
+вместо бесплатного триала получает оффер: сутки тарифа Solo за 1 ₽ по СБП через
+1Payment. Счёт выставляется с привязкой, подписка создаётся на сутки с периодом
+продления 30 дней, и за `TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE` часов до конца
+доступа рекуррент списывает месячную цену тарифа и продлевает на месяц.
+
+Настраивается **только в админке** (⚙️ Настройки → Триал), в `.env` эти ключи не
+задавайте — заморозятся:
+
+| Ключ | По умолчанию | Смысл |
+|---|---|---|
+| `TRIAL_PAID_OFFER_ENABLED` | `false` | Рубильник теста (нужен включённый 1Payment) |
+| `TRIAL_PAID_OFFER_PERCENT` | `0` | % новых пользователей в варианте «1 ₽»; вариант назначается при регистрации, липкий |
+| `TRIAL_PAID_OFFER_PRICE_KOPEKS` | `100` | Цена оффера |
+| `TRIAL_PAID_OFFER_ACCESS_DAYS` | `1` | Дней доступа за оффер |
+| `TRIAL_PAID_OFFER_PLAN_CODE` | `solo` | Тариф (нужна цена на период продления) |
+| `TRIAL_PAID_OFFER_RENEWAL_PERIOD_DAYS` | `30` | Период автопродления |
+| `TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE` | `2` | За сколько часов до конца доступа списывать |
+| `TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS` | `0` | Через N часов без оплаты выдать обычный триал (0 — нет) |
+
+Аналитика — SQL по `users.trial_offer_variant` (`control` / `paid_trial`),
+`subscription_events.source = 'paid_trial_offer'` и `onepayment_payments.is_recurring`.
+
 ### 💥 Реферальная система
 
 ```env

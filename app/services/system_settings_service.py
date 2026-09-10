@@ -695,6 +695,55 @@ class BotConfigurationService:
             "warning": "Неверный формат будет проигнорирован при создании пользователя.",
             "dependencies": "Активация триала и включенная интеграция с RemnaWave",
         },
+        "TRIAL_PAID_OFFER_ENABLED": {
+            "description": (
+                "A/B-тест только для Telegram-бота: часть новых пользователей вместо бесплатного "
+                "триала получает оффер «доступ за 1 ₽» по СБП (1Payment) с автопродлением."
+            ),
+            "format": "Булево значение.",
+            "example": "true",
+            "warning": "Не задавайте в .env — значение заморозится и админка перестанет его переключать. Без включённого 1Payment оффер не показывается.",
+            "dependencies": "ONEPAYMENT_ENABLED, TRIAL_PAID_OFFER_PERCENT, TRIAL_PAID_OFFER_PLAN_CODE",
+        },
+        "TRIAL_PAID_OFFER_PERCENT": {
+            "description": "Процент новых пользователей бота, попадающих в вариант «доступ за 1 ₽». Вариант назначается при регистрации и не меняется.",
+            "format": "Целое 0–100.",
+            "example": "50",
+            "warning": "Действует только на регистрации после включения: уже зарегистрированные пользователи в тест не попадают.",
+        },
+        "TRIAL_PAID_OFFER_PRICE_KOPEKS": {
+            "description": "Цена оффера в копейках.",
+            "format": "Целое > 0.",
+            "example": "100",
+            "warning": "Счёт выставляется мимо ONEPAYMENT_MIN_AMOUNT_KOPEKS — убедитесь, что 1Payment принимает такую сумму.",
+        },
+        "TRIAL_PAID_OFFER_ACCESS_DAYS": {
+            "description": "Сколько дней доступа даёт оплата оффера.",
+            "format": "Целое ≥ 1.",
+            "example": "1",
+        },
+        "TRIAL_PAID_OFFER_PLAN_CODE": {
+            "description": "Код тарифа, который получает пользователь по офферу.",
+            "format": "Код из таблицы тарифов (solo, plus, pro).",
+            "example": "solo",
+            "warning": "У тарифа должна быть цена на TRIAL_PAID_OFFER_RENEWAL_PERIOD_DAYS для когорты пользователя, иначе оффер не показывается.",
+        },
+        "TRIAL_PAID_OFFER_RENEWAL_PERIOD_DAYS": {
+            "description": "Период, на который рекуррент продлевает подписку после суточного доступа (пишется в plan_period_days).",
+            "format": "Целое ≥ 1, обычно 30.",
+            "example": "30",
+        },
+        "TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE": {
+            "description": "За сколько часов до конца суточного доступа списывать первое продление по токену.",
+            "format": "Целое ≥ 0 (часы).",
+            "example": "2",
+            "warning": "Для суточной подписки общее окно ONEPAYMENT_RECURRING_DAYS_BEFORE не применяется. Повтор после отказа банка — через час.",
+        },
+        "TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS": {
+            "description": "Через сколько часов без оплаты оффера выдать обычный бесплатный триал.",
+            "format": "Целое ≥ 0 (часы); 0 — не выдавать.",
+            "example": "24",
+        },
         "PAID_SUBSCRIPTION_USER_TAG": {
             "description": (
                 "Тег, который бот ставит пользователю при покупке платной подписки в панели RemnaWave."

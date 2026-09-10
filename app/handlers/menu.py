@@ -60,6 +60,7 @@ from app.services.subscription_checkout_service import (
 )
 from app.utils.photo_message import edit_or_answer_photo
 from app.services.support_settings_service import SupportSettingsService
+from app.services.trial_paid_offer_service import trial_paid_offer_service
 from app.services.main_menu_button_service import MainMenuButtonService
 from app.services.user_cart_service import user_cart_service
 from app.utils.promo_offer import (
@@ -275,6 +276,7 @@ async def show_main_menu(
         is_admin=is_admin,
         language=db_user.language,
         use_premium_emoji=is_primary_bot(callback.bot.id if callback.bot else None),
+        paid_trial_offer=trial_paid_offer_service.is_offer_available(db_user),
     )
 
     image_path = os.path.join("images", "main_menu.webp")

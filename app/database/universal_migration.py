@@ -2003,6 +2003,57 @@ async def add_user_tariff_pricing_cohort_override_column() -> bool:
         return False
 
 
+async def add_trial_paid_offer_columns() -> bool:
+    """Колонки A/B «доступ за 1 ₽ вместо триала».
+
+    users.trial_offer_variant — control / paid_trial (NULL — вне теста);
+    subscriptions.is_paid_trial — суточная платная подписка, у которой рекуррент
+    идёт по часам до конца, а не по дням.
+    """
+    try:
+        db_type = await get_database_type()
+
+        if await check_column_exists('users', 'trial_offer_variant'):
+            logger.info("ℹ️ Колонка users.trial_offer_variant уже существует")
+        else:
+            async with engine.begin() as conn:
+                if db_type in ('sqlite', 'postgresql', 'mysql'):
+                    await conn.execute(text(
+                        "ALTER TABLE users ADD COLUMN trial_offer_variant VARCHAR(16) NULL"
+                    ))
+                else:
+                    raise ValueError(f"Unsupported database type: {db_type}")
+            logger.info("✅ Колонка users.trial_offer_variant добавлена")
+
+        if not await check_index_exists('users', 'ix_users_trial_offer_variant'):
+            async with engine.begin() as conn:
+                await conn.execute(text(
+                    "CREATE INDEX ix_users_trial_offer_variant ON users (trial_offer_variant)"
+                ))
+            logger.info("✅ Индекс ix_users_trial_offer_variant создан")
+
+        if await check_column_exists('subscriptions', 'is_paid_trial'):
+            logger.info("ℹ️ Колонка subscriptions.is_paid_trial уже существует")
+        else:
+            async with engine.begin() as conn:
+                if db_type == 'sqlite':
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN is_paid_trial BOOLEAN NOT NULL DEFAULT 0"
+                    ))
+                elif db_type in ('postgresql', 'mysql'):
+                    await conn.execute(text(
+                        "ALTER TABLE subscriptions ADD COLUMN is_paid_trial BOOLEAN NOT NULL DEFAULT FALSE"
+                    ))
+                else:
+                    raise ValueError(f"Unsupported database type: {db_type}")
+            logger.info("✅ Колонка subscriptions.is_paid_trial добавлена")
+
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления колонок A/B платного триала: {e}")
+        return False
+
+
 async def ensure_promo_offer_template_active_duration_column() -> bool:
     try:
         column_exists = await check_column_exists('promo_offer_templates', 'active_discount_hours')
@@ -8802,6 +8853,13 @@ async def run_universal_migration():
         else:
             logger.warning("⚠️ Проблемы с колонкой tariff_pricing_cohort_override в users")
 
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНОК A/B ПЛАТНОГО ТРИАЛА (TRIAL_OFFER_VARIANT, IS_PAID_TRIAL) ===")
+        trial_paid_offer_ready = await add_trial_paid_offer_columns()
+        if trial_paid_offer_ready:
+            logger.info("✅ Колонки A/B платного триала готовы")
+        else:
+            logger.warning("⚠️ Проблемы с колонками A/B платного триала")
+
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ AD_CAMPAIGN_VISITS ===")
         ad_visits_ready = await create_ad_campaign_visits_table()
         if ad_visits_ready:
@@ -8933,6 +8991,8 @@ async def check_migration_status():
             "users_promo_offer_discount_source_column": False,
             "users_promo_offer_discount_expires_column": False,
             "users_tariff_pricing_cohort_override_column": False,
+            "users_trial_offer_variant_column": False,
+            "subscriptions_is_paid_trial_column": False,
             "users_referral_commission_percent_column": False,
             "subscription_crypto_link_column": False,
             "discount_offers_table": False,
@@ -9032,6 +9092,8 @@ async def check_migration_status():
         status["users_promo_offer_discount_source_column"] = await check_column_exists('users', 'promo_offer_discount_source')
         status["users_promo_offer_discount_expires_column"] = await check_column_exists('users', 'promo_offer_discount_expires_at')
         status["users_tariff_pricing_cohort_override_column"] = await check_column_exists('users', 'tariff_pricing_cohort_override')
+        status["users_trial_offer_variant_column"] = await check_column_exists('users', 'trial_offer_variant')
+        status["subscriptions_is_paid_trial_column"] = await check_column_exists('subscriptions', 'is_paid_trial')
         status["users_referral_commission_percent_column"] = await check_column_exists('users', 'referral_commission_percent')
         status["subscription_crypto_link_column"] = await check_column_exists('subscriptions', 'subscription_crypto_link')
         
@@ -9114,6 +9176,8 @@ async def check_migration_status():
             "users_promo_offer_discount_source_column": "Колонка источника промо-скидки у пользователей",
             "users_promo_offer_discount_expires_column": "Колонка срока действия промо-скидки у пользователей",
             "users_tariff_pricing_cohort_override_column": "Колонка переопределения тарифной когорты у пользователей",
+            "users_trial_offer_variant_column": "Колонка варианта A/B платного триала у пользователей",
+            "subscriptions_is_paid_trial_column": "Колонка is_paid_trial в subscriptions",
             "users_referral_commission_percent_column": "Колонка процента реферальной комиссии у пользователей",
             "subscription_crypto_link_column": "Колонка subscription_crypto_link в subscriptions",
             "discount_offers_table": "Таблица discount_offers",

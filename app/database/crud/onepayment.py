@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -403,13 +403,24 @@ async def deactivate_onepayment_binding(
 
 
 async def list_onepayment_bindings_due(
-    db: AsyncSession, *, before: datetime
+    db: AsyncSession, *, before: datetime, paid_trial_before: Optional[datetime] = None
 ) -> List[OnePaymentBinding]:
     """Активные привязки, чья платная подписка заканчивается до `before`.
 
     Подписка должна быть ACTIVE и не триальной — истёкшие переводит в EXPIRED
     `_check_expired_subscriptions`, что естественно ограничивает окно попыток.
+
+    `paid_trial_before` — отдельное (короткое, в часах) окно для суточных
+    подписок «за 1 ₽» (`is_paid_trial`): с общим окном в днях их списание ушло
+    бы сразу после оплаты. None — суточные подписки идут по общему окну.
     """
+    if paid_trial_before is None:
+        due_clause = Subscription.end_date <= before
+    else:
+        due_clause = or_(
+            and_(Subscription.is_paid_trial == False, Subscription.end_date <= before),  # noqa: E712
+            and_(Subscription.is_paid_trial == True, Subscription.end_date <= paid_trial_before),  # noqa: E712
+        )
     result = await db.execute(
         select(OnePaymentBinding)
         .join(Subscription, Subscription.user_id == OnePaymentBinding.user_id)
@@ -419,7 +430,7 @@ async def list_onepayment_bindings_due(
                 OnePaymentBinding.status == OnePaymentBinding.STATUS_ACTIVE,
                 Subscription.status == SubscriptionStatus.ACTIVE.value,
                 Subscription.is_trial == False,  # noqa: E712
-                Subscription.end_date <= before,
+                due_clause,
             )
         )
         .order_by(Subscription.end_date.asc())

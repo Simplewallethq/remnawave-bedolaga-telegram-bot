@@ -105,6 +105,7 @@ from .purchase import (
     start_subscription_purchase,
 )
 
+from .paid_trial_offer import register_handlers as _register_paid_trial_offer_handlers
 from .tariffs import (
     register_handlers as _register_tariffs_handlers,
     show_tariffs_page,
@@ -119,6 +120,7 @@ from .tariffs import (
 def register_handlers(dp):
     _register_tariffs_handlers(dp)
     _register_purchase_handlers(dp)
+    _register_paid_trial_offer_handlers(dp)
 
 from .traffic import (
     add_traffic,

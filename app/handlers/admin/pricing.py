@@ -115,6 +115,83 @@ TRIAL_ENTRIES: Tuple[SettingEntry, ...] = (
         description_en="Amount in kopeks. 0 — free activation.",
     ),
     SettingEntry(
+        key="TRIAL_PAID_OFFER_ENABLED",
+        section="trial",
+        label_ru="🧪 A/B: сутки за 1 ₽ вместо триала",
+        label_en="🧪 A/B: 1-day paid access instead of trial",
+        action="toggle",
+        description_ru=(
+            "Часть новых пользователей бота вместо бесплатного триала получает оффер "
+            "«доступ за 1 ₽» по СБП (1Payment) с автопродлением на месяц. "
+            "Нужен включённый 1Payment."
+        ),
+        description_en=(
+            "A share of new bot users gets a paid 1-ruble SBP offer (1Payment) with monthly "
+            "auto-renewal instead of the free trial. Requires 1Payment enabled."
+        ),
+    ),
+    SettingEntry(
+        key="TRIAL_PAID_OFFER_PERCENT",
+        section="trial",
+        label_ru="🧪 A/B: процент новых пользователей",
+        label_en="🧪 A/B: share of new users, %",
+        action="input",
+        description_ru="0–100. Вариант назначается один раз при регистрации и не меняется.",
+        description_en="0–100. The variant is assigned once at registration and never changes.",
+    ),
+    SettingEntry(
+        key="TRIAL_PAID_OFFER_PRICE_KOPEKS",
+        section="trial",
+        label_ru="🧪 A/B: цена оффера",
+        label_en="🧪 A/B: offer price",
+        action="price",
+        description_ru="В копейках. 100 = 1 ₽.",
+        description_en="In kopeks. 100 = 1 RUB.",
+    ),
+    SettingEntry(
+        key="TRIAL_PAID_OFFER_ACCESS_DAYS",
+        section="trial",
+        label_ru="🧪 A/B: дней доступа за оффер",
+        label_en="🧪 A/B: access days for the offer",
+        action="input",
+    ),
+    SettingEntry(
+        key="TRIAL_PAID_OFFER_PLAN_CODE",
+        section="trial",
+        label_ru="🧪 A/B: код тарифа",
+        label_en="🧪 A/B: plan code",
+        action="input",
+        description_ru="Код тарифа (solo/plus/pro). У тарифа должна быть цена на период продления.",
+        description_en="Plan code (solo/plus/pro). The plan must have a price for the renewal period.",
+    ),
+    SettingEntry(
+        key="TRIAL_PAID_OFFER_RENEWAL_PERIOD_DAYS",
+        section="trial",
+        label_ru="🧪 A/B: период автопродления, дн.",
+        label_en="🧪 A/B: auto-renewal period, days",
+        action="input",
+        description_ru="Пишется в plan_period_days подписки: по нему рекуррент считает цену и продлевает.",
+        description_en="Stored as the subscription's plan_period_days: recurring charges use it for price and extension.",
+    ),
+    SettingEntry(
+        key="TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE",
+        section="trial",
+        label_ru="🧪 A/B: списывать за N часов до конца",
+        label_en="🧪 A/B: charge N hours before access ends",
+        action="input",
+        description_ru="Окно первого автосписания для суточной подписки (в часах, вместо ONEPAYMENT_RECURRING_DAYS_BEFORE).",
+        description_en="First auto-charge window for the 1-day subscription (hours, instead of ONEPAYMENT_RECURRING_DAYS_BEFORE).",
+    ),
+    SettingEntry(
+        key="TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS",
+        section="trial",
+        label_ru="🧪 A/B: бесплатный триал неоплатившим через N ч",
+        label_en="🧪 A/B: free trial for non-payers after N h",
+        action="input",
+        description_ru="0 — не выдавать. N>0 — если оффер не оплачен за N часов, выдать обычный триал.",
+        description_en="0 — never. N>0 — grant the regular trial if the offer is unpaid after N hours.",
+    ),
+    SettingEntry(
         key="TRIAL_ADD_REMAINING_DAYS_TO_PAID",
         section="trial",
         label_ru="➕ Добавлять оставшиеся дни к платной подписке",

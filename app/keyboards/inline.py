@@ -3268,18 +3268,31 @@ def get_new_main_menu_keyboard(
     is_admin: bool = False,
     language: str = DEFAULT_LANGUAGE,
     use_premium_emoji: bool = False,
+    paid_trial_offer: bool = False,
 ) -> InlineKeyboardMarkup:
     """
     Экран 2: Главное меню
+
+    `paid_trial_offer` — пользователь в варианте A/B «доступ за 1 ₽»: вместо
+    кнопки бесплатного триала показываем оффер.
     """
     texts = get_texts(language)
     keyboard = []
     
     if not trial_used and not trial_active and not has_active_subscription:
-        keyboard.append([InlineKeyboardButton(
-            text=texts.t("MENU_TRIAL_BUTTON", "🎁 3 дня бесплатно"),
-            callback_data="trial_activate"
-        )])
+        if paid_trial_offer:
+            keyboard.append([InlineKeyboardButton(
+                text=texts.t("PAID_TRIAL_OFFER_BUTTON", "⚡ {days} дн. за {price}").format(
+                    days=settings.get_trial_paid_offer_access_days(),
+                    price=settings.format_price(settings.get_trial_paid_offer_price_kopeks()),
+                ),
+                callback_data="paid_trial_offer"
+            )])
+        else:
+            keyboard.append([InlineKeyboardButton(
+                text=texts.t("MENU_TRIAL_BUTTON", "🎁 3 дня бесплатно"),
+                callback_data="trial_activate"
+            )])
         keyboard.append([InlineKeyboardButton(
             text=_premium_button_label(
                 texts.t("MENU_CONNECT_BUTTON", "🚀 Подключить устройство"),

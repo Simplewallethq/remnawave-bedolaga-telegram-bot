@@ -907,6 +907,8 @@ class User(Base):
     promo_offer_discount_source = Column(String(100), nullable=True)
     promo_offer_discount_expires_at = Column(DateTime, nullable=True)
     tariff_pricing_cohort_override = Column(String(8), nullable=True)
+    # A/B «доступ за 1 ₽ вместо триала»: control / paid_trial, NULL — вне теста.
+    trial_offer_variant = Column(String(16), nullable=True, index=True)
     last_remnawave_sync = Column(DateTime, nullable=True)
     trojan_password = Column(String(255), nullable=True)
     vless_uuid = Column(String(255), nullable=True)
@@ -1002,6 +1004,9 @@ class Subscription(Base):
     is_trial = Column(Boolean, default=True)
     is_partner = Column(Boolean, default=False, nullable=False, server_default="false")
     used_trial_failed = Column(Boolean, default=False, nullable=False, server_default="false")
+    # Суточный платный доступ из A/B «за 1 ₽»: рекуррент идёт по часам до конца,
+    # сбрасывается при первом продлении/перепокупке.
+    is_paid_trial = Column(Boolean, default=False, nullable=False, server_default="false")
 
     start_date = Column(DateTime, default=func.now())
     end_date = Column(DateTime, nullable=False)

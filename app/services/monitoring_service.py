@@ -81,6 +81,8 @@ logger = logging.getLogger(__name__)
 
 
 SUBSCRIPTION_EXPIRING_IMAGE = Path("images") / "subend.webp"
+# Интервал между попытками списания по суточной подписке «за 1 ₽».
+PAID_TRIAL_RECURRING_RETRY_INTERVAL = timedelta(hours=1)
 
 
 class MonitoringService:
@@ -300,6 +302,7 @@ class MonitoringService:
                     await self._process_autopayments(db)
                 if settings.is_onepayment_recurring_enabled():
                     await self._process_onepayment_recurring(db)
+                await self._process_trial_paid_offer_fallbacks(db)
                 await self._cleanup_inactive_users(db)
                 await self._collect_daily_subscription_metrics(db)
                 await self._collect_user_daily_metrics(db)
@@ -1335,7 +1338,14 @@ class MonitoringService:
 
             now = datetime.utcnow()
             window_end = now + timedelta(days=settings.get_onepayment_recurring_days_before())
-            bindings = await payment_module.list_onepayment_bindings_due(db, before=window_end)
+            # Суточные подписки «за 1 ₽» — своё окно в часах, иначе списание
+            # ушло бы в первом же цикле после оплаты.
+            paid_trial_window_end = now + timedelta(
+                hours=settings.get_trial_paid_offer_recurring_hours_before()
+            )
+            bindings = await payment_module.list_onepayment_bindings_due(
+                db, before=window_end, paid_trial_before=paid_trial_window_end
+            )
             if not bindings:
                 return
 
@@ -1500,7 +1510,14 @@ class MonitoringService:
             )
             return "renewed_from_balance"
 
-        if binding.last_charge_at and (now - binding.last_charge_at) < timedelta(hours=24):
+        # Суточной подписке «за 1 ₽» ждать сутки между попытками некогда —
+        # повторяем через час, пока доступ не истёк.
+        retry_interval = (
+            PAID_TRIAL_RECURRING_RETRY_INTERVAL
+            if getattr(subscription, "is_paid_trial", False)
+            else timedelta(hours=24)
+        )
+        if binding.last_charge_at and (now - binding.last_charge_at) < retry_interval:
             return "skipped"
 
         charge_kopeks = max(shortfall, int(settings.ONEPAYMENT_MIN_AMOUNT_KOPEKS))
@@ -1556,6 +1573,24 @@ class MonitoringService:
             payment.user_data,
         )
         return "charged"
+
+    async def _process_trial_paid_offer_fallbacks(self, db: AsyncSession) -> None:
+        """A/B «за 1 ₽»: неоплатившим через N часов выдаём обычный триал (если включено)."""
+        if settings.get_trial_paid_offer_fallback_trial_hours() <= 0:
+            return
+        try:
+            from app.services.trial_paid_offer_service import trial_paid_offer_service
+
+            granted = await trial_paid_offer_service.grant_fallback_trials(db, self.bot)
+            if granted:
+                await self._log_monitoring_event(
+                    db,
+                    "trial_paid_offer_fallback_granted",
+                    f"Фолбэк-триал выдан {granted} пользователям без оплаты оффера за 1 ₽",
+                    {"granted": granted},
+                )
+        except Exception as error:
+            logger.error(f"Ошибка выдачи фолбэк-триалов A/B платного триала: {error}")
 
     async def _send_onepayment_balance_renewal_notification(
         self, user: User, amount: int, days: int, subscription: Subscription

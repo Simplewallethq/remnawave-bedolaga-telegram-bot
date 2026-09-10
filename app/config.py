@@ -8,7 +8,7 @@ import re
 import html
 from collections import defaultdict
 from datetime import time, datetime, timezone as dt_timezone
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 from pydantic_settings import BaseSettings
@@ -105,6 +105,21 @@ class Settings(BaseSettings):
     TRIAL_PAYMENT_ENABLED: bool = False
     TRIAL_ACTIVATION_PRICE: int = 0
     TRIAL_USER_TAG: Optional[str] = None
+    # A/B-тест «доступ за 1 ₽ вместо триала» (только Telegram-бот). Новый
+    # пользователь с вероятностью TRIAL_PAID_OFFER_PERCENT попадает в вариант
+    # paid_trial: вместо бесплатного триала ему предлагают оплатить по СБП
+    # (1Payment, с привязкой) TRIAL_PAID_OFFER_ACCESS_DAYS дней доступа к тарифу
+    # TRIAL_PAID_OFFER_PLAN_CODE; подписке пишется период продления
+    # TRIAL_PAID_OFFER_RENEWAL_PERIOD_DAYS, по которому дальше идёт рекуррент.
+    # Настраивать в админке, в .env НЕ класть — заморозится (ENV_OVERRIDE_KEYS).
+    TRIAL_PAID_OFFER_ENABLED: bool = False
+    TRIAL_PAID_OFFER_PERCENT: int = 0
+    TRIAL_PAID_OFFER_PRICE_KOPEKS: int = 100
+    TRIAL_PAID_OFFER_ACCESS_DAYS: int = 1
+    TRIAL_PAID_OFFER_PLAN_CODE: str = "solo"
+    TRIAL_PAID_OFFER_RENEWAL_PERIOD_DAYS: int = 30
+    TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE: int = 2
+    TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS: int = 0
     DEFAULT_TRAFFIC_LIMIT_GB: int = 100
     DEFAULT_DEVICE_LIMIT: int = 1
     DEFAULT_TRAFFIC_RESET_STRATEGY: str = "MONTH"
@@ -1315,6 +1330,46 @@ class Settings(BaseSettings):
             return 0
 
         return value
+
+    # --- A/B «доступ за 1 ₽ вместо триала» ---
+
+    @staticmethod
+    def _int_or_default(value: Any, default: int, *, minimum: int = 0, maximum: Optional[int] = None) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        if parsed < minimum:
+            return minimum
+        if maximum is not None and parsed > maximum:
+            return maximum
+        return parsed
+
+    def is_trial_paid_offer_enabled(self) -> bool:
+        """Тест включён и есть чем выставить счёт: без 1Payment оффер бессмыслен."""
+        return bool(self.TRIAL_PAID_OFFER_ENABLED) and self.is_onepayment_enabled()
+
+    def get_trial_paid_offer_percent(self) -> int:
+        return self._int_or_default(self.TRIAL_PAID_OFFER_PERCENT, 0, minimum=0, maximum=100)
+
+    def get_trial_paid_offer_price_kopeks(self) -> int:
+        return self._int_or_default(self.TRIAL_PAID_OFFER_PRICE_KOPEKS, 100, minimum=1)
+
+    def get_trial_paid_offer_access_days(self) -> int:
+        return self._int_or_default(self.TRIAL_PAID_OFFER_ACCESS_DAYS, 1, minimum=1)
+
+    def get_trial_paid_offer_plan_code(self) -> str:
+        return (self.TRIAL_PAID_OFFER_PLAN_CODE or "solo").strip().lower() or "solo"
+
+    def get_trial_paid_offer_renewal_period_days(self) -> int:
+        return self._int_or_default(self.TRIAL_PAID_OFFER_RENEWAL_PERIOD_DAYS, 30, minimum=1)
+
+    def get_trial_paid_offer_recurring_hours_before(self) -> int:
+        return self._int_or_default(self.TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE, 2, minimum=0)
+
+    def get_trial_paid_offer_fallback_trial_hours(self) -> int:
+        """0 — неоплатившим ничего не выдаём; N>0 — через N часов даём обычный триал."""
+        return self._int_or_default(self.TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS, 0, minimum=0)
     
     def is_yookassa_enabled(self) -> bool:
         return (self.YOOKASSA_ENABLED and

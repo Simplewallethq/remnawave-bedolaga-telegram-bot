@@ -69,6 +69,8 @@ from app.services.subscription_checkout_service import (
     should_offer_checkout_resume,
 )
 from app.services.subscription_service import SubscriptionService
+from app.services.trial_paid_offer_service import trial_paid_offer_service
+from .paid_trial_offer import render_paid_trial_offer
 from app.services.trial_activation_service import (
     TrialPaymentChargeFailed,
     TrialPaymentInsufficientFunds,
@@ -450,12 +452,31 @@ async def show_subscription_info(
     )
     await callback.answer()
 
+async def _redirect_to_paid_trial_offer(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+) -> bool:
+    """A/B «доступ за 1 ₽»: старые кнопки триала ведут на оффер. True — перехвачено."""
+    if not trial_paid_offer_service.is_offer_available(db_user):
+        return False
+    shown = await render_paid_trial_offer(db, db_user, callback, is_callback=True)
+    if not shown:
+        # Тариф/цена не настроены — оффер показать нельзя, пусть идёт обычный триал.
+        return False
+    await callback.answer()
+    return True
+
+
 async def show_trial_offer(
         callback: types.CallbackQuery,
         db_user: User,
         db: AsyncSession
 ):
     texts = get_texts(db_user.language)
+
+    if await _redirect_to_paid_trial_offer(callback, db_user, db):
+        return
 
     if db_user.subscription or db_user.has_had_paid_subscription:
         await callback.message.edit_text(
@@ -540,6 +561,9 @@ async def activate_trial(
     from app.services.admin_notification_service import AdminNotificationService
 
     texts = get_texts(db_user.language)
+
+    if await _redirect_to_paid_trial_offer(callback, db_user, db):
+        return
 
     if db_user.subscription or db_user.has_had_paid_subscription:
         await callback.message.edit_text(

@@ -337,3 +337,75 @@ async def test_autopayments_skip_insufficient_notice_with_binding(monkeypatch: p
 
     monkeypatch.setattr(settings, "ONEPAYMENT_RECURRING_ENABLED", False, raising=False)
     assert await service._has_active_onepayment_binding(FakeSession(None), 42) is False
+
+
+# ---------------------------------------------- суточная подписка «за 1 ₽»
+
+
+def _paid_trial_user(balance: int, end_date: datetime) -> SimpleNamespace:
+    user = _user(balance=balance, end_date=end_date, legacy=False)
+    user.subscription.is_paid_trial = True
+    return user
+
+
+@pytest.mark.anyio
+async def test_paid_trial_retries_after_one_hour_not_a_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _service(monkeypatch)
+    _patch_crud(monkeypatch)
+    user = _paid_trial_user(balance=0, end_date=NOW + timedelta(hours=2))
+    plan = SimpleNamespace(id=3, code="solo")
+
+    async def fake_resolve(db: Any, subscription: Any, user_arg: Any) -> Any:
+        return plan, 30, 32_000
+
+    monkeypatch.setattr(service, "_resolve_tariff_autopay_charge", fake_resolve)
+
+    payments = FakePaymentService()
+    outcome = await service._process_onepayment_binding(
+        FakeSession(user), payments, _binding(last_charge_at=NOW - timedelta(minutes=30)), NOW
+    )
+    assert outcome == "skipped"
+    assert not payments.charges
+
+    outcome = await service._process_onepayment_binding(
+        FakeSession(user), payments, _binding(last_charge_at=NOW - timedelta(hours=1, minutes=1)), NOW
+    )
+    assert outcome == "charged"
+    charge = payments.charges[0]
+    assert charge["amount_kopeks"] == 32_000
+    assert charge["renewal_snapshot"]["period_days"] == 30
+    assert charge["renewal_snapshot"]["plan_id"] == 3
+
+
+@pytest.mark.anyio
+async def test_regular_subscription_keeps_daily_retry_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _service(monkeypatch)
+    _patch_crud(monkeypatch)
+    user = _user(balance=0, end_date=END)
+    payments = FakePaymentService()
+
+    outcome = await service._process_onepayment_binding(
+        FakeSession(user), payments, _binding(last_charge_at=NOW - timedelta(hours=2)), NOW
+    )
+    assert outcome == "skipped"
+
+
+@pytest.mark.anyio
+async def test_recurring_passes_hour_window_for_paid_trials(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = _service(monkeypatch)
+    monkeypatch.setattr(settings, "ONEPAYMENT_RECURRING_DAYS_BEFORE", 1, raising=False)
+    monkeypatch.setattr(settings, "TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE", 3, raising=False)
+    captured: Dict[str, Any] = {}
+
+    async def fake_list(db: Any, *, before: datetime, paid_trial_before: Optional[datetime] = None) -> List[Any]:
+        captured["before"] = before
+        captured["paid_trial_before"] = paid_trial_before
+        return []
+
+    monkeypatch.setattr(payment_service_module, "list_onepayment_bindings_due", fake_list, raising=False)
+
+    started = datetime.utcnow()
+    await service._process_onepayment_recurring(FakeSession(None))
+
+    assert captured["before"] - started >= timedelta(days=1) - timedelta(seconds=5)
+    assert timedelta(hours=3) - timedelta(seconds=5) <= captured["paid_trial_before"] - started <= timedelta(hours=3, seconds=5)
