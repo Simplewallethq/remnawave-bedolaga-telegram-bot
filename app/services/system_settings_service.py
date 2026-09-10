@@ -718,9 +718,9 @@ class BotConfigurationService:
             "warning": "Счёт выставляется мимо ONEPAYMENT_MIN_AMOUNT_KOPEKS — убедитесь, что 1Payment принимает такую сумму.",
         },
         "TRIAL_PAID_OFFER_ACCESS_DAYS": {
-            "description": "Сколько дней доступа даёт оплата оффера.",
+            "description": "Сколько дней доступа даёт активация за символическую оплату.",
             "format": "Целое ≥ 1.",
-            "example": "1",
+            "example": "3",
         },
         "TRIAL_PAID_OFFER_PLAN_CODE": {
             "description": "Код тарифа, который получает пользователь по офферу.",
@@ -734,9 +734,9 @@ class BotConfigurationService:
             "example": "30",
         },
         "TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE": {
-            "description": "За сколько часов до конца суточного доступа списывать первое продление по токену.",
+            "description": "За сколько часов до конца пробного доступа списывать первое продление по токену.",
             "format": "Целое ≥ 0 (часы).",
-            "example": "2",
+            "example": "1",
             "warning": "Для суточной подписки общее окно ONEPAYMENT_RECURRING_DAYS_BEFORE не применяется. Повтор после отказа банка — через час.",
         },
         "TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS": {

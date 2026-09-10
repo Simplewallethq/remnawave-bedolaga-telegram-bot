@@ -97,6 +97,7 @@ class DailySubscriptionMetricsService:
             select(func.count(func.distinct(Subscription.user_id))).where(
                 and_(
                     Subscription.is_trial.is_(False),
+                    func.coalesce(Subscription.is_paid_trial, False).is_(False),
                     func.coalesce(Subscription.is_partner, False).is_(False),
                     Subscription.start_date <= as_of,
                     Subscription.end_date > as_of,
@@ -110,6 +111,7 @@ class DailySubscriptionMetricsService:
             select(func.count(func.distinct(Subscription.user_id))).where(
                 and_(
                     Subscription.is_trial.is_(False),
+                    func.coalesce(Subscription.is_paid_trial, False).is_(False),
                     func.coalesce(Subscription.is_partner, False).is_(False),
                     Subscription.end_date < lost_cutoff,
                 )

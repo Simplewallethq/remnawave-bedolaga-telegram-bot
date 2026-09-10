@@ -33,6 +33,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.database.models import Subscription, SubscriptionPlan, User, UserStatus
 from app.localization.texts import get_texts
+from app.utils.formatters import format_days_declension
 from app.services.plan_pricing_service import (
     get_plan_by_code,
     get_plan_by_id,
@@ -345,32 +346,18 @@ class TrialPaidOfferService:
         lang = getattr(user, "language", None) or settings.DEFAULT_LANGUAGE
         texts = get_texts(lang)
         link = get_raw_subscription_link(subscription)
-        renewal_price = snapshot.get("renewal_price_kopeks")
         parts = [
             texts.t(
                 "PAID_TRIAL_OFFER_ACTIVATED_TEXT",
-                "⚡ <b>Доступ {name} на {days} дн. активирован!</b>\n"
-                "Установи приложение и пользуйся.",
-            ).format(name=plan.display_name, days=snapshot.get("access_days")),
+                "✅ <b>Готово! Доступ на {days} активирован</b>",
+            ).format(days=format_days_declension(int(snapshot.get("access_days") or 0), lang)),
         ]
         if link:
             parts.append(
-                texts.t("ONBOARDING_ACCESS_KEY_LABEL", "Ключ-ссылка доступа (для Happ, Incy)")
+                "▎ "
+                + texts.t("ONBOARDING_ACCESS_KEY_LABEL", "Ключ-ссылка доступа (для Happ, Incy)")
                 + "\n"
                 + f"<pre><code>{html.escape(link, quote=True)}</code></pre>"
-            )
-        if renewal_price:
-            parts.append(
-                texts.t(
-                    "PAID_TRIAL_OFFER_ACTIVATED_RENEWAL_NOTE",
-                    "🔁 Перед окончанием доступа по СБП спишется {price} за {name} на {period} дн., "
-                    "дальше продление раз в {period} дн. Отключить автоплатёж можно в разделе "
-                    "«Управление подпиской → Автоплатеж».",
-                ).format(
-                    price=settings.format_price(int(renewal_price)),
-                    name=plan.display_name,
-                    period=snapshot.get("renewal_period_days"),
-                )
             )
         text = "\n\n".join(parts)
         keyboard = get_onboarding_welcome_keyboard(lang)

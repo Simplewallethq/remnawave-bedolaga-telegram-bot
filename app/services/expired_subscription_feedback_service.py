@@ -203,6 +203,7 @@ class ExpiredSubscriptionFeedbackService:
                     User.status == ModelUserStatus.ACTIVE.value,
                     Subscription.status == ModelSubscriptionStatus.EXPIRED.value,
                     Subscription.is_trial == False,  # noqa: E712
+                    Subscription.is_paid_trial == False,  # noqa: E712
                     Subscription.is_partner == False,  # noqa: E712
                     Subscription.end_date >= start_utc_naive,
                     Subscription.end_date < end_utc_naive,

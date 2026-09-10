@@ -42,6 +42,13 @@ from app.services.pinned_message_service import (
 
 logger = logging.getLogger(__name__)
 
+
+def _is_trial_like(subscription) -> bool:
+    """Триал для рассылок: бесплатный триал или пробный доступ «за 1 ₽» (A/B)."""
+    return bool(
+        getattr(subscription, "is_trial", False) or getattr(subscription, "is_paid_trial", False)
+    )
+
 BUTTON_ROWS = BROADCAST_BUTTON_ROWS
 DEFAULT_SELECTED_BUTTONS = DEFAULT_BROADCAST_BUTTONS
 
@@ -1330,14 +1337,14 @@ async def get_target_users(db: AsyncSession, target: str) -> list:
             for user in users
             if user.subscription
             and user.subscription.is_active
-            and not user.subscription.is_trial
+            and not _is_trial_like(user.subscription)
         ]
 
     if target == "trial":
         return [
             user
             for user in users
-            if user.subscription and user.subscription.is_trial
+            if user.subscription and _is_trial_like(user.subscription)
         ]
 
     if target == "no":
@@ -1376,7 +1383,7 @@ async def get_target_users(db: AsyncSession, target: str) -> list:
             user
             for user in users
             if user.subscription
-            and not user.subscription.is_trial
+            and not _is_trial_like(user.subscription)
             and user.subscription.is_active
             and (user.subscription.traffic_used_gb or 0) <= 0
         ]
@@ -1386,7 +1393,7 @@ async def get_target_users(db: AsyncSession, target: str) -> list:
             user
             for user in users
             if user.subscription
-            and user.subscription.is_trial
+            and _is_trial_like(user.subscription)
             and user.subscription.is_active
             and (user.subscription.traffic_used_gb or 0) <= 0
         ]
@@ -1439,7 +1446,7 @@ async def get_target_users(db: AsyncSession, target: str) -> list:
             user
             for user in users
             if user.subscription
-            and user.subscription.is_trial
+            and _is_trial_like(user.subscription)
             and user.subscription.is_active
             and user.subscription.end_date <= in_3_days
         ]
@@ -1450,7 +1457,7 @@ async def get_target_users(db: AsyncSession, target: str) -> list:
             user
             for user in users
             if user.subscription
-            and user.subscription.is_trial
+            and _is_trial_like(user.subscription)
             and user.subscription.end_date <= now
         ]
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
 from aiogram import types
@@ -38,7 +39,15 @@ async def get_onepayment_autopay_binding(
     return None
 
 
-async def _resolve_renewal_price_label(db: AsyncSession, db_user: User) -> Optional[str]:
+async def resolve_renewal_charge(
+    db: AsyncSession, db_user: User
+) -> Optional[Dict[str, Any]]:
+    """Что и когда спишется за продление: {"name", "price_kopeks", "period_days"}.
+
+    None — подписки нет или цена не считается. Для тарифных подписок —
+    цена плана на купленный период в когорте пользователя, для legacy — расчёт
+    за 30 дней.
+    """
     subscription = getattr(db_user, "subscription", None)
     if subscription is None:
         return None
@@ -59,54 +68,110 @@ async def _resolve_renewal_price_label(db: AsyncSession, db_user: User) -> Optio
             )
             if price is None:
                 return None
-            return f"{plan.display_name} · {settings.format_price(int(price))}"
+            return {"name": plan.display_name, "price_kopeks": int(price), "period_days": period_days}
 
         from app.services.subscription_service import SubscriptionService
 
         price = await SubscriptionService().calculate_renewal_price(
             subscription, 30, db, user=db_user
         )
-        return settings.format_price(int(price))
+        return {"name": None, "price_kopeks": int(price), "period_days": 30}
     except Exception as error:  # pragma: no cover - меню не должно падать
         logger.debug("1Payment: не удалось посчитать цену продления для меню: %s", error)
         return None
 
 
-async def build_onepayment_autopay_status_line(
+def _period_label(texts, period_days: int, language: str) -> str:
+    """«месяц», «3 месяца», «год» — для строки «Сумма: … раз в {период}»."""
+    from app.utils.pricing_utils import format_period_description
+
+    fixed = {
+        30: texts.t("AUTOPAY_PERIOD_MONTH", "месяц"),
+        90: texts.t("AUTOPAY_PERIOD_3_MONTHS", "3 месяца"),
+        180: texts.t("AUTOPAY_PERIOD_6_MONTHS", "полгода"),
+        360: texts.t("AUTOPAY_PERIOD_YEAR", "год"),
+        720: texts.t("AUTOPAY_PERIOD_2_YEARS", "2 года"),
+    }
+    return fixed.get(period_days) or format_period_description(period_days, language)
+
+
+async def build_onepayment_autopay_status(
     db: AsyncSession, db_user: User, binding: Optional[OnePaymentBinding]
-) -> Optional[str]:
-    """Строка о СБП-привязке для меню «Автоплатеж». None — привязки нет."""
+) -> Optional[Dict[str, Any]]:
+    """Описание активного автоплатежа по СБП для меню «Автоплатеж».
+
+    None — привязки нет. Иначе {"active": bool, "note": str | None,
+    "amount_kopeks", "period_label", "next_charge_at", "lead_label"}: при
+    приостановке/сбое active=False и note с пояснением.
+    """
     if binding is None:
         return None
     texts = get_texts(db_user.language)
     provider = settings.get_onepayment_display_name()
 
     if binding.status == OnePaymentBinding.STATUS_FAILED:
-        return texts.t(
-            "ONEPAYMENT_AUTOPAY_STATUS_FAILED",
-            "СБП ({provider}): ⚠️ автосписание не удалось — требуется переподключение "
-            "(оплатите подписку по СБП ещё раз).",
-        ).format(provider=provider)
+        return {
+            "active": False,
+            "note": texts.t(
+                "ONEPAYMENT_AUTOPAY_STATUS_FAILED",
+                "СБП ({provider}): ⚠️ автосписание не удалось — требуется переподключение "
+                "(оплатите подписку по СБП ещё раз).",
+            ).format(provider=provider),
+        }
 
     if not settings.is_onepayment_recurring_enabled():
-        return texts.t(
-            "ONEPAYMENT_AUTOPAY_STATUS_PAUSED",
-            "СБП ({provider}): привязка активна, автосписание временно приостановлено.",
-        ).format(provider=provider)
+        return {
+            "active": False,
+            "note": texts.t(
+                "ONEPAYMENT_AUTOPAY_STATUS_PAUSED",
+                "СБП ({provider}): привязка активна, автосписание временно приостановлено.",
+            ).format(provider=provider),
+        }
 
-    price_label = await _resolve_renewal_price_label(db, db_user)
-    days = settings.get_onepayment_recurring_days_before()
-    if price_label:
+    charge = await resolve_renewal_charge(db, db_user)
+    subscription = getattr(db_user, "subscription", None)
+    end_date = getattr(subscription, "end_date", None)
+    if getattr(subscription, "is_paid_trial", False):
+        hours = settings.get_trial_paid_offer_recurring_hours_before()
+        lead = timedelta(hours=hours)
+        lead_label = texts.t("AUTOPAY_LEAD_HOURS", "{hours} ч.").format(hours=hours)
+    else:
+        days = settings.get_onepayment_recurring_days_before()
+        lead = timedelta(days=days)
+        lead_label = texts.t("AUTOPAY_LEAD_DAYS", "{days} дн.").format(days=days)
+
+    return {
+        "active": True,
+        "note": None,
+        "amount_kopeks": charge["price_kopeks"] if charge else None,
+        "period_label": _period_label(texts, charge["period_days"], db_user.language) if charge else None,
+        "next_charge_at": (end_date - lead) if end_date else None,
+        "lead_label": lead_label,
+    }
+
+
+async def build_onepayment_autopay_status_line(
+    db: AsyncSession, db_user: User, binding: Optional[OnePaymentBinding]
+) -> Optional[str]:
+    """Совместимая строка о СБП-привязке (используется вне меню «Автоплатеж»)."""
+    status = await build_onepayment_autopay_status(db, db_user, binding)
+    if status is None:
+        return None
+    if not status["active"]:
+        return status["note"]
+    texts = get_texts(db_user.language)
+    provider = settings.get_onepayment_display_name()
+    if status["amount_kopeks"] is not None:
         return texts.t(
             "ONEPAYMENT_AUTOPAY_STATUS_LINE",
             "СБП ({provider}): ✅ продление {price} списывается автоматически "
-            "за {days} дн. до окончания подписки (за вычетом баланса).",
-        ).format(provider=provider, price=price_label, days=days)
+            "за {days} до окончания подписки (за вычетом баланса).",
+        ).format(provider=provider, price=settings.format_price(status["amount_kopeks"]), days=status["lead_label"])
     return texts.t(
         "ONEPAYMENT_AUTOPAY_STATUS_LINE_NO_PRICE",
         "СБП ({provider}): ✅ продление подписки списывается автоматически "
-        "за {days} дн. до окончания (за вычетом баланса).",
-    ).format(provider=provider, days=days)
+        "за {days} до окончания (за вычетом баланса).",
+    ).format(provider=provider, days=status["lead_label"])
 
 
 @error_handler

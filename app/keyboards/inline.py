@@ -8,6 +8,7 @@ from app.database.models import User
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings, PERIOD_PRICES, TRAFFIC_PRICES
+from app.utils.formatters import format_days_declension
 from app.localization.loader import DEFAULT_LANGUAGE
 from app.localization.texts import get_texts
 from app.utils.install_referrer import build_personal_play_link
@@ -3282,9 +3283,8 @@ def get_new_main_menu_keyboard(
     if not trial_used and not trial_active and not has_active_subscription:
         if paid_trial_offer:
             keyboard.append([InlineKeyboardButton(
-                text=texts.t("PAID_TRIAL_OFFER_BUTTON", "⚡ {days} дн. за {price}").format(
-                    days=settings.get_trial_paid_offer_access_days(),
-                    price=settings.format_price(settings.get_trial_paid_offer_price_kopeks()),
+                text=texts.t("PAID_TRIAL_OFFER_BUTTON", "🎁 Активируй {days} доступа").format(
+                    days=format_days_declension(settings.get_trial_paid_offer_access_days(), language),
                 ),
                 callback_data="paid_trial_offer"
             )])

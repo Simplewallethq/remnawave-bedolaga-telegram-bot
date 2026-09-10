@@ -616,7 +616,7 @@ class MonitoringService:
                 .where(
                     and_(
                         Subscription.status == SubscriptionStatus.ACTIVE.value,
-                        Subscription.is_trial == True,
+                        or_(Subscription.is_trial == True, Subscription.is_paid_trial == True),
                         Subscription.start_date.isnot(None),
                         Subscription.start_date <= one_hour_ago,
                         Subscription.end_date > now,

@@ -3,7 +3,7 @@
 import logging
 import os
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 from aiogram import types
 from aiogram.fsm.context import FSMContext
@@ -29,6 +29,109 @@ logger = logging.getLogger(__name__)
 PLATEGA_SUBSCRIPTION_MANAGEMENT_ORIGIN = "management"
 
 
+async def build_autopay_menu_text(
+    db: AsyncSession,
+    db_user: User,
+    platega_subscription,
+    onepayment_binding,
+) -> str:
+    """Текст раздела «Автоплатеж».
+
+    Источники по приоритету: привязка СБП (1Payment) → рекуррент Platega →
+    автоплатёж с баланса. Первый активный даёт блок «активен / сумма раз в период /
+    следующая дата»; если активных нет — «не настроен».
+    """
+    from datetime import timedelta
+
+    from app.utils.timezone import format_local_datetime
+
+    from .onepayment import (
+        _period_label,
+        build_onepayment_autopay_status,
+        resolve_renewal_charge,
+    )
+
+    texts = get_texts(db_user.language)
+    intro = texts.t(
+        "AUTOPAY_SECTION_INTRO",
+        "Здесь вы можете настроить автоплатеж чтобы всегда оставаться на связи.",
+    )
+    notes: List[str] = []
+    active: Optional[dict] = None
+
+    onepayment_status = await build_onepayment_autopay_status(db, db_user, onepayment_binding)
+    if onepayment_status is not None:
+        if onepayment_status["active"]:
+            active = {
+                "amount_kopeks": onepayment_status["amount_kopeks"],
+                "period_label": onepayment_status["period_label"],
+                "next_charge_at": onepayment_status["next_charge_at"],
+                "lead_label": onepayment_status["lead_label"],
+            }
+        elif onepayment_status["note"]:
+            notes.append(onepayment_status["note"])
+
+    if active is None and platega_subscription is not None:
+        active = {
+            "amount_kopeks": platega_subscription.amount_kopeks,
+            "period_label": texts.t("AUTOPAY_PERIOD_MONTH", "месяц"),
+            "next_charge_at": getattr(platega_subscription, "next_charge_at", None),
+            "lead_label": None,
+        }
+
+    user_subscription = getattr(db_user, "subscription", None)
+    if (
+        active is None
+        and user_subscription is not None
+        and getattr(user_subscription, "autopay_enabled", False)
+        and not getattr(user_subscription, "is_trial", False)
+        and settings.ENABLE_AUTOPAY
+    ):
+        charge = await resolve_renewal_charge(db, db_user)
+        if charge:
+            days = int(getattr(user_subscription, "autopay_days_before", None) or settings.DEFAULT_AUTOPAY_DAYS_BEFORE)
+            end_date = getattr(user_subscription, "end_date", None)
+            active = {
+                "amount_kopeks": charge["price_kopeks"],
+                "period_label": _period_label(texts, charge["period_days"], db_user.language),
+                "next_charge_at": (end_date - timedelta(days=days)) if end_date else None,
+                "lead_label": texts.t("AUTOPAY_LEAD_DAYS", "{days} дн.").format(days=days),
+            }
+
+    if active is None:
+        text = texts.t(
+            "AUTOPAY_SECTION_NOT_CONFIGURED",
+            "{intro}\n\nТекущий автоплатеж: не настроен",
+        ).format(intro=intro)
+    else:
+        lines = [
+            texts.t("AUTOPAY_SECTION_ACTIVE", "Текущий автоплатеж: активен"),
+        ]
+        if active["amount_kopeks"] is not None:
+            lines.append(
+                texts.t("AUTOPAY_SECTION_AMOUNT", "Сумма: {amount} раз в {period}").format(
+                    amount=settings.format_price(int(active["amount_kopeks"])),
+                    period=active["period_label"] or texts.t("AUTOPAY_PERIOD_MONTH", "месяц"),
+                )
+            )
+        if active["next_charge_at"]:
+            lines.append(
+                texts.t("AUTOPAY_SECTION_NEXT_DATE", "Следующая дата платежа: {date}").format(
+                    date=format_local_datetime(active["next_charge_at"], "%d.%m.%Y %H:%M")
+                )
+            )
+        text = f"{intro}\n\n" + "\n".join(lines)
+        if active["lead_label"]:
+            text += "\n\n" + texts.t(
+                "AUTOPAY_SECTION_LEAD_NOTE",
+                "Сумма платежа списывается автоматически за {lead} до окончания подписки (за вычетом баланса).",
+            ).format(lead=active["lead_label"])
+
+    if notes:
+        text += "\n\n" + "\n".join(notes)
+    return text
+
+
 async def show_platega_autopay_menu(
     callback: types.CallbackQuery,
     db_user: User,
@@ -39,35 +142,14 @@ async def show_platega_autopay_menu(
     """Show and manage the user's recurring Platega balance top-up."""
     from app.services import payment_service as payment_module
 
-    from .onepayment import (
-        build_onepayment_autopay_status_line,
-        get_onepayment_autopay_binding,
-    )
+    from .onepayment import get_onepayment_autopay_binding
 
     texts = get_texts(db_user.language)
     subscription = await payment_module.get_active_platega_subscription_for_user(
         db, db_user.id
     )
-    amount = (
-        texts.t("PLATEGA_AUTOPAY_CURRENT_AMOUNT", "{amount}/мес").format(
-            amount=settings.format_price(subscription.amount_kopeks)
-        )
-        if subscription
-        else texts.t("PLATEGA_AUTOPAY_NOT_CONFIGURED", "не настроен")
-    )
-    text = texts.t(
-        "PLATEGA_AUTOPAY_MENU_TEXT",
-        "Здесь вы можете настроить автоплатеж чтобы всегда оставаться на связи.\n\n"
-        "Текущий автоплатеж: {amount}",
-    ).format(amount=amount)
-
-    # Привязка СБП (1Payment): показываем отдельной строкой и даём отключить.
     onepayment_binding = await get_onepayment_autopay_binding(db, db_user)
-    onepayment_line = await build_onepayment_autopay_status_line(
-        db, db_user, onepayment_binding
-    )
-    if onepayment_line:
-        text = f"{text}\n\n{onepayment_line}"
+    text = await build_autopay_menu_text(db, db_user, subscription, onepayment_binding)
 
     await edit_or_answer_photo(
         callback,

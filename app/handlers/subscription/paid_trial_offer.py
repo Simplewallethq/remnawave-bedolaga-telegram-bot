@@ -1,4 +1,10 @@
-"""Экраны оффера «доступ на сутки за 1 ₽» (A/B вместо бесплатного триала).
+"""Гейт «активация за 1 ₽» (A/B вместо бесплатного триала, только бот).
+
+Экраны по документу «1 рубль»:
+1. гейт — «Активируй N дня доступа», кнопка «Активировать»;
+2. условия — раскрытие рекуррента (цена тарифа продления), кнопка
+   «Активировать за 1 ₽» и справка «Как отменить автосписание»;
+3. счёт — ссылка на оплату по СБП и проверка статуса.
 
 Показывается только пользователям варианта `paid_trial` без подписки —
 `trial_paid_offer_service.is_offer_available`. Счёт выставляется через 1Payment
@@ -22,79 +28,57 @@ from app.services.trial_paid_offer_service import (
     PAY_IMAGE_PATH,
     trial_paid_offer_service,
 )
+from app.utils.formatters import format_days_declension
 from app.utils.photo_message import edit_or_answer_photo
+from app.utils.pricing_utils import format_period_description
 
 logger = logging.getLogger(__name__)
 
 OFFER_CALLBACK = "paid_trial_offer"
+TERMS_CALLBACK = "paid_trial_offer_terms"
+CANCEL_HELP_CALLBACK = "paid_trial_offer_cancel_help"
 PAY_CALLBACK = "paid_trial_offer_pay"
 
+TRIAL_IMAGE_PATH = os.path.join("images", "trial.webp")
 
-def _offer_text(texts, plan_name: str, renewal_price_kopeks: int) -> str:
-    return texts.t(
-        "PAID_TRIAL_OFFER_TEXT",
-        "⚡ <b>Доступ {name} на {days} дн. за {price}</b>\n\n"
-        "Оплати по СБП — и через минуту VPN уже работает.\n\n"
-        "🔁 Дальше подписка продлевается автоматически: {renewal_price} за {period} дн. "
-        "Автоплатёж можно отключить в любой момент в разделе "
-        "«Управление подпиской → Автоплатеж».",
-    ).format(
-        name=plan_name,
-        days=settings.get_trial_paid_offer_access_days(),
-        price=settings.format_price(settings.get_trial_paid_offer_price_kopeks()),
-        renewal_price=settings.format_price(renewal_price_kopeks),
-        period=settings.get_trial_paid_offer_renewal_period_days(),
+
+def _days_label(language: str) -> str:
+    return format_days_declension(settings.get_trial_paid_offer_access_days(), language)
+
+
+def _price_label() -> str:
+    return settings.format_price(settings.get_trial_paid_offer_price_kopeks())
+
+
+def _renewal_label(texts, plan_name: str, renewal_price_kopeks: int, language: str) -> str:
+    """«Solo (290 ₽/мес)» — тариф и цена продления за период."""
+    period_days = settings.get_trial_paid_offer_renewal_period_days()
+    if period_days == 30:
+        period = texts.t("PAID_TRIAL_OFFER_PER_MONTH", "мес")
+    else:
+        period = format_period_description(period_days, language)
+    return f"{plan_name} ({settings.format_price(renewal_price_kopeks)}/{period})"
+
+
+def _support_button(texts) -> types.InlineKeyboardButton:
+    return types.InlineKeyboardButton(
+        text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"),
+        callback_data="menu_support",
     )
 
 
-def _offer_keyboard(texts) -> types.InlineKeyboardMarkup:
-    return types.InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                types.InlineKeyboardButton(
-                    text=texts.t("PAID_TRIAL_OFFER_PAY_BUTTON", "⚡ Оплатить {price}").format(
-                        price=settings.format_price(settings.get_trial_paid_offer_price_kopeks())
-                    ),
-                    callback_data=PAY_CALLBACK,
-                )
-            ],
-            [
-                types.InlineKeyboardButton(
-                    text=texts.t("PAID_TRIAL_OFFER_TARIFFS_BUTTON", "💎 Смотреть тарифы"),
-                    callback_data="subscription_tariffs",
-                )
-            ],
-            [
-                types.InlineKeyboardButton(
-                    text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"),
-                    callback_data="main_menu",
-                )
-            ],
-        ]
-    )
+def _unavailable(texts) -> str:
+    return texts.t("PAID_TRIAL_OFFER_UNAVAILABLE", "Предложение недоступно")
 
 
-async def render_paid_trial_offer(
-    db: AsyncSession,
-    user: User,
+async def _send_screen(
     message_or_callback: Any,
     *,
     is_callback: bool,
-    language: Optional[str] = None,
-) -> bool:
-    """Рисует экран оффера. False — оффер сейчас показать нельзя (нет тарифа/цены)."""
-    lang = language or getattr(user, "language", None) or settings.DEFAULT_LANGUAGE
-    texts = get_texts(lang)
-
-    resolved = await trial_paid_offer_service.resolve_plan(db, user)
-    if resolved is None:
-        return False
-    plan, renewal_price = resolved
-
-    text = _offer_text(texts, plan.display_name, renewal_price)
-    keyboard = _offer_keyboard(texts)
-    photo_path = PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None
-
+    text: str,
+    keyboard: types.InlineKeyboardMarkup,
+    photo_path: Optional[str],
+) -> None:
     if is_callback:
         await edit_or_answer_photo(
             callback=message_or_callback,
@@ -112,6 +96,60 @@ async def render_paid_trial_offer(
         )
     else:
         await message_or_callback.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# ------------------------------------------------------------ шаг 1: гейт
+
+
+def build_gate_text(texts, language: str) -> str:
+    return texts.t(
+        "PAID_TRIAL_OFFER_GATE_TEXT",
+        "🎁 <b>Активируй {days} доступа</b>\n\n"
+        "▎ Доступ бесплатный на {days}. Чтобы отсечь РКН ботов и мультиаккаунты, "
+        "необходимо пройти активацию через символическую оплату в {price}.\n\n"
+        "Дальше расскажем условия — без сюрпризов.",
+    ).format(days=_days_label(language), price=_price_label())
+
+
+def build_gate_keyboard(texts, *, with_back: bool) -> types.InlineKeyboardMarkup:
+    rows = [
+        [
+            types.InlineKeyboardButton(
+                text=texts.t("PAID_TRIAL_OFFER_ACTIVATE_BUTTON", "✅ Активировать"),
+                callback_data=TERMS_CALLBACK,
+            )
+        ],
+        [_support_button(texts)],
+    ]
+    if with_back:
+        rows.append(
+            [types.InlineKeyboardButton(text=texts.t("MAIN_MENU_BUTTON", "⬅️Назад"), callback_data="main_menu")]
+        )
+    return types.InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def render_paid_trial_offer(
+    db: AsyncSession,
+    user: User,
+    message_or_callback: Any,
+    *,
+    is_callback: bool,
+    language: Optional[str] = None,
+) -> bool:
+    """Шаг 1 (гейт). False — оффер сейчас показать нельзя (нет тарифа/цены)."""
+    lang = language or getattr(user, "language", None) or settings.DEFAULT_LANGUAGE
+    texts = get_texts(lang)
+
+    if await trial_paid_offer_service.resolve_plan(db, user) is None:
+        return False
+
+    await _send_screen(
+        message_or_callback,
+        is_callback=is_callback,
+        text=build_gate_text(texts, lang),
+        keyboard=build_gate_keyboard(texts, with_back=is_callback),
+        photo_path=TRIAL_IMAGE_PATH if os.path.exists(TRIAL_IMAGE_PATH) else None,
+    )
     return True
 
 
@@ -122,20 +160,111 @@ async def show_paid_trial_offer(
 ) -> None:
     texts = get_texts(db_user.language)
     if not trial_paid_offer_service.is_offer_available(db_user):
-        await callback.answer(
-            texts.t("PAID_TRIAL_OFFER_UNAVAILABLE", "Предложение недоступно"),
-            show_alert=True,
-        )
+        await callback.answer(_unavailable(texts), show_alert=True)
         return
-
-    shown = await render_paid_trial_offer(db, db_user, callback, is_callback=True)
-    if not shown:
-        await callback.answer(
-            texts.t("PAID_TRIAL_OFFER_UNAVAILABLE", "Предложение недоступно"),
-            show_alert=True,
-        )
+    if not await render_paid_trial_offer(db, db_user, callback, is_callback=True):
+        await callback.answer(_unavailable(texts), show_alert=True)
         return
     await callback.answer()
+
+
+# --------------------------------------------------------- шаг 2: условия
+
+
+def build_terms_text(texts, language: str, plan_name: str, renewal_price_kopeks: int) -> str:
+    return texts.t(
+        "PAID_TRIAL_OFFER_TERMS_TEXT",
+        "💳 <b>Активация за {price}</b>\n\n"
+        "Сейчас спишем <b>{price}</b> — это подтверждает, что ты живой человек, а не бот.\n\n"
+        "▎ Первые <b>{days} — бесплатно</b>.\n"
+        "▎ После пробного периода доступ продолжится на тарифе <b>{renewal}</b>, "
+        "списание автоматически со счета.\n\n"
+        "▎<b>Отменить можно в любой момент</b> в разделе «Управление подпиской» — "
+        "тогда ничего не спишется.",
+    ).format(
+        price=_price_label(),
+        days=_days_label(language),
+        renewal=_renewal_label(texts, plan_name, renewal_price_kopeks, language),
+    )
+
+
+def build_terms_keyboard(texts) -> types.InlineKeyboardMarkup:
+    return types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(
+                    text=texts.t("PAID_TRIAL_OFFER_PAY_BUTTON", "✅ Активировать за {price}").format(
+                        price=_price_label()
+                    ),
+                    callback_data=PAY_CALLBACK,
+                )
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text=texts.t("PAID_TRIAL_OFFER_CANCEL_HELP_BUTTON", "❔ Как отменить автосписание"),
+                    callback_data=CANCEL_HELP_CALLBACK,
+                )
+            ],
+            [types.InlineKeyboardButton(text=texts.BACK, callback_data=OFFER_CALLBACK)],
+        ]
+    )
+
+
+async def show_paid_trial_terms(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+) -> None:
+    texts = get_texts(db_user.language)
+    if not trial_paid_offer_service.is_offer_available(db_user):
+        await callback.answer(_unavailable(texts), show_alert=True)
+        return
+    resolved = await trial_paid_offer_service.resolve_plan(db, db_user)
+    if resolved is None:
+        await callback.answer(_unavailable(texts), show_alert=True)
+        return
+    plan, renewal_price = resolved
+
+    await _send_screen(
+        callback,
+        is_callback=True,
+        text=build_terms_text(texts, db_user.language, plan.display_name, renewal_price),
+        keyboard=build_terms_keyboard(texts),
+        photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
+    )
+    await callback.answer()
+
+
+async def show_paid_trial_cancel_help(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+) -> None:
+    texts = get_texts(db_user.language)
+    text = texts.t(
+        "PAID_TRIAL_OFFER_CANCEL_HELP_TEXT",
+        "❔ <b>Как отменить автосписание</b>\n\n"
+        "В любой момент: «Управление подпиской → Автоплатеж → Отключить автоплатёж СБП». "
+        "После отключения ничего не спишется, а доступ останется до конца оплаченного срока.\n\n"
+        "Если что-то не получается — напиши в поддержку, поможем.",
+    )
+    keyboard = types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [_support_button(texts)],
+            [types.InlineKeyboardButton(text=texts.BACK, callback_data=TERMS_CALLBACK)],
+        ]
+    )
+    await _send_screen(
+        callback,
+        is_callback=True,
+        text=text,
+        keyboard=keyboard,
+        photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
+    )
+    await callback.answer()
+
+
+# ------------------------------------------------------------ шаг 3: счёт
 
 
 async def pay_paid_trial_offer(
@@ -145,45 +274,26 @@ async def pay_paid_trial_offer(
 ) -> None:
     texts = get_texts(db_user.language)
     if not trial_paid_offer_service.is_offer_available(db_user):
-        await callback.answer(
-            texts.t("PAID_TRIAL_OFFER_UNAVAILABLE", "Предложение недоступно"),
-            show_alert=True,
-        )
+        await callback.answer(_unavailable(texts), show_alert=True)
         return
 
     result = await trial_paid_offer_service.create_offer_invoice(db, callback.bot, db_user)
     payment_url = (result or {}).get("payment_url")
     if not result or not payment_url:
         await callback.answer(
-            texts.t(
-                "PAID_TRIAL_OFFER_INVOICE_ERROR",
-                "Не удалось создать счёт. Попробуйте позже.",
-            ),
+            texts.t("PAID_TRIAL_OFFER_INVOICE_ERROR", "Не удалось создать счёт. Попробуйте позже."),
             show_alert=True,
         )
         return
 
     snapshot = result.get("snapshot") or {}
-    plan = result.get("plan")
     price_label = settings.format_price(int(snapshot.get("price_kopeks") or 0))
     text = texts.t(
         "PAID_TRIAL_OFFER_INVOICE_TEXT",
-        "<b>Оплата — {price}</b>\n"
-        "Доступ {name} на {days} дн.\n\n"
-        "🔒 Защищённый платёж по СБП ({provider})\n"
-        "Обычно занимает до 10 секунд",
-    ).format(
-        price=price_label,
-        name=getattr(plan, "display_name", ""),
-        days=snapshot.get("access_days"),
-        provider=settings.get_onepayment_display_name(),
-    )
-    text += "\n\n" + texts.t(
-        "ONEPAYMENT_INVOICE_NOTE",
-        "🔁 Оплатив по СБП, вы подключаете автопродление подписки: перед окончанием срока "
-        "стоимость продления (за вычетом баланса) списывается автоматически. Отключить можно "
-        "в разделе «Управление подпиской → Автоплатеж».",
-    )
+        "💳 <b>Оплата — {price}</b>\n\n"
+        "Нажми кнопку ниже: оплата по СБП ({provider}) занимает до 10 секунд. "
+        "После оплаты доступ включится автоматически, ссылка придёт сюда.",
+    ).format(price=price_label, provider=settings.get_onepayment_display_name())
 
     keyboard = types.InlineKeyboardMarkup(
         inline_keyboard=[
@@ -201,21 +311,16 @@ async def pay_paid_trial_offer(
                     callback_data=f"check_onepayment_{result['local_payment_id']}",
                 )
             ],
-            [
-                types.InlineKeyboardButton(
-                    text=texts.t("SUPPORT_BUTTON", "🆘 Поддержка"),
-                    callback_data="menu_support",
-                )
-            ],
-            [types.InlineKeyboardButton(text=texts.BACK, callback_data=OFFER_CALLBACK)],
+            [_support_button(texts)],
+            [types.InlineKeyboardButton(text=texts.BACK, callback_data=TERMS_CALLBACK)],
         ]
     )
 
-    await edit_or_answer_photo(
-        callback=callback,
-        caption=text,
+    await _send_screen(
+        callback,
+        is_callback=True,
+        text=text,
         keyboard=keyboard,
-        parse_mode="HTML",
         photo_path=PAY_IMAGE_PATH if os.path.exists(PAY_IMAGE_PATH) else None,
     )
     await _remember_invoice_message(db, result, callback)
@@ -244,4 +349,6 @@ async def _remember_invoice_message(
 
 def register_handlers(dp: Dispatcher) -> None:
     dp.callback_query.register(show_paid_trial_offer, F.data == OFFER_CALLBACK)
+    dp.callback_query.register(show_paid_trial_terms, F.data == TERMS_CALLBACK)
+    dp.callback_query.register(show_paid_trial_cancel_help, F.data == CANCEL_HELP_CALLBACK)
     dp.callback_query.register(pay_paid_trial_offer, F.data == PAY_CALLBACK)

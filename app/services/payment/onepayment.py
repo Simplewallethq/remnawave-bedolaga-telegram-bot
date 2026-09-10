@@ -396,6 +396,8 @@ class OnePaymentPaymentMixin:
 
         old_balance = user.balance_kopeks
         was_first_topup = not user.has_made_first_topup
+        # Оффер «за 1 ₽»: символическая оплата не считается первым пополнением.
+        paid_trial_snapshot = trial_paid_offer_service.extract_snapshot(existing_metadata)
 
         user.balance_kopeks += credit_amount_kopeks
         user.updated_at = datetime.utcnow()
@@ -445,7 +447,7 @@ class OnePaymentPaymentMixin:
         except Exception as error:
             logger.error("Ошибка обработки реферального пополнения 1Payment: %s", error)
 
-        if was_first_topup and not user.has_made_first_topup:
+        if was_first_topup and not user.has_made_first_topup and paid_trial_snapshot is None:
             user.has_made_first_topup = True
             await db.commit()
             await db.refresh(user)
@@ -512,7 +514,6 @@ class OnePaymentPaymentMixin:
             return payment
 
         # Оффер «доступ за 1 ₽»: счёт самодостаточен — активируем по снимку.
-        paid_trial_snapshot = trial_paid_offer_service.extract_snapshot(existing_metadata)
         if paid_trial_snapshot is not None:
             activated = False
             try:

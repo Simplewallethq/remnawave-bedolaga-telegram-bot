@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.database.crud.discount_offer import mark_offer_claimed, upsert_discount_offer
 from app.database.models import (
     CloudPaymentsPayment,
@@ -87,6 +88,11 @@ class ColdSoloOfferService:
                 return True
         return False
 
+    @staticmethod
+    def _paid_amount_floor() -> int:
+        """Символическая оплата гейта «за 1 ₽» (A/B) оплатой не считается."""
+        return settings.get_trial_paid_offer_price_kopeks()
+
     async def has_paid(self, db: AsyncSession, user: User) -> bool:
         if getattr(user, "has_had_paid_subscription", False) or getattr(user, "has_made_first_topup", False):
             return True
@@ -100,6 +106,7 @@ class ColdSoloOfferService:
                         TransactionType.SUBSCRIPTION_PAYMENT.value,
                     )
                 ),
+                Transaction.amount_kopeks > self._paid_amount_floor(),
             )
         )
         return int(result.scalar() or 0) > 0
@@ -112,6 +119,7 @@ class ColdSoloOfferService:
                 Transaction.user_id == user.id,
                 Transaction.is_completed.is_(True),
                 Transaction.type == TransactionType.SUBSCRIPTION_PAYMENT.value,
+                Transaction.amount_kopeks > self._paid_amount_floor(),
             )
         )
         return int(result.scalar() or 0) > 0
@@ -131,7 +139,9 @@ class ColdSoloOfferService:
             return False
 
         subscription = getattr(user, "subscription", None)
-        if not subscription or not getattr(subscription, "is_trial", False):
+        if not subscription or not (
+            getattr(subscription, "is_trial", False) or getattr(subscription, "is_paid_trial", False)
+        ):
             return False
 
         now = now_utc or datetime.utcnow()

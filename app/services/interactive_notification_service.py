@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.database.database import AsyncSessionLocal
@@ -1410,7 +1410,7 @@ class InteractiveNotificationService:
                     .where(
                         User.id > last_user_id,
                         User.telegram_id.isnot(None),
-                        Subscription.is_trial.is_(True),
+                        or_(Subscription.is_trial.is_(True), Subscription.is_paid_trial.is_(True)),
                         Subscription.end_date <= cutoff,
                     )
                     .order_by(User.id.asc())

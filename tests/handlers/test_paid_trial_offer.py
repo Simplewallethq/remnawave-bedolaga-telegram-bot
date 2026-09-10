@@ -31,8 +31,7 @@ def _buttons(keyboard: Any) -> List[tuple]:
 
 
 def test_main_menu_shows_paid_offer_instead_of_trial(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "TRIAL_PAID_OFFER_ACCESS_DAYS", 1, raising=False)
-    monkeypatch.setattr(settings, "TRIAL_PAID_OFFER_PRICE_KOPEKS", 100, raising=False)
+    monkeypatch.setattr(settings, "TRIAL_PAID_OFFER_ACCESS_DAYS", 3, raising=False)
 
     regular = _buttons(inline.get_new_main_menu_keyboard(balance_rub=0, language="ru"))
     assert ("🎁 3 дня бесплатно", "trial_activate") in regular
@@ -40,8 +39,7 @@ def test_main_menu_shows_paid_offer_instead_of_trial(monkeypatch: pytest.MonkeyP
 
     offered = _buttons(inline.get_new_main_menu_keyboard(balance_rub=0, language="ru", paid_trial_offer=True))
     assert all(cb != "trial_activate" for _, cb in offered)
-    text, callback = next(item for item in offered if item[1] == "paid_trial_offer")
-    assert "1 дн." in text and "1" in text
+    assert ("🎁 Активируй 3 дня доступа", "paid_trial_offer") in offered
 
     # Кнопка не появляется, если подписка уже была.
     used = _buttons(
@@ -50,44 +48,97 @@ def test_main_menu_shows_paid_offer_instead_of_trial(monkeypatch: pytest.MonkeyP
     assert all(cb not in ("paid_trial_offer", "trial_activate") for _, cb in used)
 
 
-@pytest.mark.anyio
-async def test_offer_screen_lists_price_renewal_and_pay_button(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "TRIAL_PAID_OFFER_ACCESS_DAYS", 1, raising=False)
+def _offer_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "TRIAL_PAID_OFFER_ACCESS_DAYS", 3, raising=False)
     monkeypatch.setattr(settings, "TRIAL_PAID_OFFER_PRICE_KOPEKS", 100, raising=False)
     monkeypatch.setattr(settings, "TRIAL_PAID_OFFER_RENEWAL_PERIOD_DAYS", 30, raising=False)
+
+
+def _capture_screen(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
+    captured: Dict[str, Any] = {}
+
+    async def fake_send(message_or_callback: Any, *, is_callback: bool, text: str, keyboard: Any, photo_path: Any) -> None:
+        captured["text"] = text
+        captured["keyboard"] = keyboard
+        captured["is_callback"] = is_callback
+
+    monkeypatch.setattr(offer_handlers, "_send_screen", fake_send)
+    return captured
+
+
+@pytest.mark.anyio
+async def test_gate_screen_explains_one_ruble_activation(monkeypatch: pytest.MonkeyPatch) -> None:
+    _offer_settings(monkeypatch)
     plan = SimpleNamespace(id=2, code="solo", display_name="Solo", is_active=True)
 
     async def fake_resolve(db: Any, user: Any) -> Any:
-        return plan, 32_000
+        return plan, 29_000
 
     monkeypatch.setattr(offer_handlers.trial_paid_offer_service, "resolve_plan", fake_resolve)
-    captured: Dict[str, Any] = {}
-
-    async def fake_edit(callback: Any, caption: str, keyboard: Any, **kwargs: Any) -> None:
-        captured["caption"] = caption
-        captured["keyboard"] = keyboard
-
-    monkeypatch.setattr(offer_handlers, "edit_or_answer_photo", fake_edit)
+    captured = _capture_screen(monkeypatch)
 
     user = SimpleNamespace(id=42, language="ru")
-    assert await offer_handlers.render_paid_trial_offer(object(), user, object(), is_callback=True) is True
+    assert await offer_handlers.render_paid_trial_offer(object(), user, object(), is_callback=False) is True
 
-    assert "Solo" in captured["caption"]
-    assert "1 дн." in captured["caption"]
-    assert "320" in captured["caption"]
+    assert "Активируй 3 дня доступа" in captured["text"]
+    assert "Доступ бесплатный на 3 дня" in captured["text"]
+    assert "оплату в 1 ₽" in captured["text"]
     buttons = _buttons(captured["keyboard"])
-    assert any(cb == "paid_trial_offer_pay" for _, cb in buttons)
-    assert any(cb == "subscription_tariffs" for _, cb in buttons)
+    assert buttons[0] == ("✅ Активировать", "paid_trial_offer_terms")
+    assert ("🆘 Поддержка", "menu_support") in buttons
+    # При /start назад некуда, из главного меню — есть.
+    assert all(cb != "main_menu" for _, cb in buttons)
+
+    assert await offer_handlers.render_paid_trial_offer(object(), user, object(), is_callback=True) is True
+    assert ("⬅️Назад", "main_menu") in _buttons(captured["keyboard"])
 
 
 @pytest.mark.anyio
-async def test_offer_screen_hidden_without_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_gate_screen_hidden_without_plan(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_resolve(db: Any, user: Any) -> Any:
         return None
 
     monkeypatch.setattr(offer_handlers.trial_paid_offer_service, "resolve_plan", fake_resolve)
     user = SimpleNamespace(id=42, language="ru")
     assert await offer_handlers.render_paid_trial_offer(object(), user, object(), is_callback=False) is False
+
+
+@pytest.mark.anyio
+async def test_terms_screen_discloses_recurring_price(monkeypatch: pytest.MonkeyPatch) -> None:
+    _offer_settings(monkeypatch)
+    monkeypatch.setattr(offer_handlers.trial_paid_offer_service, "is_offer_available", lambda user: True)
+    plan = SimpleNamespace(id=2, code="solo", display_name="Solo", is_active=True)
+
+    async def fake_resolve(db: Any, user: Any) -> Any:
+        return plan, 29_000
+
+    monkeypatch.setattr(offer_handlers.trial_paid_offer_service, "resolve_plan", fake_resolve)
+    captured = _capture_screen(monkeypatch)
+
+    callback = SimpleNamespace(answer=AsyncMock())
+    await offer_handlers.show_paid_trial_terms(callback, SimpleNamespace(id=42, language="ru"), object())
+
+    text = captured["text"]
+    assert "Активация за 1 ₽" in text
+    assert "Первые <b>3 дня — бесплатно</b>" in text
+    assert "Solo (290 ₽/мес)" in text
+    assert "Отменить можно в любой момент" in text
+    buttons = _buttons(captured["keyboard"])
+    assert buttons[0] == ("✅ Активировать за 1 ₽", "paid_trial_offer_pay")
+    assert ("❔ Как отменить автосписание", "paid_trial_offer_cancel_help") in buttons
+    assert buttons[-1][1] == "paid_trial_offer"
+    callback.answer.assert_awaited()
+
+
+@pytest.mark.anyio
+async def test_cancel_help_screen_points_to_subscription_management(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _capture_screen(monkeypatch)
+    callback = SimpleNamespace(answer=AsyncMock())
+    await offer_handlers.show_paid_trial_cancel_help(callback, SimpleNamespace(id=42, language="ru"), object())
+    assert "Управление подпиской" in captured["text"]
+    buttons = _buttons(captured["keyboard"])
+    assert ("🆘 Поддержка", "menu_support") in buttons
+    assert buttons[-1][1] == "paid_trial_offer_terms"
 
 
 @pytest.mark.anyio
@@ -99,29 +150,24 @@ async def test_pay_handler_shows_invoice_with_status_check(monkeypatch: pytest.M
         return {
             "local_payment_id": 15,
             "payment_url": "https://merchant.1payment.com/pay",
-            "snapshot": {"price_kopeks": 100, "access_days": 1},
+            "snapshot": {"price_kopeks": 100, "access_days": 3},
             "plan": plan,
         }
 
     monkeypatch.setattr(offer_handlers.trial_paid_offer_service, "create_offer_invoice", fake_invoice)
-    captured: Dict[str, Any] = {}
-
-    async def fake_edit(callback: Any, caption: str, keyboard: Any, **kwargs: Any) -> None:
-        captured["caption"] = caption
-        captured["keyboard"] = keyboard
-
+    captured = _capture_screen(monkeypatch)
     remembered = AsyncMock()
-    monkeypatch.setattr(offer_handlers, "edit_or_answer_photo", fake_edit)
     monkeypatch.setattr(offer_handlers, "_remember_invoice_message", remembered)
 
     callback = SimpleNamespace(bot=None, answer=AsyncMock(), message=SimpleNamespace(chat=SimpleNamespace(id=1), message_id=2))
-    user = SimpleNamespace(id=42, language="ru")
-    await offer_handlers.pay_paid_trial_offer(callback, user, object())
+    await offer_handlers.pay_paid_trial_offer(callback, SimpleNamespace(id=42, language="ru"), object())
 
-    buttons = captured["keyboard"].inline_keyboard
-    assert buttons[0][0].url == "https://merchant.1payment.com/pay"
-    assert ("📊 Проверить статус", "check_onepayment_15") in _buttons(captured["keyboard"])
-    assert "Автоплатеж" in captured["caption"]
+    rows = captured["keyboard"].inline_keyboard
+    assert rows[0][0].url == "https://merchant.1payment.com/pay"
+    buttons = _buttons(captured["keyboard"])
+    assert ("📊 Проверить статус", "check_onepayment_15") in buttons
+    assert buttons[-1][1] == "paid_trial_offer_terms"
+    assert "Оплата — 1 ₽" in captured["text"]
     remembered.assert_awaited_once()
     callback.answer.assert_awaited()
 
@@ -231,7 +277,9 @@ async def test_finalize_purchase_with_access_days_creates_daily_paid_trial(monke
     assert timedelta(hours=23, minutes=59) <= subscription.end_date - started <= timedelta(days=1, seconds=5)
     assert calls["subtracted"] == 100
     assert calls["transaction"]["description"] == "Доступ Solo на 1 дн."
-    assert user.has_had_paid_subscription is True
+    # 1 ₽ за гейт — ещё не платная подписка: офферы после триала должны прийти.
+    assert user.has_had_paid_subscription is False
+    assert user.has_made_first_topup is False
     assert db.added == [subscription]
 
 
@@ -252,13 +300,15 @@ async def test_finalize_purchase_replaces_trial_and_keeps_regular_flag_off(monke
     )
     db = _Db(existing=existing)
 
-    result = await tariffs_module.finalize_tariff_purchase(db, _user(balance=32_000), _plan(), 30, 32_000)
+    buyer = _user(balance=32_000)
+    result = await tariffs_module.finalize_tariff_purchase(db, buyer, _plan(), 30, 32_000)
     assert result is not None
     subscription, _, was_trial_conversion = result
 
     assert subscription is existing
     assert was_trial_conversion is True
     assert subscription.is_paid_trial is False
+    assert buyer.has_had_paid_subscription is True
     assert subscription.plan_period_days == 30
     assert timedelta(days=29, hours=23) <= subscription.end_date - datetime.utcnow() <= timedelta(days=30)
 
@@ -279,10 +329,14 @@ async def test_finalize_renewal_clears_paid_trial_flag(monkeypatch: pytest.Monke
             self.end_date = self.end_date + timedelta(days=days)
 
     subscription = Sub()
-    result = await tariffs_module.finalize_tariff_renewal(_Db(), _user(balance=32_000), subscription, _plan(), 30, 32_000)
+    renewer = _user(balance=32_000)
+    result = await tariffs_module.finalize_tariff_renewal(_Db(), renewer, subscription, _plan(), 30, 32_000)
     assert result is not None
     renewed, _, old_end = result
     assert old_end == end
     assert renewed.end_date == end + timedelta(days=30)
     assert renewed.is_paid_trial is False
+    # Первое реальное продление делает пользователя платным.
+    assert renewer.has_had_paid_subscription is True
+    assert renewer.has_made_first_topup is True
     assert calls["subtracted"] == 32_000

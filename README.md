@@ -1088,8 +1088,8 @@ MAX_DEVICES_LIMIT=15
 #### 🧪 A/B «доступ за 1 ₽ вместо триала»
 
 Только для Telegram-бота (кабинет и миниапп не участвуют). Часть новых пользователей
-вместо бесплатного триала получает оффер: сутки тарифа Solo за 1 ₽ по СБП через
-1Payment. Счёт выставляется с привязкой, подписка создаётся на сутки с периодом
+вместо бесплатного триала проходит «гейт»: символическая оплата 1 ₽ по СБП через
+1Payment даёт 3 дня Solo. Счёт выставляется с привязкой, подписка создаётся на 3 дня с периодом
 продления 30 дней, и за `TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE` часов до конца
 доступа рекуррент списывает месячную цену тарифа и продлевает на месяц.
 
@@ -1101,14 +1101,21 @@ MAX_DEVICES_LIMIT=15
 | `TRIAL_PAID_OFFER_ENABLED` | `false` | Рубильник теста (нужен включённый 1Payment) |
 | `TRIAL_PAID_OFFER_PERCENT` | `0` | % новых пользователей в варианте «1 ₽»; вариант назначается при регистрации, липкий |
 | `TRIAL_PAID_OFFER_PRICE_KOPEKS` | `100` | Цена оффера |
-| `TRIAL_PAID_OFFER_ACCESS_DAYS` | `1` | Дней доступа за оффер |
+| `TRIAL_PAID_OFFER_ACCESS_DAYS` | `3` | Дней доступа после активации |
 | `TRIAL_PAID_OFFER_PLAN_CODE` | `solo` | Тариф (нужна цена на период продления) |
 | `TRIAL_PAID_OFFER_RENEWAL_PERIOD_DAYS` | `30` | Период автопродления |
-| `TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE` | `2` | За сколько часов до конца доступа списывать |
+| `TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE` | `1` | За сколько часов до конца доступа списывать |
 | `TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS` | `0` | Через N часов без оплаты выдать обычный триал (0 — нет) |
 
-Аналитика — SQL по `users.trial_offer_variant` (`control` / `paid_trial`),
-`subscription_events.source = 'paid_trial_offer'` и `onepayment_payments.is_recurring`.
+Флоу варианта «1 ₽»: гейт «Активируй 3 дня доступа» → условия с ценой продления →
+счёт по СБП → «Готово! Доступ на 3 дня активирован» с ключом. Символическая оплата
+не делает пользователя платным (`has_had_paid_subscription` ставит первое реальное
+продление), поэтому когорта получает те же пост-триальные офферы, что и обычный триал;
+в сегментах рассылок и промо-офферов `is_paid_trial` считается триалом.
+
+Аналитика — SQL по `users.trial_offer_variant` (`control` / `paid_trial`) и `users.bot_id`
+(в каком боте зарегистрировался), `subscription_events.source = 'paid_trial_offer'`
+и `onepayment_payments.is_recurring`.
 
 ### 💥 Реферальная система
 

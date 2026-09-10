@@ -739,8 +739,12 @@ async def finalize_tariff_purchase(
             )
             db.add(new_sub)
 
-        db_user.has_made_first_topup = True
-        db_user.has_had_paid_subscription = True
+        # Символическая оплата гейта «за 1 ₽» — ещё не платная подписка: флаги
+        # ставит первое реальное продление (finalize_tariff_renewal), чтобы
+        # когорта получала те же пост-триальные офферы, что и обычный триал.
+        if not is_paid_trial:
+            db_user.has_made_first_topup = True
+            db_user.has_had_paid_subscription = True
 
         # Surface IntegrityError (e.g. UNIQUE on user_id) BEFORE the payment is committed.
         await db.flush()
@@ -813,8 +817,10 @@ async def finalize_tariff_renewal(
         old_end_date = subscription.end_date
         subscription.extend_subscription(period_days)
         subscription.plan_period_days = period_days
-        # Суточный доступ «за 1 ₽» после первого продления — обычная подписка.
+        # Пробный доступ «за 1 ₽» после первого продления — обычная платная подписка.
         subscription.is_paid_trial = False
+        db_user.has_made_first_topup = True
+        db_user.has_had_paid_subscription = True
         await db.flush()
 
         transaction = await create_transaction(

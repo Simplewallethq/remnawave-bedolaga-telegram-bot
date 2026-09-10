@@ -1011,15 +1011,18 @@ async def get_users_for_promo_segment(db: AsyncSession, segment: str) -> List[Us
     else:
         query = base_query.join(Subscription)
 
+        # Пробный доступ «за 1 ₽» (is_paid_trial) для сегментов — триал.
+        trial_like = or_(Subscription.is_trial == True, Subscription.is_paid_trial == True)  # noqa: E712
+        paid_like = and_(Subscription.is_trial == False, Subscription.is_paid_trial == False)  # noqa: E712
         if segment == "paid_active":
             query = query.where(
-                Subscription.is_trial == False,  # noqa: E712
+                paid_like,
                 Subscription.status == SubscriptionStatus.ACTIVE.value,
                 Subscription.end_date > now,
             )
         elif segment == "paid_expired":
             query = query.where(
-                Subscription.is_trial == False,  # noqa: E712
+                paid_like,
                 or_(
                     Subscription.status == SubscriptionStatus.EXPIRED.value,
                     Subscription.end_date <= now,
@@ -1027,13 +1030,13 @@ async def get_users_for_promo_segment(db: AsyncSession, segment: str) -> List[Us
             )
         elif segment == "trial_active":
             query = query.where(
-                Subscription.is_trial == True,  # noqa: E712
+                trial_like,
                 Subscription.status == SubscriptionStatus.ACTIVE.value,
                 Subscription.end_date > now,
             )
         elif segment == "trial_expired":
             query = query.where(
-                Subscription.is_trial == True,  # noqa: E712
+                trial_like,
                 or_(
                     Subscription.status == SubscriptionStatus.EXPIRED.value,
                     Subscription.end_date <= now,

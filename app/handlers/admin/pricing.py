@@ -117,12 +117,12 @@ TRIAL_ENTRIES: Tuple[SettingEntry, ...] = (
     SettingEntry(
         key="TRIAL_PAID_OFFER_ENABLED",
         section="trial",
-        label_ru="🧪 A/B: сутки за 1 ₽ вместо триала",
-        label_en="🧪 A/B: 1-day paid access instead of trial",
+        label_ru="🧪 A/B: гейт за 1 ₽ вместо триала",
+        label_en="🧪 A/B: 1-ruble gate instead of free trial",
         action="toggle",
         description_ru=(
-            "Часть новых пользователей бота вместо бесплатного триала получает оффер "
-            "«доступ за 1 ₽» по СБП (1Payment) с автопродлением на месяц. "
+            "Часть новых пользователей бота вместо бесплатного триала проходит активацию "
+            "за 1 ₽ по СБП (1Payment): 3 дня доступа, затем автопродление на месяц. "
             "Нужен включённый 1Payment."
         ),
         description_en=(
@@ -179,8 +179,8 @@ TRIAL_ENTRIES: Tuple[SettingEntry, ...] = (
         label_ru="🧪 A/B: списывать за N часов до конца",
         label_en="🧪 A/B: charge N hours before access ends",
         action="input",
-        description_ru="Окно первого автосписания для суточной подписки (в часах, вместо ONEPAYMENT_RECURRING_DAYS_BEFORE).",
-        description_en="First auto-charge window for the 1-day subscription (hours, instead of ONEPAYMENT_RECURRING_DAYS_BEFORE).",
+        description_ru="Окно первого автосписания для пробного доступа (в часах, вместо ONEPAYMENT_RECURRING_DAYS_BEFORE).",
+        description_en="First auto-charge window for the paid-trial access (hours, instead of ONEPAYMENT_RECURRING_DAYS_BEFORE).",
     ),
     SettingEntry(
         key="TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS",
