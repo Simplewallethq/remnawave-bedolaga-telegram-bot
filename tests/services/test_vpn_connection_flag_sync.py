@@ -535,3 +535,60 @@ async def test_panel_subscription_sync_sets_vpn_flag_from_panel_traffic():
 
     assert user.has_connected_to_vpn is True
     assert subscription.traffic_used_gb > 0
+
+
+async def test_monitoring_cycle_runs_panel_sync_last_on_its_own_session(monkeypatch):
+    """Скан панели длится минуты и убивает соединение сессии (idle_in_transaction
+    timeout); он не должен делить сессию с автоплатежами и идти раньше них."""
+    import app.services.monitoring_service as module
+
+    sessions = []
+
+    async def fake_get_db():
+        session = SimpleNamespace(name=f"session{len(sessions)}")
+        sessions.append(session)
+        yield session
+
+    monkeypatch.setattr(module, "get_db", fake_get_db)
+    monkeypatch.setattr(module.settings, "IS_ARTEM", False, raising=False)
+    monkeypatch.setattr(module.settings, "ENABLE_AUTOPAY", True, raising=False)
+    monkeypatch.setattr(type(module.settings), "is_onepayment_recurring_enabled", lambda self: True)
+    monkeypatch.setattr(module, "deactivate_expired_offers", AsyncMock(return_value=0))
+    monkeypatch.setattr(module, "cleanup_expired_promo_offer_discounts", AsyncMock(return_value=0))
+    monkeypatch.setattr(module.promo_offer_service, "cleanup_expired_test_access", AsyncMock(return_value=0))
+
+    service = MonitoringService.__new__(MonitoringService)
+    calls = []
+
+    def step(name):
+        async def _step(db, *args, **kwargs):
+            calls.append((name, db.name))
+        return _step
+
+    for name in (
+        "_cleanup_notification_cache",
+    ):
+        async def _noop():
+            calls.append(("_cleanup_notification_cache", None))
+        setattr(service, name, _noop)
+    for name in (
+        "_check_expired_subscriptions", "_check_expiring_subscriptions", "_check_trial_expiring_soon",
+        "_check_trial_inactivity_notifications", "_check_trial_channel_subscriptions",
+        "_check_expired_subscription_followups", "_process_expired_subscription_feedbacks",
+        "_process_autopayments", "_process_onepayment_recurring", "_cleanup_inactive_users",
+        "_collect_daily_subscription_metrics", "_collect_user_daily_metrics",
+        "_collect_trial_expiry_daily_metrics", "_collect_user_daily_traffic_usage",
+        "_process_android_rate_requests", "_cleanup_cabinet_notifications", "_log_monitoring_event",
+        "_sync_with_remnawave",
+    ):
+        setattr(service, name, step(name))
+
+    await service._monitoring_cycle()
+
+    names = [name for name, _ in calls]
+    assert names[-1] == "_sync_with_remnawave"
+    assert names.index("_process_onepayment_recurring") < names.index("_sync_with_remnawave")
+    cycle_sessions = {db for name, db in calls if db and name != "_sync_with_remnawave"}
+    sync_session = [db for name, db in calls if name == "_sync_with_remnawave"][0]
+    assert cycle_sessions == {"session0"}
+    assert sync_session == "session1"

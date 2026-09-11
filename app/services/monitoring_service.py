@@ -301,7 +301,6 @@ class MonitoringService:
                 await self._check_expired_subscriptions(db)
                 await self._check_expiring_subscriptions(db)
                 await self._check_trial_expiring_soon(db)
-                await self._sync_with_remnawave(db)
                 await self._check_trial_inactivity_notifications(db)
                 await self._check_trial_channel_subscriptions(db)
                 await self._check_expired_subscription_followups(db)
@@ -334,6 +333,18 @@ class MonitoringService:
                 )
             finally:
                 break 
+
+        # Скан панели идёт ~6 минут, и за это время idle_in_transaction_session_timeout
+        # (на проде 1 с) убивает соединение сессии. Раньше синк стоял посреди цикла на
+        # общей сессии, и всё после него — автоплатежи, рекуррент 1Payment, метрики —
+        # падало с «connection is closed». Поэтому: своя сессия и после всего остального.
+        async for sync_db in get_db():
+            try:
+                await self._sync_with_remnawave(sync_db)
+            except Exception as e:
+                logger.error(f"Ошибка синхронизации флагов VPN с RemnaWave: {e}")
+            finally:
+                break
     
     async def _cleanup_notification_cache(self):
         current_time = datetime.utcnow()
