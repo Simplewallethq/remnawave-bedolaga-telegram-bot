@@ -918,7 +918,6 @@
   "ONEPAYMENT_INVOICE_NOTE": "🔁 Paying via SBP enables automatic renewal: before the subscription ends, the renewal price (minus your balance) is charged automatically. You can disable it in “Manage subscription → Auto-payment”.",
   "PAYMENT_AUTO_PAY_BUTTON_SBP": "🏦 Pay via SBP – {amount}",
   "ONEPAYMENT_CARD_ALT_BUTTON": "💳 Pay by card – {amount}",
-  "ONEPAYMENT_CARD_ALT_NOTE": "💳 Card payment does not enable auto-renewal.",
   "ONEPAYMENT_CARD_ALT_READY": "💳 Link is ready — tap “Pay by card” again",
   "ONEPAYMENT_CARD_ALT_MESSAGE": "💳 <b>Card payment — {amount}</b>\n\n🔒 Secure payment\nUsually takes up to 10 seconds",
   "ONEPAYMENT_CARD_ALT_ERROR": "❌ Could not prepare the card payment. Try again later or pay via SBP.",

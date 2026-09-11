@@ -292,11 +292,6 @@ async def _render_invoice(
             "списывается автоматически. Отключить можно в разделе "
             "«Управление подпиской → Автоплатеж».",
         )
-        if card_alt_enabled:
-            instructions += "\n" + texts.t(
-                "ONEPAYMENT_CARD_ALT_NOTE",
-                "\U0001f4b3 Оплата картой — без подключения автопродления.",
-            )
 
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=rows)
 
