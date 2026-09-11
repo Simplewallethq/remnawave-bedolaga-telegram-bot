@@ -494,3 +494,30 @@ async def test_fallback_candidates_query_filters_variant_and_missing_subscriptio
     assert "users.created_at >=" in sql
     assert "LIMIT" in sql
     assert "ORDER BY users.created_at DESC" in sql
+
+
+@pytest.mark.anyio
+async def test_fallback_notification_goes_through_the_users_own_bot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пользователь зеркала получает сообщение из зеркала, а не из основного бота."""
+    from app.utils import bot_registry
+
+    bot_registry.clear()
+    primary = SimpleNamespace(send_photo=AsyncMock(), send_message=AsyncMock())
+    mirror = SimpleNamespace(send_photo=AsyncMock(), send_message=AsyncMock())
+    bot_registry.register_bot(111, Path("images/logo.png"), primary)
+    bot_registry.register_bot(222, Path("images/logo.png"), mirror)
+    monkeypatch.setattr("os.path.exists", lambda _p: False)
+
+    async def no_refresh(*_a: Any, **_k: Any) -> None:
+        return None
+
+    db = SimpleNamespace(refresh=no_refresh)
+    service = TrialPaidOfferService()
+    await service._notify_fallback_trial(db, primary, _user(telegram_id=5, bot_id=222, subscription=None))
+    assert mirror.send_message.await_count == 1
+    assert primary.send_message.await_count == 0
+
+    # Незарегистрированный бот — шлём тем, что дали.
+    await service._notify_fallback_trial(db, primary, _user(telegram_id=6, bot_id=999, subscription=None))
+    assert primary.send_message.await_count == 1
+    bot_registry.clear()

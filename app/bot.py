@@ -118,7 +118,7 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
         )
     except Exception as error:
         logger.warning("Failed to load animated text emoji set: %s", error)
-    bot_registry.register_bot(primary_bot_id, Path(settings.LOGO_FILE))
+    bot_registry.register_bot(primary_bot_id, Path(settings.LOGO_FILE), primary_bot)
     logger.info("Primary bot registered: id=%s", primary_bot_id)
 
     all_bots: list[Bot] = [primary_bot]
@@ -126,7 +126,7 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
         try:
             m_bot = Bot(token=mirror_cfg["token"], default=_default)
             m_me = await m_bot.get_me()
-            bot_registry.register_bot(m_me.id, Path(mirror_cfg["logo"]))
+            bot_registry.register_bot(m_me.id, Path(mirror_cfg["logo"]), m_bot)
             all_bots.append(m_bot)
             logger.info(
                 "Mirror bot registered: @%s id=%s logo=%s",

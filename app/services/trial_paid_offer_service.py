@@ -334,10 +334,12 @@ class TrialPaidOfferService:
     ) -> None:
         """Онбординг с ключом доступа + предупреждение о списании через сутки."""
         from app.keyboards.inline import get_onboarding_welcome_keyboard
+        from app.utils.bot_registry import bot_for_user
         from app.utils.subscription_utils import get_raw_subscription_link
 
         if not bot or not getattr(user, "telegram_id", None):
             return
+        bot = bot_for_user(user, bot)
         try:
             await db.refresh(subscription)
         except Exception:
@@ -362,12 +364,15 @@ class TrialPaidOfferService:
         text = "\n\n".join(parts)
         keyboard = get_onboarding_welcome_keyboard(lang)
         try:
-            if os.path.exists(CONNECTION_IMAGE_PATH):
+            from app.utils.bot_registry import resolve_photo_for_bot
+
+            photo_path = resolve_photo_for_bot(getattr(user, "bot_id", None), CONNECTION_IMAGE_PATH)
+            if os.path.exists(photo_path):
                 from aiogram.types import FSInputFile
 
                 await bot.send_photo(
                     user.telegram_id,
-                    FSInputFile(CONNECTION_IMAGE_PATH),
+                    FSInputFile(photo_path),
                     caption=text,
                     reply_markup=keyboard,
                     parse_mode="HTML",
@@ -464,10 +469,12 @@ class TrialPaidOfferService:
 
     async def _notify_fallback_trial(self, db: AsyncSession, bot: Any, user: Any) -> None:
         from app.keyboards.inline import get_onboarding_welcome_keyboard
+        from app.utils.bot_registry import bot_for_user
         from app.utils.subscription_utils import get_raw_subscription_link
 
         if not bot or not getattr(user, "telegram_id", None):
             return
+        bot = bot_for_user(user, bot)
         try:
             await db.refresh(user, ["subscription"])
         except Exception:
@@ -488,12 +495,15 @@ class TrialPaidOfferService:
             )
         keyboard = get_onboarding_welcome_keyboard(lang)
         try:
-            if os.path.exists(CONNECTION_IMAGE_PATH):
+            from app.utils.bot_registry import resolve_photo_for_bot
+
+            photo_path = resolve_photo_for_bot(getattr(user, "bot_id", None), CONNECTION_IMAGE_PATH)
+            if os.path.exists(photo_path):
                 from aiogram.types import FSInputFile
 
                 await bot.send_photo(
                     user.telegram_id,
-                    FSInputFile(CONNECTION_IMAGE_PATH),
+                    FSInputFile(photo_path),
                     caption=text,
                     reply_markup=keyboard,
                     parse_mode="HTML",

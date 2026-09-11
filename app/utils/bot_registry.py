@@ -3,10 +3,30 @@ from pathlib import Path
 PAGE_IMAGES_DIR = Path("images")
 
 _registry: dict[int, Path] = {}
+# Живые экземпляры aiogram.Bot по id — чтобы фоновые сервисы могли писать
+# пользователю из того бота, в котором он зарегистрирован (user.bot_id).
+_instances: dict[int, object] = {}
 
 
-def register_bot(bot_id: int, logo_path: Path) -> None:
+def register_bot(bot_id: int, logo_path: Path, bot: object | None = None) -> None:
     _registry[bot_id] = logo_path
+    if bot is not None:
+        _instances[bot_id] = bot
+
+
+def get_bot_instance(bot_id: int | None) -> object | None:
+    if bot_id is None:
+        return None
+    return _instances.get(bot_id)
+
+
+def bot_for_user(user: object, default: object) -> object:
+    """Бот, в котором пользователь зарегистрирован, иначе `default`.
+
+    Основной бот не может писать тому, кто стартовал только зеркало:
+    Telegram отвечает «chat not found».
+    """
+    return get_bot_instance(getattr(user, "bot_id", None)) or default
 
 
 def get_logo_for_bot(bot_id: int | None) -> Path:
@@ -40,6 +60,7 @@ def is_primary_bot(bot_id: int | None) -> bool:
 
 def clear() -> None:
     _registry.clear()
+    _instances.clear()
 
 
 def _same_file(first: Path, second: Path) -> bool:
