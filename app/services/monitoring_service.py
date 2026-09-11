@@ -2253,6 +2253,13 @@ class MonitoringService:
                 self._last_remnawave_sync_at = now
                 sync_stats = await RemnaWaveService().sync_vpn_connection_flags_from_panel(db)
 
+                # За минуты скана сервер закрывает простаивающее соединение сессии;
+                # rollback возвращает его в пул, следующий запрос возьмёт живое.
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+
                 await self._log_monitoring_event(
                     db,
                     "remnawave_sync",
