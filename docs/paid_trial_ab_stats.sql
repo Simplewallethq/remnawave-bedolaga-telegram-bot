@@ -46,3 +46,54 @@ select u.telegram_id, u.bot_id, p.amount_kopeks, p.status, p.is_paid, p.created_
 from onepayment_payments p join users u on u.id = p.user_id
 where p.metadata_json->>'paid_trial' is not null
 order by p.created_at desc limit 20;
+
+-- 4. Подключение к VPN по когортам за период (Grafana «🧪 Доступ → подключение → оплата»).
+--    Когорты: control — триал сразу; 1 ₽ — оплатили гейт / фоллбэк-триал через
+--    TRIAL_PAID_OFFER_FALLBACK_TRIAL_MINUTES (users.paid_trial_fallback_at) / купили сами / без доступа.
+--    В Grafana $__timeFilter(u.created_at) — здесь последняя неделя.
+-- Сводка по когортам за период (по дате регистрации): доступ, подключение к VPN,
+-- реальные оплаты (>1 ₽). Флаг подключения приходит с задержкой синка панели.
+WITH c AS (
+  SELECT u.id, u.has_connected_to_vpn,
+         CASE
+           WHEN u.trial_offer_variant = 'control' THEN '1. control: триал сразу'
+           WHEN EXISTS (SELECT 1 FROM subscription_events e
+                        WHERE e.user_id = u.id AND e.event_type = 'purchase'
+                          AND e.extra->>'source' = 'paid_trial_offer') THEN '2. 1 ₽: оплатили гейт'
+           WHEN u.paid_trial_fallback_at IS NOT NULL THEN '3. 1 ₽: фоллбэк-триал'
+           WHEN EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id) THEN '4. 1 ₽: купили сами'
+           ELSE '5. 1 ₽: без доступа'
+         END AS cohort
+  FROM users u
+  WHERE $__timeFilteru.created_at > now() - interval '7 days' AND u.trial_offer_variant IS NOT NULL
+),
+paid AS (
+  SELECT user_id, SUM(amount_kopeks) AS amt FROM transactions
+  WHERE type = 'deposit' AND is_completed AND amount_kopeks > 100
+  GROUP BY 1
+)
+SELECT
+  c.cohort                                                       AS "Когорта",
+  COUNT(*)                                                       AS "Юзеров",
+  COUNT(*) FILTER (WHERE c.has_connected_to_vpn)                 AS "Подключились",
+  ROUND(100.0 * COUNT(*) FILTER (WHERE c.has_connected_to_vpn) / COUNT(*), 1) AS "Подключились, %",
+  COUNT(p.user_id)                                               AS "Платили >1 ₽",
+  ROUND(100.0 * COUNT(p.user_id) / COUNT(*), 1)                  AS "Платили, %",
+  COALESCE(SUM(p.amt), 0) / 100                                  AS "Выручка, ₽"
+FROM c
+LEFT JOIN paid p ON p.user_id = c.id
+GROUP BY 1
+ORDER BY 1;
+
+-- 5. Фоллбэк-триалы по дню выдачи: выдано / подключились к VPN.
+-- Фоллбэк-триалы по моменту выдачи (users.paid_trial_fallback_at):
+-- сколько выдано и сколько из них уже подключились к VPN.
+SELECT
+  $__timeGroupdate_trunc('day', paid_trial_fallback_at) AS "time",
+  COUNT(*)                                        AS "Выдано фоллбэк-триалов",
+  COUNT(*) FILTER (WHERE has_connected_to_vpn)    AS "Подключились к VPN"
+FROM users
+WHERE $__timeFilterpaid_trial_fallback_at > now() - interval '7 days'
+  AND trial_offer_variant = 'paid_trial'
+GROUP BY 1
+ORDER BY 1;

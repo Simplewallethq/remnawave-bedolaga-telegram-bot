@@ -405,7 +405,7 @@ async def test_activate_from_payment_skips_unknown_or_inactive_plan(monkeypatch:
 @pytest.mark.anyio
 async def test_fallback_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     _enable(monkeypatch)
-    monkeypatch.setattr(settings, "TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS", 0, raising=False)
+    monkeypatch.setattr(settings, "TRIAL_PAID_OFFER_FALLBACK_TRIAL_MINUTES", 0, raising=False)
     service = TrialPaidOfferService()
     listed = AsyncMock(return_value=[_user()])
     monkeypatch.setattr(service, "list_fallback_candidates", listed)
@@ -417,14 +417,16 @@ async def test_fallback_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> 
 @pytest.mark.anyio
 async def test_fallback_grants_trial_to_unpaid_users_after_cutoff(monkeypatch: pytest.MonkeyPatch) -> None:
     _enable(monkeypatch)
-    monkeypatch.setattr(settings, "TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS", 24, raising=False)
+    monkeypatch.setattr(settings, "TRIAL_PAID_OFFER_FALLBACK_TRIAL_MINUTES", 30, raising=False)
     service = TrialPaidOfferService()
 
     candidates = [_user(id=1, telegram_id=None), _user(id=2, telegram_id=None)]
     captured: Dict[str, Any] = {}
 
-    async def fake_list(db: Any, *, before: datetime) -> List[Any]:
+    async def fake_list(db: Any, *, before: datetime, not_before: Any = None, limit: Any = None) -> List[Any]:
         captured["before"] = before
+        captured["not_before"] = not_before
+        captured["limit"] = limit
         return candidates
 
     activated: List[int] = []
@@ -439,13 +441,21 @@ async def test_fallback_grants_trial_to_unpaid_users_after_cutoff(monkeypatch: p
     monkeypatch.setattr(service, "_notify_fallback_trial", notify)
 
     before_call = datetime.utcnow()
-    granted = await service.grant_fallback_trials(SimpleNamespace(rollback=AsyncMock()), None)
+    db = SimpleNamespace(rollback=AsyncMock(), commit=AsyncMock())
+    granted = await service.grant_fallback_trials(db, None)
 
     assert granted == 1
     assert activated == [1, 2]
     assert notify.await_count == 1
-    # Порог — N часов назад от «сейчас».
-    assert timedelta(hours=23, minutes=59) < before_call - captured["before"] <= timedelta(hours=24, seconds=5)
+    # Момент выдачи фиксируется только у того, кому триал реально выдан.
+    assert candidates[0].paid_trial_fallback_at is not None
+    assert getattr(candidates[1], "paid_trial_fallback_at", None) is None
+    assert db.commit.await_count == 1
+    # Порог — N минут назад от «сейчас».
+    assert timedelta(minutes=29, seconds=59) < before_call - captured["before"] <= timedelta(minutes=30, seconds=5)
+    # Бэклог ограничен: не старше MAX_AGE_HOURS и пачкой.
+    assert timedelta(hours=23, minutes=59) < before_call - captured["not_before"] <= timedelta(hours=24, seconds=5)
+    assert captured["limit"] == service.FALLBACK_BATCH_LIMIT
 
 
 @pytest.mark.anyio
@@ -473,3 +483,14 @@ async def test_fallback_candidates_query_filters_variant_and_missing_subscriptio
     assert "subscriptions.id IS NULL" in sql
     assert "users.has_had_paid_subscription" in sql
     assert "users.created_at <" in sql
+    assert "users.paid_trial_fallback_at IS NULL" in sql
+    assert "users.created_at >=" not in sql
+    assert "LIMIT" not in sql
+
+    await TrialPaidOfferService().list_fallback_candidates(
+        FakeDb(), before=datetime(2030, 1, 1), not_before=datetime(2029, 12, 31), limit=50
+    )
+    sql = captured["sql"]
+    assert "users.created_at >=" in sql
+    assert "LIMIT" in sql
+    assert "ORDER BY users.created_at DESC" in sql

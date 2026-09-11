@@ -739,9 +739,14 @@ class BotConfigurationService:
             "example": "1",
             "warning": "Для суточной подписки общее окно ONEPAYMENT_RECURRING_DAYS_BEFORE не применяется. Повтор после отказа банка — через час.",
         },
-        "TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS": {
-            "description": "Через сколько часов без оплаты оффера выдать обычный бесплатный триал.",
-            "format": "Целое ≥ 0 (часы); 0 — не выдавать.",
+        "TRIAL_PAID_OFFER_FALLBACK_TRIAL_MINUTES": {
+            "description": "Через сколько минут без оплаты оффера выдать обычный бесплатный триал. Момент выдачи пишется в users.paid_trial_fallback_at.",
+            "format": "Целое ≥ 0 (минуты); 0 — не выдавать.",
+            "example": "30",
+        },
+        "TRIAL_PAID_OFFER_FALLBACK_MAX_AGE_HOURS": {
+            "description": "Фолбэк-триал выдаётся только зарегистрированным не раньше N часов назад; выдача идёт пачками по 50 в минуту, свежие первыми.",
+            "format": "Целое ≥ 1 (часы).",
             "example": "24",
         },
         "PAID_SUBSCRIPTION_USER_TAG": {

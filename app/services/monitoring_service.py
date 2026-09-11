@@ -111,6 +111,7 @@ class MonitoringService:
         self._last_cleanup = datetime.utcnow()
         self._last_cabinet_notifications_cleanup = datetime.min
         self._sla_task = None
+        self._paid_trial_fallback_task = None
         self._last_remnawave_sync_at: Optional[datetime] = None
         self._remnawave_sync_lock = asyncio.Lock()
 
@@ -238,6 +239,11 @@ class MonitoringService:
                 self._sla_task = asyncio.create_task(self._sla_loop())
         except Exception as e:
             logger.error(f"Не удалось запустить SLA-мониторинг: {e}")
+        try:
+            if not self._paid_trial_fallback_task or self._paid_trial_fallback_task.done():
+                self._paid_trial_fallback_task = asyncio.create_task(self._paid_trial_fallback_loop())
+        except Exception as e:
+            logger.error(f"Не удалось запустить цикл фолбэк-триалов A/B: {e}")
         
         while self.is_running:
             try:
@@ -254,6 +260,8 @@ class MonitoringService:
         try:
             if self._sla_task and not self._sla_task.done():
                 self._sla_task.cancel()
+            if self._paid_trial_fallback_task and not self._paid_trial_fallback_task.done():
+                self._paid_trial_fallback_task.cancel()
         except Exception:
             pass
     
@@ -302,7 +310,6 @@ class MonitoringService:
                     await self._process_autopayments(db)
                 if settings.is_onepayment_recurring_enabled():
                     await self._process_onepayment_recurring(db)
-                await self._process_trial_paid_offer_fallbacks(db)
                 await self._cleanup_inactive_users(db)
                 await self._collect_daily_subscription_metrics(db)
                 await self._collect_user_daily_metrics(db)
@@ -1574,9 +1581,27 @@ class MonitoringService:
         )
         return "charged"
 
+    PAID_TRIAL_FALLBACK_CHECK_INTERVAL_SECONDS = 60
+
+    async def _paid_trial_fallback_loop(self) -> None:
+        """Отдельный цикл раз в минуту: окно фолбэка задаётся в минутах, а основной
+        цикл мониторинга крутится раз в MONITORING_INTERVAL минут."""
+        while self.is_running:
+            try:
+                async for db in get_db():
+                    try:
+                        await self._process_trial_paid_offer_fallbacks(db)
+                    finally:
+                        break
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Ошибка в цикле фолбэк-триалов A/B: {e}")
+            await asyncio.sleep(self.PAID_TRIAL_FALLBACK_CHECK_INTERVAL_SECONDS)
+
     async def _process_trial_paid_offer_fallbacks(self, db: AsyncSession) -> None:
-        """A/B «за 1 ₽»: неоплатившим через N часов выдаём обычный триал (если включено)."""
-        if settings.get_trial_paid_offer_fallback_trial_hours() <= 0:
+        """A/B «за 1 ₽»: неоплатившим через N минут выдаём обычный триал (если включено)."""
+        if settings.get_trial_paid_offer_fallback_trial_minutes() <= 0:
             return
         try:
             from app.services.trial_paid_offer_service import trial_paid_offer_service

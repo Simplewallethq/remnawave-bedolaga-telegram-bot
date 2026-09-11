@@ -11,8 +11,8 @@ TRIAL_PAID_OFFER_RENEWAL_PERIOD_DAYS и `is_paid_trial=True` — дальше м
 списывает месячную цену тарифа за TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE часов
 до конца доступа и продлевает на месяц (`finalize_tariff_renewal` снимает флаг).
 
-Неоплатившим по TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS (0 — выключено) через
-N часов выдаётся обычный бесплатный триал.
+Неоплатившим по TRIAL_PAID_OFFER_FALLBACK_TRIAL_MINUTES (0 — выключено) через
+N минут выдаётся обычный бесплатный триал.
 
 Кабинет, миниапп и web-API не знают об эксперименте и ведут себя как раньше.
 """
@@ -379,37 +379,59 @@ class TrialPaidOfferService:
 
     # -------------------------------------------------------------- фолбэк
 
-    async def list_fallback_candidates(self, db: AsyncSession, *, before: datetime) -> List[User]:
-        """Вариант paid_trial без какой-либо подписки, зарегистрированные до `before`."""
-        result = await db.execute(
+    FALLBACK_BATCH_LIMIT = 50
+
+    async def list_fallback_candidates(
+        self,
+        db: AsyncSession,
+        *,
+        before: datetime,
+        not_before: Optional[datetime] = None,
+        limit: Optional[int] = None,
+    ) -> List[User]:
+        """Вариант paid_trial без какой-либо подписки, зарегистрированные до `before`
+        (и не раньше `not_before`). Свежие — первыми, чтобы новым триал приходил
+        вовремя, а бэклог дотягивался следом."""
+        query = (
             select(User)
             .outerjoin(Subscription, Subscription.user_id == User.id)
             .where(
                 User.trial_offer_variant == VARIANT_PAID,
                 User.status == UserStatus.ACTIVE.value,
                 User.has_had_paid_subscription.is_(False),
+                User.paid_trial_fallback_at.is_(None),
                 User.created_at < before,
                 Subscription.id.is_(None),
             )
             .options(selectinload(User.subscription))
-            .order_by(User.created_at.asc())
+            .order_by(User.created_at.desc())
         )
+        if not_before is not None:
+            query = query.where(User.created_at >= not_before)
+        if limit:
+            query = query.limit(limit)
+        result = await db.execute(query)
         return list(result.scalars().unique().all())
 
     async def grant_fallback_trials(self, db: AsyncSession, bot: Any) -> int:
-        """Через TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS без оплаты выдаёт обычный триал.
+        """Через TRIAL_PAID_OFFER_FALLBACK_TRIAL_MINUTES без оплаты выдаёт обычный триал.
 
         Идемпотентно: после выдачи у пользователя есть подписка, и в выборку он
-        больше не попадает. При 0 часов ничего не делает.
+        больше не попадает. При 0 минут ничего не делает. Момент выдачи пишется в
+        users.paid_trial_fallback_at — по нему считается когорта в статистике.
         """
-        hours = settings.get_trial_paid_offer_fallback_trial_hours()
-        if hours <= 0 or not settings.is_trial_paid_offer_enabled():
+        minutes = settings.get_trial_paid_offer_fallback_trial_minutes()
+        if minutes <= 0 or not settings.is_trial_paid_offer_enabled():
             return 0
 
         from app.handlers.start import activate_trial_for_user
 
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
-        candidates = await self.list_fallback_candidates(db, before=cutoff)
+        now = datetime.utcnow()
+        cutoff = now - timedelta(minutes=minutes)
+        oldest = now - timedelta(hours=settings.get_trial_paid_offer_fallback_max_age_hours())
+        candidates = await self.list_fallback_candidates(
+            db, before=cutoff, not_before=oldest, limit=self.FALLBACK_BATCH_LIMIT
+        )
         granted = 0
         for user in candidates:
             try:
@@ -426,6 +448,15 @@ class TrialPaidOfferService:
             if not ok:
                 continue
             granted += 1
+            try:
+                user.paid_trial_fallback_at = datetime.utcnow()
+                await db.commit()
+            except Exception as error:
+                logger.error("🧪 Фолбэк-триал: не удалось отметить выдачу пользователю %s: %s", user.telegram_id, error)
+                try:
+                    await db.rollback()
+                except Exception:  # pragma: no cover
+                    pass
             await self._notify_fallback_trial(db, bot, user)
         if granted:
             logger.info("🧪 Фолбэк-триал: выдано %s пользователям без оплаты оффера", granted)

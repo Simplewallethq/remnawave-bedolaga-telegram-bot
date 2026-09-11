@@ -2048,6 +2048,18 @@ async def add_trial_paid_offer_columns() -> bool:
                     raise ValueError(f"Unsupported database type: {db_type}")
             logger.info("✅ Колонка subscriptions.is_paid_trial добавлена")
 
+        if await check_column_exists('users', 'paid_trial_fallback_at'):
+            logger.info("ℹ️ Колонка users.paid_trial_fallback_at уже существует")
+        else:
+            async with engine.begin() as conn:
+                if db_type in ('sqlite', 'postgresql', 'mysql'):
+                    await conn.execute(text(
+                        "ALTER TABLE users ADD COLUMN paid_trial_fallback_at TIMESTAMP NULL"
+                    ))
+                else:
+                    raise ValueError(f"Unsupported database type: {db_type}")
+            logger.info("✅ Колонка users.paid_trial_fallback_at добавлена")
+
         return True
     except Exception as e:
         logger.error(f"Ошибка добавления колонок A/B платного триала: {e}")

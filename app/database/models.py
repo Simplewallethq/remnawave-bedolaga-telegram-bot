@@ -909,6 +909,8 @@ class User(Base):
     tariff_pricing_cohort_override = Column(String(8), nullable=True)
     # A/B «доступ за 1 ₽ вместо триала»: control / paid_trial, NULL — вне теста.
     trial_offer_variant = Column(String(16), nullable=True, index=True)
+    # Когда неоплатившему гейт выдали обычный бесплатный триал (фоллбэк A/B).
+    paid_trial_fallback_at = Column(DateTime, nullable=True)
     last_remnawave_sync = Column(DateTime, nullable=True)
     trojan_password = Column(String(255), nullable=True)
     vless_uuid = Column(String(255), nullable=True)

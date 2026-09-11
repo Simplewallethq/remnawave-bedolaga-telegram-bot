@@ -120,7 +120,8 @@ class Settings(BaseSettings):
     TRIAL_PAID_OFFER_PLAN_CODE: str = "solo"
     TRIAL_PAID_OFFER_RENEWAL_PERIOD_DAYS: int = 30
     TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE: int = 1
-    TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS: int = 0
+    TRIAL_PAID_OFFER_FALLBACK_TRIAL_MINUTES: int = 0
+    TRIAL_PAID_OFFER_FALLBACK_MAX_AGE_HOURS: int = 24
     DEFAULT_TRAFFIC_LIMIT_GB: int = 100
     DEFAULT_DEVICE_LIMIT: int = 1
     DEFAULT_TRAFFIC_RESET_STRATEGY: str = "MONTH"
@@ -1368,9 +1369,14 @@ class Settings(BaseSettings):
     def get_trial_paid_offer_recurring_hours_before(self) -> int:
         return self._int_or_default(self.TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE, 1, minimum=0)
 
-    def get_trial_paid_offer_fallback_trial_hours(self) -> int:
-        """0 — неоплатившим ничего не выдаём; N>0 — через N часов даём обычный триал."""
-        return self._int_or_default(self.TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS, 0, minimum=0)
+    def get_trial_paid_offer_fallback_trial_minutes(self) -> int:
+        """0 — неоплатившим ничего не выдаём; N>0 — через N минут даём обычный триал."""
+        return self._int_or_default(self.TRIAL_PAID_OFFER_FALLBACK_TRIAL_MINUTES, 0, minimum=0)
+
+    def get_trial_paid_offer_fallback_max_age_hours(self) -> int:
+        """Старше скольких часов регистрации фолбэк-триал уже не выдаём (защита от
+        массовой раздачи всему бэклогу при включении настройки)."""
+        return self._int_or_default(self.TRIAL_PAID_OFFER_FALLBACK_MAX_AGE_HOURS, 24, minimum=1)
     
     def is_yookassa_enabled(self) -> bool:
         return (self.YOOKASSA_ENABLED and

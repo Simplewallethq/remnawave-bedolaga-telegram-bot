@@ -1105,7 +1105,8 @@ MAX_DEVICES_LIMIT=15
 | `TRIAL_PAID_OFFER_PLAN_CODE` | `solo` | Тариф (нужна цена на период продления) |
 | `TRIAL_PAID_OFFER_RENEWAL_PERIOD_DAYS` | `30` | Период автопродления |
 | `TRIAL_PAID_OFFER_RECURRING_HOURS_BEFORE` | `1` | За сколько часов до конца доступа списывать |
-| `TRIAL_PAID_OFFER_FALLBACK_TRIAL_HOURS` | `0` | Через N часов без оплаты выдать обычный триал (0 — нет) |
+| `TRIAL_PAID_OFFER_FALLBACK_TRIAL_MINUTES` | `0` | Через N минут без оплаты выдать обычный триал (0 — нет); момент выдачи — `users.paid_trial_fallback_at` |
+| `TRIAL_PAID_OFFER_FALLBACK_MAX_AGE_HOURS` | `24` | Фоллбэк только тем, кто зарегистрировался не раньше N часов назад (по 50 в минуту, свежие первыми) |
 
 Флоу варианта «1 ₽»: гейт «Активируй 3 дня доступа» → условия с ценой продления →
 счёт по СБП → «Готово! Доступ на 3 дня активирован» с ключом. Символическая оплата
