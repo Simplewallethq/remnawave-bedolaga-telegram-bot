@@ -1478,10 +1478,6 @@ def get_sync_options_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
             InlineKeyboardButton(
                 text=_t(texts, "ADMIN_SYNC_VALIDATE", "🔍 Валидация"),
                 callback_data="sync_validate"
-            ),
-            InlineKeyboardButton(
-                text=_t(texts, "ADMIN_SYNC_CLEANUP", "🧹 Очистка"),
-                callback_data="sync_cleanup"
             )
         ],
         [

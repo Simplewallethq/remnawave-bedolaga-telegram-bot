@@ -248,8 +248,6 @@ curl -X POST "http://127.0.0.1:8080/tokens" \
 | `POST` | `/remnawave/sync/from-panel` | Синхронизация пользователей и подписок из панели в бота. |
 | `POST` | `/remnawave/sync/to-panel` | Обратная синхронизация данных бота в панель. |
 | `POST` | `/remnawave/sync/subscriptions/validate` | Проверка и восстановление подписок в RemnaWave. |
-| `POST` | `/remnawave/sync/subscriptions/cleanup` | Очистка «осиротевших» подписок и пользователей в RemnaWave. |
-| `POST` | `/remnawave/sync/subscriptions/statuses` | Приведение статусов подписок в боте и панели к единому виду. |
 | `GET` | `/remnawave/sync/recommendations` | Рекомендации по синхронизации: что добавить, обновить или удалить. |
 
 

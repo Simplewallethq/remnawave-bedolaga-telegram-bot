@@ -467,32 +467,6 @@ async def validate_and_fix_subscriptions(
     return RemnaWaveGenericSyncResponse(success=True, detail=detail, data=stats)
 
 
-@router.post("/sync/subscriptions/cleanup", response_model=RemnaWaveGenericSyncResponse)
-async def cleanup_orphaned_subscriptions(
-    _: Any = Security(require_api_token),
-    db: AsyncSession = Depends(get_db_session),
-) -> RemnaWaveGenericSyncResponse:
-    service = _get_service()
-    _ensure_service_configured(service)
-
-    stats = await service.cleanup_orphaned_subscriptions(db)
-    detail = "Очистка завершена"
-    return RemnaWaveGenericSyncResponse(success=True, detail=detail, data=stats)
-
-
-@router.post("/sync/subscriptions/statuses", response_model=RemnaWaveGenericSyncResponse)
-async def sync_subscription_statuses(
-    _: Any = Security(require_api_token),
-    db: AsyncSession = Depends(get_db_session),
-) -> RemnaWaveGenericSyncResponse:
-    service = _get_service()
-    _ensure_service_configured(service)
-
-    stats = await service.sync_subscription_statuses(db)
-    detail = "Статусы подписок синхронизированы"
-    return RemnaWaveGenericSyncResponse(success=True, detail=detail, data=stats)
-
-
 @router.get("/sync/recommendations", response_model=RemnaWaveGenericSyncResponse)
 async def get_sync_recommendations(
     _: Any = Security(require_api_token),
