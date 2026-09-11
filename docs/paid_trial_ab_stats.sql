@@ -61,8 +61,12 @@ WITH c AS (
                         WHERE e.user_id = u.id AND e.event_type = 'purchase'
                           AND e.extra->>'source' = 'paid_trial_offer') THEN '2. 1 ₽: оплатили гейт'
            WHEN u.paid_trial_fallback_at IS NOT NULL THEN '3. 1 ₽: фоллбэк-триал'
-           WHEN EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id) THEN '4. 1 ₽: купили сами'
-           ELSE '5. 1 ₽: без доступа'
+           WHEN EXISTS (SELECT 1 FROM transactions t WHERE t.user_id = u.id
+                          AND t.type = 'deposit' AND t.is_completed AND t.amount_kopeks > 100)
+             THEN '4. 1 ₽: купили сами'
+           WHEN EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id)
+             THEN '5. 1 ₽: доступ без оплаты (вручную/кабинет)'
+           ELSE '6. 1 ₽: без доступа'
          END AS cohort
   FROM users u
   WHERE $__timeFilteru.created_at > now() - interval '7 days' AND u.trial_offer_variant IS NOT NULL
