@@ -10,6 +10,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.utils.bot_registry import bot_for_user
 from app.database.crud.promo_offer_log import log_promo_offer_action
 from app.database.models import InteractiveNotificationLog, PromoOfferLog, User
 
@@ -470,7 +471,7 @@ class VpnDepositBonusService:
                 [InlineKeyboardButton(text="Выбрать Pro", callback_data="tariff_select:pro")],
             ]
         )
-        await bot.send_message(
+        await bot_for_user(user, bot).send_message(
             user.telegram_id,
             "✅ Готово! На балансе 100₽\n\n"
             "При первой покупке сумма покупки будет уменьшена на 100₽.",

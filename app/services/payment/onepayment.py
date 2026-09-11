@@ -22,6 +22,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.utils.bot_registry import bot_for_user
 from app.config import settings
 from app.database.models import (
     OnePaymentBinding,
@@ -565,6 +566,7 @@ class OnePaymentPaymentMixin:
         bot = getattr(self, "bot", None)
         if not bot or not getattr(user, "telegram_id", None):
             return
+        bot = bot_for_user(user, bot)
         try:
             keyboard = await self.build_topup_success_keyboard(user)
             await bot.send_message(
@@ -961,6 +963,7 @@ class OnePaymentPaymentMixin:
         bot = getattr(self, "bot", None)
         if not bot or not getattr(user, "telegram_id", None):
             return
+        bot = bot_for_user(user, bot)
         try:
             from app.utils.timezone import format_local_datetime
 
@@ -987,6 +990,7 @@ class OnePaymentPaymentMixin:
         bot = getattr(self, "bot", None)
         if not bot or not getattr(user, "telegram_id", None):
             return
+        bot = bot_for_user(user, bot)
         try:
             from aiogram.types import InlineKeyboardMarkup
 

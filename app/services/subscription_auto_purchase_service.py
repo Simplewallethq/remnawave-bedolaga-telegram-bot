@@ -36,7 +36,7 @@ from app.services.subscription_purchase_service import (
 )
 from app.services.subscription_service import SubscriptionService
 from app.services.user_cart_service import user_cart_service
-from app.utils.bot_registry import get_logo_for_bot
+from app.utils.bot_registry import bot_for_user, get_logo_for_bot
 from app.utils.pricing_utils import format_period_description
 from app.utils.success_notifications import (
     build_success_management_keyboard,
@@ -252,6 +252,7 @@ async def _auto_extend_subscription(
     *,
     bot: Optional[Bot] = None,
 ) -> bool:
+    bot = bot_for_user(user, bot)
     try:
         prepared = await _prepare_auto_extend_context(db, user, cart_data)
     except Exception as error:  # pragma: no cover - defensive logging
@@ -456,6 +457,8 @@ async def _auto_add_devices(
     """Автоматическое добавление устройств после пополнения баланса."""
     from app.database.crud.subscription import get_subscription_by_user_id
 
+    bot = bot_for_user(user, bot)
+
     device_count = _safe_int(cart_data.get("device_count"))
     current_devices = _safe_int(cart_data.get("current_devices"))
     price_kopeks = _safe_int(cart_data.get("total_price"))
@@ -609,6 +612,7 @@ async def _auto_add_devices(
 
 async def _notify_auto_tariff_success(bot: Bot, user: User, period_label: str) -> None:
     """Send the user the same kind of success card the legacy auto-purchase sends."""
+    bot = bot_for_user(user, bot)
     texts = get_texts(getattr(user, "language", "ru"))
     try:
         auto_message = texts.t(
@@ -1158,6 +1162,7 @@ async def auto_purchase_saved_cart_after_topup(
 
     if not user or not getattr(user, "id", None):
         return False
+    bot = bot_for_user(user, bot)
 
     # Счёт с зафиксированной разбивкой (частичная оплата тарифа) самодостаточен:
     # активируем по его числам даже если Redis-корзина уже истекла.

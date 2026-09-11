@@ -7,9 +7,11 @@ from datetime import datetime
 from typing import Optional
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy.exc import InterfaceError, SQLAlchemyError
 
+from app.utils.bot_registry import get_bot_instance
 from app.database.database import AsyncSessionLocal
 from app.database.models import BroadcastHistory
 from app.handlers.admin.messages import (
@@ -248,7 +250,7 @@ class BroadcastService:
                     return False
 
                 try:
-                    await self._deliver_message(telegram_id, config, keyboard)
+                    await self._deliver_message(telegram_id, config, keyboard, bot_id=getattr(user, "bot_id", None))
                     return True
                 except Exception as exc:  # noqa: BLE001
                     logger.error(
@@ -307,7 +309,7 @@ class BroadcastService:
                     return False
 
                 try:
-                    await self._deliver_message(telegram_id, config, keyboard)
+                    await self._deliver_message(telegram_id, config, keyboard, bot_id=getattr(user, "bot_id", None))
                     return True
                 except Exception as exc:  # noqa: BLE001
                     logger.error(
@@ -352,36 +354,56 @@ class BroadcastService:
         telegram_id: int,
         config: BroadcastConfig,
         keyboard: Optional[InlineKeyboardMarkup],
+        *,
+        bot_id: Optional[int] = None,
     ) -> None:
         if not self._bot:
             raise RuntimeError("Телеграм-бот не инициализирован")
+        # Пользователю зеркала пишем из зеркала: основной бот для него «chat not found».
+        bot = get_bot_instance(bot_id) or self._bot
 
         if config.media and config.media.type in VALID_MEDIA_TYPES:
             caption = config.media.caption or config.message_text
-            if config.media.type == "photo":
-                await self._bot.send_photo(
+            try:
+                if config.media.type == "photo":
+                    await bot.send_photo(
+                        chat_id=telegram_id,
+                        photo=config.media.file_id,
+                        caption=caption,
+                        reply_markup=keyboard,
+                    )
+                elif config.media.type == "video":
+                    await bot.send_video(
+                        chat_id=telegram_id,
+                        video=config.media.file_id,
+                        caption=caption,
+                        reply_markup=keyboard,
+                    )
+                elif config.media.type == "document":
+                    await bot.send_document(
+                        chat_id=telegram_id,
+                        document=config.media.file_id,
+                        caption=caption,
+                        reply_markup=keyboard,
+                    )
+                return
+            except TelegramBadRequest as exc:
+                # file_id привязан к боту, который загрузил медиа (основному);
+                # зеркало его не знает — отдаём хотя бы текст.
+                if bot is self._bot:
+                    raise
+                logger.warning(
+                    "Рассылка: зеркало %s не смогло отправить медиа пользователю %s (%s), шлём текст",
+                    bot_id, telegram_id, exc,
+                )
+                await bot.send_message(
                     chat_id=telegram_id,
-                    photo=config.media.file_id,
-                    caption=caption,
+                    text=caption or config.message_text,
                     reply_markup=keyboard,
                 )
-            elif config.media.type == "video":
-                await self._bot.send_video(
-                    chat_id=telegram_id,
-                    video=config.media.file_id,
-                    caption=caption,
-                    reply_markup=keyboard,
-                )
-            elif config.media.type == "document":
-                await self._bot.send_document(
-                    chat_id=telegram_id,
-                    document=config.media.file_id,
-                    caption=caption,
-                    reply_markup=keyboard,
-                )
-            return
+                return
 
-        await self._bot.send_message(
+        await bot.send_message(
             chat_id=telegram_id,
             text=config.message_text,
             reply_markup=keyboard,

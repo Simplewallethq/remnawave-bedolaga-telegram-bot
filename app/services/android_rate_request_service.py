@@ -10,6 +10,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.utils.bot_registry import bot_for_user
 from app.config import settings
 from app.database.crud.notification import (
     get_latest_notification_sent_at,
@@ -374,7 +375,7 @@ class AndroidRateRequestService:
         )
 
         try:
-            await bot.send_message(
+            await bot_for_user(user, bot).send_message(
                 chat_id=user.telegram_id,
                 text=message,
                 reply_markup=keyboard,

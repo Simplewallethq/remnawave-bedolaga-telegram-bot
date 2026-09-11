@@ -592,3 +592,33 @@ async def test_monitoring_cycle_runs_panel_sync_last_on_its_own_session(monkeypa
     sync_session = [db for name, db in calls if name == "_sync_with_remnawave"][0]
     assert cycle_sessions == {"session0"}
     assert sync_session == "session1"
+
+
+async def test_monitoring_sends_through_the_users_own_bot_and_skips_no_chat(monkeypatch):
+    """Юзеру зеркала пишем из зеркала; юзеру кабинета без telegram_id не пишем."""
+    from pathlib import Path
+
+    from app.utils import bot_registry
+    import app.services.monitoring_service as module
+
+    bot_registry.clear()
+    primary = SimpleNamespace(send_photo=AsyncMock(), send_message=AsyncMock())
+    mirror = SimpleNamespace(send_photo=AsyncMock(), send_message=AsyncMock())
+    bot_registry.register_bot(111, Path("images/logo.png"), primary)
+    bot_registry.register_bot(222, Path("images/logo.png"), mirror)
+    monkeypatch.setattr(module.settings, "ENABLE_LOGO_MODE", False, raising=False)
+
+    service = MonitoringService.__new__(MonitoringService)
+    service.bot = primary
+
+    await service._send_message_with_logo(chat_id=5, text="hi", user=SimpleNamespace(bot_id=222, telegram_id=5))
+    assert mirror.send_message.await_count == 1
+    assert primary.send_message.await_count == 0
+
+    await service._send_message_with_logo(chat_id=6, text="hi", user=SimpleNamespace(bot_id=999, telegram_id=6))
+    assert primary.send_message.await_count == 1
+
+    result = await service._send_message_with_logo(chat_id=None, text="hi", user=SimpleNamespace(bot_id=111, telegram_id=None))
+    assert result is None
+    assert primary.send_message.await_count == 1
+    bot_registry.clear()

@@ -75,7 +75,7 @@ from app.external.remnawave_api import (
     UserStatus,
 )
 
-from app.utils.bot_registry import get_primary_logo
+from app.utils.bot_registry import bot_for_user, get_logo_for_bot, get_primary_logo, resolve_photo_for_bot
 
 logger = logging.getLogger(__name__)
 
@@ -115,25 +115,42 @@ class MonitoringService:
         self._last_remnawave_sync_at: Optional[datetime] = None
         self._remnawave_sync_lock = asyncio.Lock()
 
+    def _bot_for(self, user: Any = None):
+        """Бот, из которого пользователь стартовал (зеркало), иначе основной."""
+        if user is None:
+            return self.bot
+        return bot_for_user(user, self.bot)
+
     async def _send_message_with_logo(
         self,
         chat_id: int,
         text: str,
         reply_markup=None,
         parse_mode: Optional[str] = "HTML",
+        *,
+        user: Any = None,
     ):
-        """Отправляет сообщение, добавляя логотип при необходимости."""
+        """Отправляет сообщение, добавляя логотип при необходимости.
+
+        `user` нужен, чтобы писать из бота, в котором он зарегистрирован:
+        основной бот не может писать тем, кто стартовал только зеркало.
+        Пользователям без telegram_id (кабинет) ничего не шлём.
+        """
         if not self.bot:
             raise RuntimeError("Bot instance is not available")
+        if not chat_id:
+            logger.debug("Пропуск уведомления: у пользователя нет telegram_id")
+            return None
 
-        logo_path = get_primary_logo()
+        bot = self._bot_for(user)
+        logo_path = get_logo_for_bot(getattr(user, "bot_id", None)) if user is not None else get_primary_logo()
         if (
             settings.ENABLE_LOGO_MODE
             and logo_path.exists()
             and (text is None or len(text) <= 1000)
         ):
             try:
-                return await self.bot.send_photo(
+                return await bot.send_photo(
                     chat_id=chat_id,
                     photo=FSInputFile(logo_path),
                     caption=text,
@@ -148,7 +165,7 @@ class MonitoringService:
                     exc,
                 )
 
-        return await self.bot.send_message(
+        return await bot.send_message(
             chat_id=chat_id,
             text=text,
             reply_markup=reply_markup,
@@ -162,14 +179,22 @@ class MonitoringService:
         image_path: Path,
         reply_markup=None,
         parse_mode: Optional[str] = "HTML",
+        *,
+        user: Any = None,
     ):
         """Отправляет сообщение с заданной картинкой, иначе — с логотипом."""
         if not self.bot:
             raise RuntimeError("Bot instance is not available")
+        if not chat_id:
+            logger.debug("Пропуск уведомления: у пользователя нет telegram_id")
+            return None
 
+        bot = self._bot_for(user)
+        if user is not None:
+            image_path = Path(resolve_photo_for_bot(getattr(user, "bot_id", None), image_path))
         if image_path.exists() and (text is None or len(text) <= 1000):
             try:
-                return await self.bot.send_photo(
+                return await bot.send_photo(
                     chat_id=chat_id,
                     photo=FSInputFile(image_path),
                     caption=text,
@@ -190,6 +215,7 @@ class MonitoringService:
             text=text,
             reply_markup=reply_markup,
             parse_mode=parse_mode,
+            user=user,
         )
 
     @staticmethod
@@ -1649,6 +1675,7 @@ class MonitoringService:
             )
             await self._send_message_with_logo(
                 chat_id=user.telegram_id,
+                user=user,
                 text=message,
                 parse_mode="HTML",
             )
@@ -1763,6 +1790,7 @@ class MonitoringService:
 
             await self._send_message_with_logo(
                 chat_id=user.telegram_id,
+                user=user,
                 text=message,
                 parse_mode="HTML",
                 reply_markup=keyboard,
@@ -1838,6 +1866,7 @@ class MonitoringService:
 
             await self._send_message_with_image(
                 chat_id=user.telegram_id,
+                user=user,
                 text=message,
                 image_path=SUBSCRIPTION_EXPIRING_IMAGE,
                 parse_mode="HTML",
@@ -1878,6 +1907,7 @@ class MonitoringService:
 
             await self._send_message_with_logo(
                 chat_id=user.telegram_id,
+                user=user,
                 text=message,
                 parse_mode="HTML",
                 reply_markup=keyboard,
@@ -1924,6 +1954,7 @@ class MonitoringService:
 
             await self._send_message_with_logo(
                 chat_id=user.telegram_id,
+                user=user,
                 text=message,
                 parse_mode="HTML",
                 reply_markup=keyboard,
@@ -1987,6 +2018,7 @@ class MonitoringService:
 
             await self._send_message_with_logo(
                 chat_id=user.telegram_id,
+                user=user,
                 text=message,
                 parse_mode="HTML",
                 reply_markup=keyboard,
@@ -2041,6 +2073,7 @@ class MonitoringService:
 
             await self._send_message_with_logo(
                 chat_id=user.telegram_id,
+                user=user,
                 text=message,
                 parse_mode="HTML",
                 reply_markup=keyboard,
@@ -2119,6 +2152,7 @@ class MonitoringService:
 
             await self._send_message_with_logo(
                 chat_id=user.telegram_id,
+                user=user,
                 text=message,
                 parse_mode="HTML",
                 reply_markup=keyboard,
@@ -2151,6 +2185,7 @@ class MonitoringService:
             )
             await self._send_message_with_logo(
                 chat_id=user.telegram_id,
+                user=user,
                 text=message,
                 parse_mode="HTML",
             )
@@ -2185,6 +2220,7 @@ class MonitoringService:
             
             await self._send_message_with_logo(
                 chat_id=user.telegram_id,
+                user=user,
                 text=message,
                 parse_mode="HTML",
                 reply_markup=keyboard,

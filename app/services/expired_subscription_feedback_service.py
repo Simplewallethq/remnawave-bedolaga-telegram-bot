@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.utils.bot_registry import bot_for_user
 from app.database.crud.feedback import (
     create_feedback,
     get_feedback_by_event_key,
@@ -231,7 +232,7 @@ class ExpiredSubscriptionFeedbackService:
         ended_on_msk,
     ) -> dict:
         try:
-            sent_message = await bot.send_message(
+            sent_message = await bot_for_user(user, bot).send_message(
                 chat_id=user.telegram_id,
                 text=self._build_message_text(user, ended_on_msk),
                 reply_markup=self._build_keyboard(feedback.id),

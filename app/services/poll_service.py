@@ -9,6 +9,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.utils.bot_registry import get_bot_instance
 from app.config import settings
 from app.database.crud.user import add_user_balance
 from app.database.models import (
@@ -81,6 +82,7 @@ async def send_poll_to_users(
             id=user.id,
             telegram_id=user.telegram_id,
             language=user.language,
+            bot_id=getattr(user, "bot_id", None),
         )
         for user in users
     ]
@@ -135,7 +137,7 @@ async def send_poll_to_users(
                     text = _build_poll_invitation_text(poll, user_snapshot.language)
                     keyboard = build_start_keyboard(response.id, user_snapshot.language)
 
-                    await bot.send_message(
+                    await (get_bot_instance(user_snapshot.bot_id) or bot).send_message(
                         chat_id=user_snapshot.telegram_id,
                         text=text,
                         reply_markup=keyboard,

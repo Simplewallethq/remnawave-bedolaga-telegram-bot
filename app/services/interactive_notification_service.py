@@ -10,6 +10,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
+from app.utils.bot_registry import bot_for_user, get_bot_instance
 from app.database.database import AsyncSessionLocal
 from app.database.models import InteractiveNotificationLog, Subscription, User
 from app.services.cold_solo_offer_service import cold_solo_offer_service
@@ -608,6 +609,7 @@ class InteractiveNotificationService:
     ) -> Optional[int]:
         if not self.bot or candidate.user.telegram_id is None:
             return None
+        bot = bot_for_user(candidate.user, self.bot)
 
         if slot_key == hot_invoice_offer_service.FIRST_SLOT_KEY:
             minutes_left = hot_invoice_offer_service.invoice_minutes_left(
@@ -683,7 +685,7 @@ class InteractiveNotificationService:
             )
 
         try:
-            sent_message = await self.bot.send_message(
+            sent_message = await bot.send_message(
                 int(candidate.user.telegram_id),
                 text,
                 reply_markup=keyboard,
@@ -738,6 +740,7 @@ class InteractiveNotificationService:
                     message_id = await self._send_vpn_deposit_bonus_message(
                         user.telegram_id,
                         first_touch=True,
+                        bot_id=getattr(user, "bot_id", None),
                     )
                     if message_id:
                         sent += 1
@@ -794,6 +797,7 @@ class InteractiveNotificationService:
                     message_id = await self._send_vpn_deposit_bonus_message(
                         user.telegram_id,
                         first_touch=False,
+                        bot_id=getattr(user, "bot_id", None),
                     )
                     if message_id:
                         sent += 1
@@ -828,9 +832,11 @@ class InteractiveNotificationService:
         telegram_id: int,
         *,
         first_touch: bool,
+        bot_id: Optional[int] = None,
     ) -> Optional[int]:
         if not self.bot:
             return None
+        bot = get_bot_instance(bot_id) or self.bot
 
         if first_touch:
             text = (
@@ -858,7 +864,7 @@ class InteractiveNotificationService:
         )
 
         try:
-            sent_message = await self.bot.send_message(
+            sent_message = await bot.send_message(
                 int(telegram_id),
                 text,
                 reply_markup=keyboard,
@@ -1064,6 +1070,7 @@ class InteractiveNotificationService:
     ) -> Optional[int]:
         if not self.bot or candidate.user.telegram_id is None:
             return None
+        bot = bot_for_user(candidate.user, self.bot)
 
         plan_code = candidate.plan_code
         plan_name = candidate.plan_name
@@ -1139,7 +1146,7 @@ class InteractiveNotificationService:
             )
 
         try:
-            sent_message = await self.bot.send_message(
+            sent_message = await bot.send_message(
                 int(candidate.user.telegram_id),
                 text,
                 reply_markup=keyboard,
@@ -1228,6 +1235,7 @@ class InteractiveNotificationService:
                     text=message.text,
                     button_text=message.button_text,
                     offer_id=offer.id,
+                    bot_id=getattr(user, "bot_id", None),
                 )
                 if message_id:
                     sent += 1
@@ -1310,6 +1318,7 @@ class InteractiveNotificationService:
                         text=message.text,
                         button_text=message.button_text,
                         offer_id=offer.id,
+                        bot_id=getattr(user, "bot_id", None),
                     )
                     if message_id:
                         sent += 1
@@ -1352,9 +1361,11 @@ class InteractiveNotificationService:
         text: str,
         button_text: str,
         offer_id: int,
+        bot_id: Optional[int] = None,
     ) -> Optional[int]:
         if not self.bot:
             return None
+        bot = get_bot_instance(bot_id) or self.bot
 
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -1368,7 +1379,7 @@ class InteractiveNotificationService:
         )
 
         try:
-            sent_message = await self.bot.send_message(
+            sent_message = await bot.send_message(
                 telegram_id,
                 text,
                 reply_markup=keyboard,
@@ -1431,6 +1442,7 @@ class InteractiveNotificationService:
                     message_id = await self._send_cold_solo_message(
                         user.telegram_id,
                         first_touch=True,
+                        bot_id=getattr(user, "bot_id", None),
                         offer_id=offer.id,
                     )
                     if message_id:
@@ -1541,6 +1553,7 @@ class InteractiveNotificationService:
                     message_id = await self._send_cold_solo_message(
                         user.telegram_id,
                         first_touch=False,
+                        bot_id=getattr(user, "bot_id", None),
                         offer_id=offer.id,
                     )
                     if message_id:
@@ -1575,9 +1588,11 @@ class InteractiveNotificationService:
         *,
         first_touch: bool,
         offer_id: int,
+        bot_id: Optional[int] = None,
     ) -> Optional[int]:
         if not self.bot:
             return None
+        bot = get_bot_instance(bot_id) or self.bot
 
         if first_touch:
             text = (
@@ -1608,7 +1623,7 @@ class InteractiveNotificationService:
         )
 
         try:
-            sent_message = await self.bot.send_message(
+            sent_message = await bot.send_message(
                 telegram_id,
                 text,
                 reply_markup=keyboard,

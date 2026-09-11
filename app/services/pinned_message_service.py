@@ -12,6 +12,7 @@ from aiogram.exceptions import (
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.utils.bot_registry import bot_for_user
 from app.database.crud.user import get_users_list
 from app.database.database import AsyncSessionLocal
 from app.database.models import PinnedMessage, User, UserStatus
@@ -114,7 +115,7 @@ async def deliver_pinned_message_to_user(
         if last_pinned_id == pinned_message.id:
             return False
 
-    success = await _send_and_pin_message(bot, user.telegram_id, pinned_message)
+    success = await _send_and_pin_message(bot_for_user(user, bot), user.telegram_id, pinned_message)
     if success:
         await _mark_pinned_delivery(user_id=getattr(user, "id", None), pinned_message_id=pinned_message.id)
     return success
@@ -153,7 +154,7 @@ async def broadcast_pinned_message(
             for attempt in range(3):
                 try:
                     success = await _send_and_pin_message(
-                        bot,
+                        bot_for_user(user, bot),
                         user.telegram_id,
                         pinned_message,
                     )
@@ -280,31 +281,46 @@ async def _send_and_pin_message(bot: Bot, chat_id: int, pinned_message: PinnedMe
     except TelegramForbiddenError:
         return False
 
+    async def _send_text():
+        return await bot.send_message(
+            chat_id=chat_id,
+            text=pinned_message.content,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            disable_notification=True,
+        )
+
     try:
-        if pinned_message.media_type == "photo" and pinned_message.media_file_id:
-            sent_message = await bot.send_photo(
-                chat_id=chat_id,
-                photo=pinned_message.media_file_id,
-                caption=pinned_message.content or None,
-                parse_mode="HTML" if pinned_message.content else None,
-                disable_notification=True,
-            )
-        elif pinned_message.media_type == "video" and pinned_message.media_file_id:
-            sent_message = await bot.send_video(
-                chat_id=chat_id,
-                video=pinned_message.media_file_id,
-                caption=pinned_message.content or None,
-                parse_mode="HTML" if pinned_message.content else None,
-                disable_notification=True,
-            )
-        else:
-            sent_message = await bot.send_message(
-                chat_id=chat_id,
-                text=pinned_message.content,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-                disable_notification=True,
-            )
+        sent_message = None
+        if pinned_message.media_type in ("photo", "video") and pinned_message.media_file_id:
+            try:
+                if pinned_message.media_type == "photo":
+                    sent_message = await bot.send_photo(
+                        chat_id=chat_id,
+                        photo=pinned_message.media_file_id,
+                        caption=pinned_message.content or None,
+                        parse_mode="HTML" if pinned_message.content else None,
+                        disable_notification=True,
+                    )
+                else:
+                    sent_message = await bot.send_video(
+                        chat_id=chat_id,
+                        video=pinned_message.media_file_id,
+                        caption=pinned_message.content or None,
+                        parse_mode="HTML" if pinned_message.content else None,
+                        disable_notification=True,
+                    )
+            except TelegramBadRequest as media_error:
+                # file_id знает только загрузивший его бот; у зеркала он не сработает —
+                # закрепляем хотя бы текст.
+                if not pinned_message.content:
+                    raise
+                logger.warning(
+                    "Закреп: бот %s не смог отправить медиа в чат %s (%s), шлём текст",
+                    getattr(bot, "id", None), chat_id, media_error,
+                )
+        if sent_message is None:
+            sent_message = await _send_text()
         await bot.pin_chat_message(
             chat_id=chat_id,
             message_id=sent_message.message_id,
