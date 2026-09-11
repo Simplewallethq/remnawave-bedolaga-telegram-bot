@@ -21,6 +21,7 @@ from app.config import settings
 from app.database.models import User
 from app.localization.texts import get_texts
 from app.services.blacklist_service import blacklist_service
+from app.services.payment.onepayment_card_alt import CARD_ALT_CALLBACK_PREFIX
 from app.services.payment_gateway_router import (
     SOURCE_BALANCE,
     payment_gateway_router,
@@ -151,6 +152,23 @@ async def process_auto_payment_amount(
     return True
 
 
+def _card_alternative_available(routed, amount_kopeks: int) -> bool:
+    """Кнопка «Оплатить картой» — только на счёте 1Payment и только если Platega
+    примет эту сумму."""
+    if getattr(routed, "gateway", None) != "onepayment":
+        return False
+    if not getattr(routed, "local_payment_id", None):
+        return False
+    if not settings.is_onepayment_card_button_enabled():
+        return False
+    if amount_kopeks < int(settings.PLATEGA_MIN_AMOUNT_KOPEKS):
+        return False
+    max_kopeks = int(settings.PLATEGA_MAX_AMOUNT_KOPEKS)
+    if max_kopeks and amount_kopeks > max_kopeks:
+        return False
+    return True
+
+
 async def _render_invoice(
     message: types.Message,
     db: AsyncSession,
@@ -176,7 +194,27 @@ async def _render_invoice(
     )
     tariff_summary = state_data.get("tariff_checkout_summary")
 
+    # 1Payment умеет только СБП — рядом даём карту через Platega. Счёт Platega
+    # выставляется лениво, по нажатию (см. request_onepayment_card_alternative).
+    card_alt_enabled = _card_alternative_available(routed, amount_kopeks)
+    if card_alt_enabled:
+        pay_button_text = texts.t(
+            "PAYMENT_AUTO_PAY_BUTTON_SBP",
+            "\U0001f3e6 Оплатить по СБП – {amount}",
+        ).format(amount=amount_label)
+
     rows = [[types.InlineKeyboardButton(text=pay_button_text, url=routed.payment_url)]]
+    if card_alt_enabled:
+        rows.append(
+            [
+                types.InlineKeyboardButton(
+                    text=texts.t(
+                        "ONEPAYMENT_CARD_ALT_BUTTON", "\U0001f4b3 Оплатить картой – {amount}"
+                    ).format(amount=amount_label),
+                    callback_data=f"{CARD_ALT_CALLBACK_PREFIX}{routed.local_payment_id}",
+                )
+            ]
+        )
 
     if isinstance(tariff_summary, dict):
         balance_callback = tariff_summary.get("balance_callback")
@@ -254,6 +292,11 @@ async def _render_invoice(
             "списывается автоматически. Отключить можно в разделе "
             "«Управление подпиской → Автоплатеж».",
         )
+        if card_alt_enabled:
+            instructions += "\n" + texts.t(
+                "ONEPAYMENT_CARD_ALT_NOTE",
+                "\U0001f4b3 Оплата картой — без подключения автопродления.",
+            )
 
     keyboard = types.InlineKeyboardMarkup(inline_keyboard=rows)
 

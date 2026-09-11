@@ -45,6 +45,12 @@ from app.services.onepayment_service import (
     parse_status,
 )
 from app.services.payment.common import _record_router_payment
+from app.services.payment.onepayment_card_alt import (
+    CARD_ALT_METADATA_KEY,
+    CARD_ALT_PURPOSE,
+    CARD_ALT_SOURCE_KEY,
+    get_card_alt_block,
+)
 from app.services.subscription_auto_purchase_service import (
     auto_purchase_saved_cart_after_topup,
 )
@@ -634,6 +640,111 @@ class OnePaymentPaymentMixin:
             "is_paid": payment.is_paid,
             "remote": remote,
         }
+
+    # ------------------------------------------------------ карта вместо СБП
+
+    async def create_onepayment_card_alternative(
+        self,
+        db: AsyncSession,
+        payment: OnePaymentPayment,
+    ) -> Optional[Dict[str, Any]]:
+        """Platega-счёт с методом «банковская карта» на сумму СБП-счёта 1Payment.
+
+        Создаётся лениво, по нажатию кнопки, и переиспользуется, пока живой:
+        повторные нажатия не плодят PENDING-транзакции у Platega. Возвращает
+        {"platega_payment_id", "redirect_url", "reused"} или None.
+        """
+        if not settings.is_onepayment_card_button_enabled():
+            return None
+        if payment.is_paid or payment.status not in {
+            OnePaymentPayment.STATUS_INIT,
+            OnePaymentPayment.STATUS_PENDING,
+        }:
+            return None
+
+        payment_module = import_module("app.services.payment_service")
+        metadata = dict(getattr(payment, "metadata_json", {}) or {})
+
+        existing = get_card_alt_block(metadata)
+        if existing:
+            reusable = await self._reusable_card_alt_payment(db, existing["platega_payment_id"])
+            if reusable:
+                return {
+                    "platega_payment_id": reusable.id,
+                    "redirect_url": reusable.redirect_url,
+                    "reused": True,
+                }
+
+        # Переносим то, что нужно финализации Platega: координаты сообщения
+        # со счётом (удалить после оплаты) и снимок чекаута тарифа (автопокупка).
+        carried: Dict[str, Any] = {
+            "purpose": CARD_ALT_PURPOSE,
+            CARD_ALT_SOURCE_KEY: payment.id,
+        }
+        for key in ("invoice_message", SNAPSHOT_METADATA_KEY, "payment_router"):
+            if metadata.get(key) is not None:
+                carried[key] = metadata[key]
+
+        create_platega = getattr(self, "create_platega_payment", None)
+        if create_platega is None:
+            logger.error("PaymentService без Platega: карта вместо СБП недоступна")
+            return None
+
+        result = await create_platega(
+            db,
+            user_id=payment.user_id,
+            amount_kopeks=payment.amount_kopeks,
+            description=payment.description
+            or settings.get_balance_payment_description(payment.amount_kopeks),
+            language=metadata.get("language") or settings.DEFAULT_LANGUAGE,
+            payment_method_code=settings.get_onepayment_card_button_platega_method(),
+            metadata=carried,
+        )
+        if not result or not result.get("redirect_url") or not result.get("local_payment_id"):
+            logger.error(
+                "1Payment #%s: не удалось выставить карточный Platega-счёт", payment.id
+            )
+            return None
+
+        metadata[CARD_ALT_METADATA_KEY] = {
+            "platega_payment_id": result["local_payment_id"],
+            "platega_transaction_id": result.get("transaction_id"),
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        await payment_module.update_onepayment_payment(db, payment, metadata=metadata)
+
+        logger.info(
+            "1Payment #%s: выставлен карточный Platega-счёт #%s на %s₽ (user=%s)",
+            payment.id,
+            result["local_payment_id"],
+            payment.amount_kopeks / 100,
+            payment.user_id,
+        )
+        return {
+            "platega_payment_id": result["local_payment_id"],
+            "redirect_url": result["redirect_url"],
+            "reused": False,
+        }
+
+    async def _reusable_card_alt_payment(self, db: AsyncSession, platega_payment_id: Any):
+        """Ранее выставленный карточный счёт, если по нему ещё можно платить."""
+        payment_module = import_module("app.services.payment_service")
+        try:
+            platega_payment = await payment_module.get_platega_payment_by_id(
+                db, int(platega_payment_id)
+            )
+        except (TypeError, ValueError):
+            return None
+        if platega_payment is None or platega_payment.is_paid:
+            return None
+        if str(platega_payment.status or "").upper() not in {"PENDING", "INPROGRESS"}:
+            return None
+        if not platega_payment.redirect_url:
+            return None
+        expires_at = getattr(platega_payment, "expires_at", None)
+        if expires_at is not None and expires_at <= datetime.utcnow() + timedelta(minutes=1):
+            return None
+        return platega_payment
 
     # ------------------------------------------------------------- рекурренты
 

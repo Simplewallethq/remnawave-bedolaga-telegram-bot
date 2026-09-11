@@ -1,4 +1,5 @@
-"""Хендлеры 1Payment: проверка счёта и управление СБП-привязкой в меню «Автоплатеж»."""
+"""Хендлеры 1Payment: проверка счёта, кнопка «Оплатить картой» (через Platega)
+и управление СБП-привязкой в меню «Автоплатеж»."""
 
 from __future__ import annotations
 
@@ -13,6 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database.models import OnePaymentBinding, User
 from app.localization.texts import get_texts
+from app.services.payment.onepayment_card_alt import (
+    get_card_alt_block,
+    parse_card_alt_callback,
+)
 from app.services.payment_service import PaymentService, get_user_by_id as fetch_user_by_id
 from app.utils.decorators import error_handler
 from app.utils.photo_message import edit_or_answer_photo
@@ -224,14 +229,167 @@ async def check_onepayment_payment_status(
         f"📊 Статус: {label_info['emoji']} {label_info['label']}",
         f"📅 Создан: {payment.created_at.strftime('%d.%m.%Y %H:%M') if payment.created_at else '—'}",
     ]
-    if payment.is_paid:
-        message_lines.append("\n✅ Платеж успешно завершен! Средства уже на балансе.")
-    elif payment.status in {"INIT", "PENDING"}:
+    card_alt_paid = False
+    card_alt_status: Optional[str] = None
+    card_alt = get_card_alt_block(getattr(payment, "metadata_json", None))
+    if card_alt and not payment.is_paid:
+        # Пользователь мог заплатить картой через Platega — проверяем и её счёт
+        # (при пропущенном вебхуке проверка сама финализирует оплату).
+        try:
+            card_info = await payment_service.get_platega_payment_status(
+                db, int(card_alt["platega_payment_id"])
+            )
+        except Exception as error:
+            logger.warning("Не удалось проверить карточный счёт для 1Payment: %s", error)
+            card_info = None
+        if card_info:
+            card_alt_paid = bool(card_info.get("is_paid"))
+            card_alt_status = str(card_info.get("status") or "")
+
+    if payment.is_paid or card_alt_paid:
         message_lines.append(
-            "\n⏳ Платеж еще не завершен. Завершите оплату по ссылке и проверьте статус позже."
+            "\n"
+            + texts.t(
+                "ONEPAYMENT_STATUS_PAID_NOTE",
+                "✅ Платеж успешно завершен! Средства уже на балансе.",
+            )
+        )
+    elif payment.status in {"INIT", "PENDING"}:
+        if card_alt_status:
+            message_lines.append(
+                texts.t(
+                    "ONEPAYMENT_STATUS_CARD_LINE", "💳 Оплата картой: {status}"
+                ).format(status=card_alt_status)
+            )
+        message_lines.append(
+            "\n"
+            + texts.t(
+                "ONEPAYMENT_STATUS_PENDING_NOTE",
+                "⏳ Платеж еще не завершен. Завершите оплату по ссылке и проверьте статус позже.",
+            )
         )
 
     await callback.message.answer("\n".join(message_lines), parse_mode="HTML")
+    await callback.answer()
+
+
+def _card_alt_button_text(texts, amount_kopeks: int) -> str:
+    return texts.t(
+        "ONEPAYMENT_CARD_ALT_BUTTON", "💳 Оплатить картой – {amount}"
+    ).format(amount=settings.format_price(amount_kopeks))
+
+
+def _replace_card_alt_button(
+    markup: Optional[types.InlineKeyboardMarkup],
+    *,
+    callback_data: str,
+    text: str,
+    url: str,
+) -> Optional[types.InlineKeyboardMarkup]:
+    """Та же клавиатура, где кнопка-callback «Оплатить картой» стала URL-кнопкой."""
+    if markup is None:
+        return None
+    rows = []
+    replaced = False
+    for row in markup.inline_keyboard:
+        new_row = []
+        for button in row:
+            if button.callback_data == callback_data:
+                new_row.append(types.InlineKeyboardButton(text=text, url=url))
+                replaced = True
+            else:
+                new_row.append(button)
+        rows.append(new_row)
+    if not replaced:
+        return None
+    return types.InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@error_handler
+async def request_onepayment_card_alternative(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    """«Оплатить картой» на СБП-счёте 1Payment: выставляет карточный счёт Platega
+    и подменяет кнопку на ссылку оплаты."""
+    from app.services import payment_service as payment_module
+
+    texts = get_texts(db_user.language)
+    local_payment_id = parse_card_alt_callback(callback.data)
+    if local_payment_id is None:
+        await callback.answer("❌ Некорректный идентификатор платежа", show_alert=True)
+        return
+
+    payment = await payment_module.get_onepayment_payment_by_id(db, local_payment_id)
+    if payment is None or payment.user_id != db_user.id:
+        await callback.answer(
+            texts.t("ONEPAYMENT_CARD_ALT_NOT_FOUND", "❌ Счёт не найден"), show_alert=True
+        )
+        return
+    if payment.is_paid:
+        await callback.answer(
+            texts.t("ONEPAYMENT_CARD_ALT_ALREADY_PAID", "✅ Этот счёт уже оплачен"),
+            show_alert=True,
+        )
+        return
+
+    result = await PaymentService(callback.bot).create_onepayment_card_alternative(db, payment)
+    if not result:
+        await callback.answer(
+            texts.t(
+                "ONEPAYMENT_CARD_ALT_ERROR",
+                "❌ Не удалось подготовить оплату картой. Попробуйте позже или оплатите по СБП.",
+            ),
+            show_alert=True,
+        )
+        return
+
+    button_text = _card_alt_button_text(texts, payment.amount_kopeks)
+    markup = _replace_card_alt_button(
+        callback.message.reply_markup if callback.message else None,
+        callback_data=callback.data,
+        text=button_text,
+        url=result["redirect_url"],
+    )
+
+    edited = False
+    if markup is not None:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=markup)
+            edited = True
+        except Exception as error:  # pragma: no cover - зависит от Telegram
+            logger.warning("Не удалось обновить клавиатуру счёта 1Payment: %s", error)
+
+    if edited:
+        await callback.answer(
+            texts.t(
+                "ONEPAYMENT_CARD_ALT_READY",
+                "💳 Ссылка готова — нажмите «Оплатить картой» ещё раз",
+            ),
+            show_alert=False,
+        )
+        return
+
+    # Кнопку заменить не вышло (сообщение без клавиатуры / старое) — шлём ссылку отдельно.
+    await callback.message.answer(
+        texts.t(
+            "ONEPAYMENT_CARD_ALT_MESSAGE",
+            "💳 <b>Оплата картой — {amount}</b>\n\n🔒 Защищённый платеж\nОбычно занимает до 10 секунд",
+        ).format(amount=settings.format_price(payment.amount_kopeks)),
+        reply_markup=types.InlineKeyboardMarkup(
+            inline_keyboard=[
+                [types.InlineKeyboardButton(text=button_text, url=result["redirect_url"])],
+                [
+                    types.InlineKeyboardButton(
+                        text=texts.t("CHECK_STATUS_BUTTON", "\U0001f4ca Проверить статус"),
+                        callback_data=f"check_platega_{result['platega_payment_id']}",
+                    )
+                ],
+            ]
+        ),
+        parse_mode="HTML",
+    )
     await callback.answer()
 
 

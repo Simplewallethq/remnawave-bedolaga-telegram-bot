@@ -15,6 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.services.payment.common import _record_router_payment
+from app.services.payment.onepayment_card_alt import (
+    CARD_ALT_METADATA_KEY,
+    CARD_ALT_PAID_AT_KEY,
+    CARD_ALT_SOURCE_KEY,
+    is_card_alt_platega_metadata,
+)
 from app.database.models import PaymentMethod, TransactionType
 from app.localization.texts import get_texts
 from app.services.platega_service import PlategaService
@@ -772,6 +778,78 @@ class PlategaPaymentMixin:
             "remote": remote_payload,
         }
 
+    async def _settle_onepayment_card_alt(
+        self,
+        db: AsyncSession,
+        payment: Any,
+        *,
+        transaction: Any,
+        paid_at: Optional[datetime],
+    ) -> None:
+        """Карточный счёт с СБП-счёта 1Payment оплачен — отмечаем исходный счёт.
+
+        Исходный счёт 1Payment остаётся в INIT/PENDING (провайдер о нём ничего не
+        знает), но в metadata получает card_alt_paid_at: для аналитики это не
+        брошенный счёт, а оплаченный другим способом. Журнал роутера закрываем
+        как оплату выданного им счёта — пользователь заплатил именно с этого
+        экрана. Никогда не бросает исключений: деньги уже зачислены.
+        """
+        metadata = getattr(payment, "metadata_json", None) or {}
+        if not is_card_alt_platega_metadata(metadata):
+            return
+        source_id = metadata.get(CARD_ALT_SOURCE_KEY)
+        if not source_id:
+            return
+
+        payment_module = import_module("app.services.payment_service")
+        try:
+            source = await payment_module.get_onepayment_payment_by_id(db, int(source_id))
+            if source is None:
+                logger.warning(
+                    "Platega %s: исходный счёт 1Payment #%s не найден",
+                    payment.correlation_id,
+                    source_id,
+                )
+                return
+
+            source_metadata = dict(getattr(source, "metadata_json", {}) or {})
+            if source_metadata.get(CARD_ALT_PAID_AT_KEY):
+                return
+
+            settled_at = (paid_at or datetime.utcnow()).isoformat()
+            block = dict(source_metadata.get(CARD_ALT_METADATA_KEY) or {})
+            block["platega_payment_id"] = payment.id
+            block["paid_at"] = settled_at
+            source_metadata[CARD_ALT_METADATA_KEY] = block
+            source_metadata[CARD_ALT_PAID_AT_KEY] = settled_at
+            # Сообщение со счётом уже удалено финализацией Platega.
+            source_metadata.pop("invoice_message", None)
+            await payment_module.update_onepayment_payment(
+                db, source, metadata=source_metadata
+            )
+
+            from app.services.payment_gateway_router import payment_gateway_router
+
+            await payment_gateway_router.record_payment(
+                db,
+                gateway="onepayment",
+                local_payment_id=source.id,
+                transaction_id=getattr(transaction, "id", None),
+                amount_kopeks=payment.amount_kopeks,
+                paid_at=paid_at,
+            )
+            logger.info(
+                "1Payment #%s оплачен картой через Platega %s",
+                source.id,
+                payment.correlation_id,
+            )
+        except Exception as error:  # pragma: no cover - диагностический лог
+            logger.warning(
+                "Не удалось отметить оплату картой для счёта 1Payment #%s: %s",
+                source_id,
+                error,
+            )
+
     async def _finalize_platega_payment(
         self,
         db: AsyncSession,
@@ -1082,6 +1160,10 @@ class PlategaPaymentMixin:
             db,
             payment=payment,
             metadata=metadata,
+        )
+
+        await self._settle_onepayment_card_alt(
+            db, payment, transaction=transaction, paid_at=paid_at
         )
 
         logger.info(

@@ -1154,6 +1154,7 @@ def register_balance_handlers(dp: Dispatcher):
         check_onepayment_payment_status,
         confirm_onepayment_autopay_cancellation,
         request_onepayment_autopay_cancellation,
+        request_onepayment_card_alternative,
     )
     dp.callback_query.register(
         request_onepayment_autopay_cancellation,
@@ -1166,6 +1167,10 @@ def register_balance_handlers(dp: Dispatcher):
     dp.callback_query.register(
         check_onepayment_payment_status,
         F.data.startswith("check_onepayment_"),
+    )
+    dp.callback_query.register(
+        request_onepayment_card_alternative,
+        F.data.startswith("onepay_card_"),
     )
     dp.callback_query.register(
         start_platega_payment,
