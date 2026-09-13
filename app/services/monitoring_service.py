@@ -552,6 +552,32 @@ class MonitoringService:
                     if not should_send:
                         continue
 
+                    if settings.AUTOPAY_SILENT_BEFORE_CHARGE and await self._renewal_is_automatic(
+                        db, user, subscription
+                    ):
+                        # Продление спишется само — молчим. Напоминание «кончается,
+                        # спишем автоматически» только подталкивает отключить автоплатёж.
+                        await record_notification(db, user.id, subscription.id, "expiring", days)
+                        await self._notify_cabinet(
+                            db,
+                            user_id=user.id,
+                            type="subscription_expiring",
+                            payload={
+                                "days": days,
+                                "endDate": subscription.end_date.isoformat()
+                                if subscription.end_date
+                                else None,
+                                "autopayEnabled": True,
+                            },
+                        )
+                        all_processed_users.add(user_key)
+                        logger.info(
+                            "🤫 Пользователь %s: подписка истекает через %s дн., продление автоматическое — без уведомления",
+                            user.telegram_id,
+                            days,
+                        )
+                        continue
+
                     if self.bot:
                         onepayment_autopay = await self._has_active_onepayment_binding(db, user.id)
                         success = await self._send_subscription_expiring_notification(
@@ -1355,6 +1381,19 @@ class MonitoringService:
             logger.error(f"Ошибка обработки автоплатежей: {e}")
     
     # ------------------------------------------------------------ 1Payment (СБП)
+
+    async def _renewal_is_automatic(self, db: AsyncSession, user: User, subscription: Subscription) -> bool:
+        """Продление спишется само: привязка СБП 1Payment, подписка Platega или автоплатёж с баланса."""
+        if await self._has_active_onepayment_binding(db, user.id):
+            return True
+        try:
+            from app.services import payment_service as payment_module
+
+            if await payment_module.get_active_platega_subscription_for_user(db, user.id):
+                return True
+        except Exception as error:
+            logger.debug("Не удалось проверить подписку Platega пользователя %s: %s", user.id, error)
+        return bool(settings.ENABLE_AUTOPAY and getattr(subscription, "autopay_enabled", False))
 
     async def _has_active_onepayment_binding(self, db: AsyncSession, user_id: int) -> bool:
         if not settings.is_onepayment_recurring_enabled():

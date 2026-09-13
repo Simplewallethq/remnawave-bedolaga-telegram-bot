@@ -744,6 +744,11 @@ class BotConfigurationService:
             "format": "Целое ≥ 0 (минуты); 0 — не выдавать.",
             "example": "30",
         },
+        "AUTOPAY_SILENT_BEFORE_CHARGE": {
+            "description": "Не слать «подписка заканчивается через N дней» тем, у кого продление спишется само (СБП 1Payment, Platega, автоплатёж с баланса). Уведомления об итоге списания остаются.",
+            "format": "true / false",
+            "example": "true",
+        },
         "TRIAL_PAID_OFFER_FALLBACK_MAX_AGE_HOURS": {
             "description": "Фолбэк-триал выдаётся только зарегистрированным не раньше N часов назад; выдача идёт пачками по 50 в минуту, свежие первыми.",
             "format": "Целое ≥ 1 (часы).",

@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
+import pytest
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -622,3 +623,45 @@ async def test_monitoring_sends_through_the_users_own_bot_and_skips_no_chat(monk
     assert result is None
     assert primary.send_message.await_count == 1
     bot_registry.clear()
+
+
+@pytest.mark.parametrize("automatic", [True, False])
+async def test_expiring_notice_is_silent_when_renewal_is_automatic(monkeypatch, automatic):
+    """Тем, у кого продление спишется само, «подписка кончается» не шлём."""
+    import app.services.monitoring_service as module
+
+    monkeypatch.setattr(module.settings, "AUTOPAY_SILENT_BEFORE_CHARGE", True, raising=False)
+    monkeypatch.setattr(type(module.settings), "get_autopay_warning_days", lambda self: [3])
+    monkeypatch.setattr(type(module.settings), "is_onepayment_recurring_enabled", lambda self: True)
+
+    sub = SimpleNamespace(id=7, user_id=1, end_date=datetime(2030, 1, 4), autopay_enabled=False)
+    user = SimpleNamespace(id=1, telegram_id=5, bot_id=None)
+
+    async def fake_get_user(db, user_id):
+        return user
+
+    async def not_sent(*args, **kwargs):
+        return False
+
+    monkeypatch.setattr(module, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(module, "notification_sent", not_sent)
+    record = AsyncMock()
+    monkeypatch.setattr(module, "record_notification", record)
+
+    service = MonitoringService.__new__(MonitoringService)
+    service.bot = SimpleNamespace()
+    service._get_expiring_paid_subscriptions = AsyncMock(return_value=[sub])
+    service._has_active_onepayment_binding = AsyncMock(return_value=automatic)
+    service._send_subscription_expiring_notification = AsyncMock(return_value=True)
+    service._notify_cabinet = AsyncMock()
+    service._log_monitoring_event = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.payment_service.get_active_platega_subscription_for_user",
+        AsyncMock(return_value=None),
+    )
+
+    await service._check_expiring_subscriptions(SimpleNamespace())
+
+    assert service._send_subscription_expiring_notification.await_count == (0 if automatic else 1)
+    # В обоих случаях отметка ставится: молчание не должно перепроверяться каждый цикл.
+    assert record.await_count == 1

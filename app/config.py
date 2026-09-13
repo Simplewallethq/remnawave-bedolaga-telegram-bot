@@ -272,6 +272,10 @@ class Settings(BaseSettings):
     AUTOPAY_WARNING_DAYS: str = "3,1"
 
     ENABLE_AUTOPAY: bool = True
+    # Не слать «подписка заканчивается» тем, у кого продление спишется само
+    # (привязка СБП 1Payment, подписка Platega, автоплатёж с баланса): такое
+    # напоминание подталкивает отключить автоплатёж и роняет конверсию.
+    AUTOPAY_SILENT_BEFORE_CHARGE: bool = True
 
     DEFAULT_AUTOPAY_ENABLED: bool = True
     DEFAULT_AUTOPAY_DAYS_BEFORE: int = 1
