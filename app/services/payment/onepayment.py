@@ -1064,6 +1064,19 @@ class OnePaymentPaymentMixin:
             db, binding, status=OnePaymentBinding.STATUS_CANCELLED
         )
         logger.info("1Payment: привязка #%s пользователя %s отменена", binding.id, user_id)
+        # «Отключить автоплатёж» значит никакого автоплатежа: гасим и автосписание
+        # с баланса, иначе монитор за день до конца попробует списать с баланса и
+        # напишет «не хватило средств» тому, кто только что всё отключил.
+        try:
+            from app.database.crud.subscription import get_subscription_by_user_id
+
+            subscription = await get_subscription_by_user_id(db, user_id)
+            if subscription is not None and getattr(subscription, "autopay_enabled", False):
+                subscription.autopay_enabled = False
+                await db.commit()
+                logger.info("1Payment: автосписание с баланса у пользователя %s выключено вместе с привязкой", user_id)
+        except Exception as error:
+            logger.warning("1Payment: не удалось выключить автосписание с баланса у %s: %s", user_id, error)
         return {"binding": binding, "already_cancelled": False}
 
     # ---------------------------------------------------------- уведомления

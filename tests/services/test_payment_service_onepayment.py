@@ -835,3 +835,38 @@ async def test_webhook_paid_trial_activation_exception_does_not_break_callback(
     payload = {"status": "3", "user_data": payment.user_data, "order_id": "o1"}
     assert await service.process_onepayment_webhook(DummySession(), payload) is True
     assert notices == [100]
+
+
+@pytest.mark.anyio
+async def test_cancel_binding_also_disables_balance_autopay(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отключил автоплатёж по СБП — с баланса тоже не списываем."""
+    from unittest.mock import AsyncMock
+
+    service = _make_service(StubOnePaymentService())
+    binding = DummyBinding()
+    subscription = SimpleNamespace(autopay_enabled=True)
+    commit = AsyncMock()
+
+    class Session(DummySession):
+        async def commit(self) -> None:
+            await commit()
+
+    async def fake_get(db: Any, binding_id: int) -> DummyBinding:
+        return binding
+
+    async def fake_deactivate(db: Any, binding_arg: Any, *, status: str) -> Any:
+        binding_arg.status = status
+        return binding_arg
+
+    async def fake_get_sub(db: Any, user_id: int) -> Any:
+        return subscription
+
+    monkeypatch.setattr(payment_service_module, "get_onepayment_binding_by_id_for_update", fake_get, raising=False)
+    monkeypatch.setattr(payment_service_module, "deactivate_onepayment_binding", fake_deactivate, raising=False)
+    monkeypatch.setattr("app.database.crud.subscription.get_subscription_by_user_id", fake_get_sub)
+
+    result = await service.cancel_onepayment_binding(Session(), binding_id=5, user_id=42)
+
+    assert result and result["already_cancelled"] is False
+    assert subscription.autopay_enabled is False
+    assert commit.await_count == 1
