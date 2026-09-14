@@ -29,6 +29,7 @@ class DummySession:
     def __init__(self) -> None:
         self.commits = 0
         self.execute_results: List[Any] = []
+        self.statements: List[Any] = []
 
     async def commit(self) -> None:
         self.commits += 1
@@ -39,7 +40,8 @@ class DummySession:
     async def rollback(self) -> None:
         return None
 
-    async def execute(self, *_: Any, **__: Any) -> Any:
+    async def execute(self, statement: Any = None, *_: Any, **__: Any) -> Any:
+        self.statements.append(statement)
         if self.execute_results:
             return self.execute_results.pop(0)
         return SimpleNamespace(scalar_one_or_none=lambda: None, rowcount=0)
@@ -458,6 +460,37 @@ async def test_recurring_success_renews_subscription(monkeypatch: pytest.MonkeyP
     binding_updates = calls.get("binding_updates") or []
     assert any(u.get("set_last_charged_period_end") for u in binding_updates)
     assert subscription.end_date == period_end + timedelta(days=30)
+
+
+@pytest.mark.anyio
+async def test_recurring_renewal_locks_only_subscription_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`Subscription.plan` грузится LEFT JOIN'ом: голый FOR UPDATE Postgres отвергает
+    («nullable side of an outer join»), и продление падало после каждого списания."""
+    from sqlalchemy.dialects import postgresql
+
+    service = _make_service(StubOnePaymentService())
+    period_end = datetime(2030, 1, 10, 12, 0, 0)
+    payment = _renewal_payment(period_end)
+    user = DummyUser(balance=10_000)
+    subscription = SimpleNamespace(id=9, user_id=42, status="expired", end_date=period_end, plan_id=None)
+    _lookup(monkeypatch, payment)
+    calls = _patch_finalize_deps(monkeypatch, payment=payment, user=user)
+    _patch_legacy_renewal(monkeypatch, calls)
+
+    db = DummySession()
+    db.execute_results.append(SimpleNamespace(scalar_one_or_none=lambda: subscription))
+
+    assert await service.process_onepayment_webhook(db, {"status": "3", "user_data": payment.user_data}) is True
+
+    locking = [
+        str(stmt.compile(dialect=postgresql.dialect()))
+        for stmt in db.statements
+        if getattr(stmt, "_for_update_arg", None) is not None
+    ]
+    assert locking, "подписка должна блокироваться перед продлением"
+    for sql in locking:
+        if "LEFT OUTER JOIN" in sql:
+            assert "FOR UPDATE OF subscriptions" in sql
 
 
 @pytest.mark.anyio

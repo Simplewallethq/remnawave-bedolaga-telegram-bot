@@ -925,8 +925,10 @@ class OnePaymentPaymentMixin:
             return False
         period_end = _parse_period_end(snapshot.get("period_end"))
 
+        # of=Subscription: `plan` грузится LEFT JOIN'ом, а голый FOR UPDATE на
+        # nullable-стороне outer join Postgres отвергает.
         result = await db.execute(
-            select(Subscription).where(Subscription.id == subscription_id).with_for_update()
+            select(Subscription).where(Subscription.id == subscription_id).with_for_update(of=Subscription)
         )
         subscription = result.scalar_one_or_none()
         if subscription is None or subscription.user_id != user.id:
