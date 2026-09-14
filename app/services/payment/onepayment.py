@@ -648,7 +648,8 @@ class OnePaymentPaymentMixin:
         db: AsyncSession,
         payment: OnePaymentPayment,
     ) -> Optional[Dict[str, Any]]:
-        """Platega-счёт с методом «банковская карта» на сумму СБП-счёта 1Payment.
+        """Универсальный Platega-счёт (СБП / карта на странице Platega) на сумму
+        СБП-счёта 1Payment — разовая оплата без автопродления.
 
         Создаётся лениво, по нажатию кнопки, и переиспользуется, пока живой:
         повторные нажатия не плодят PENDING-транзакции у Platega. Возвращает
@@ -685,9 +686,9 @@ class OnePaymentPaymentMixin:
             if metadata.get(key) is not None:
                 carried[key] = metadata[key]
 
-        create_platega = getattr(self, "create_platega_payment", None)
+        create_platega = getattr(self, "create_platega_universal_payment", None)
         if create_platega is None:
-            logger.error("PaymentService без Platega: карта вместо СБП недоступна")
+            logger.error("PaymentService без Platega: разовая оплата вместо СБП недоступна")
             return None
 
         result = await create_platega(
@@ -697,12 +698,11 @@ class OnePaymentPaymentMixin:
             description=payment.description
             or settings.get_balance_payment_description(payment.amount_kopeks),
             language=metadata.get("language") or settings.DEFAULT_LANGUAGE,
-            payment_method_code=settings.get_onepayment_card_button_platega_method(),
             metadata=carried,
         )
         if not result or not result.get("redirect_url") or not result.get("local_payment_id"):
             logger.error(
-                "1Payment #%s: не удалось выставить карточный Platega-счёт", payment.id
+                "1Payment #%s: не удалось выставить универсальный Platega-счёт", payment.id
             )
             return None
 
@@ -714,7 +714,7 @@ class OnePaymentPaymentMixin:
         await payment_module.update_onepayment_payment(db, payment, metadata=metadata)
 
         logger.info(
-            "1Payment #%s: выставлен карточный Platega-счёт #%s на %s₽ (user=%s)",
+            "1Payment #%s: выставлен универсальный Platega-счёт #%s на %s₽ (user=%s)",
             payment.id,
             result["local_payment_id"],
             payment.amount_kopeks / 100,
@@ -727,7 +727,7 @@ class OnePaymentPaymentMixin:
         }
 
     async def _reusable_card_alt_payment(self, db: AsyncSession, platega_payment_id: Any):
-        """Ранее выставленный карточный счёт, если по нему ещё можно платить."""
+        """Ранее выставленный универсальный счёт, если по нему ещё можно платить."""
         payment_module = import_module("app.services.payment_service")
         try:
             platega_payment = await payment_module.get_platega_payment_by_id(
@@ -736,6 +736,10 @@ class OnePaymentPaymentMixin:
         except (TypeError, ValueError):
             return None
         if platega_payment is None or platega_payment.is_paid:
+            return None
+        # Счета, выставленные до перехода на универсальную страницу, открывают
+        # только карту — такие не переиспользуем.
+        if getattr(platega_payment, "payment_method_code", 0) != 0:
             return None
         if str(platega_payment.status or "").upper() not in {"PENDING", "INPROGRESS"}:
             return None

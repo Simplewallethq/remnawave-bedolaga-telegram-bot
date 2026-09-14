@@ -478,10 +478,9 @@ class Settings(BaseSettings):
     ONEPAYMENT_RECURRING_ENABLED: bool = True
     ONEPAYMENT_RECURRING_DAYS_BEFORE: int = 1
     ONEPAYMENT_RECURRING_MAX_ATTEMPTS: int = 3
-    # Кнопка «Оплатить картой» на СБП-счёте 1Payment: карта проводится через
-    # Platega (метод — код банковских карт Platega, по умолчанию 11).
+    # Кнопка «СБП или картой, разово» на СБП-счёте 1Payment: ведёт на
+    # универсальную страницу Platega.
     ONEPAYMENT_CARD_BUTTON_ENABLED: bool = True
-    ONEPAYMENT_CARD_BUTTON_PLATEGA_METHOD: int = 11
 
     # --- Роутер платежей: единая кнопка «Оплатить» со взвешенным выбором шлюза ---
     # ВАЖНО: эти ключи НЕ должны попадать в .env — иначе BotConfigurationService
@@ -1646,15 +1645,8 @@ class Settings(BaseSettings):
             return 1
 
     def is_onepayment_card_button_enabled(self) -> bool:
-        """Показывать ли на счёте 1Payment (СБП) кнопку «Оплатить картой» через Platega."""
+        """Показывать ли на счёте 1Payment (СБП) кнопку разовой оплаты через Platega."""
         return bool(self.ONEPAYMENT_CARD_BUTTON_ENABLED) and self.is_platega_enabled()
-
-    def get_onepayment_card_button_platega_method(self) -> int:
-        try:
-            code = int(self.ONEPAYMENT_CARD_BUTTON_PLATEGA_METHOD)
-        except (TypeError, ValueError):
-            return 11
-        return code if code in {10, 11, 12} else 11
 
     def get_onepayment_recurring_max_attempts(self) -> int:
         try:

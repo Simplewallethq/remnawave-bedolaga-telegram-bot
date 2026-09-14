@@ -1,4 +1,4 @@
-"""Карта вместо СБП на счёте 1Payment: ленивый Platega-счёт, пометки для аналитики."""
+"""Разовая оплата вместо СБП-автоплатежа 1Payment: ленивый универсальный Platega-счёт, пометки для аналитики."""
 
 from __future__ import annotations
 
@@ -44,7 +44,6 @@ def card_alt_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "PLATEGA_MIN_AMOUNT_KOPEKS", 10_000, raising=False)
     monkeypatch.setattr(settings, "PLATEGA_MAX_AMOUNT_KOPEKS", 5_000_000, raising=False)
     monkeypatch.setattr(settings, "ONEPAYMENT_CARD_BUTTON_ENABLED", True, raising=False)
-    monkeypatch.setattr(settings, "ONEPAYMENT_CARD_BUTTON_PLATEGA_METHOD", 11, raising=False)
 
 
 def _onepayment_payment(**overrides: Any) -> SimpleNamespace:
@@ -68,13 +67,13 @@ def _onepayment_payment(**overrides: Any) -> SimpleNamespace:
 
 
 class FakeService(OnePaymentPaymentMixin):
-    """PaymentService без сети: create_platega_payment записывает вызов."""
+    """PaymentService без сети: create_platega_universal_payment записывает вызов."""
 
     def __init__(self, platega_result: Optional[Dict[str, Any]]) -> None:
         self.platega_result = platega_result
         self.platega_calls: List[Dict[str, Any]] = []
 
-    async def create_platega_payment(self, db: Any, **kwargs: Any) -> Optional[Dict[str, Any]]:
+    async def create_platega_universal_payment(self, db: Any, **kwargs: Any) -> Optional[Dict[str, Any]]:
         self.platega_calls.append(kwargs)
         return self.platega_result
 
@@ -99,7 +98,7 @@ def stored(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
 
 
 @pytest.mark.anyio
-async def test_card_alternative_creates_platega_card_payment(stored: Dict[str, Any]) -> None:
+async def test_card_alternative_creates_platega_universal_payment(stored: Dict[str, Any]) -> None:
     payment = _onepayment_payment()
     service = FakeService(
         {"local_payment_id": 9001, "transaction_id": "tx-1", "redirect_url": "https://pay/1"}
@@ -112,7 +111,7 @@ async def test_card_alternative_creates_platega_card_payment(stored: Dict[str, A
     call = service.platega_calls[0]
     assert call["user_id"] == 42
     assert call["amount_kopeks"] == 29_000
-    assert call["payment_method_code"] == 11
+    assert "payment_method_code" not in call
     carried = call["metadata"]
     assert carried["purpose"] == CARD_ALT_PURPOSE
     assert carried[CARD_ALT_SOURCE_KEY] == 501
@@ -132,6 +131,7 @@ async def test_card_alternative_reuses_pending_platega_payment(stored: Dict[str,
     payment.metadata_json[CARD_ALT_METADATA_KEY] = {"platega_payment_id": 9001}
     stored["platega_payments"][9001] = SimpleNamespace(
         id=9001,
+        payment_method_code=0,
         status="PENDING",
         is_paid=False,
         redirect_url="https://pay/old",
@@ -146,11 +146,32 @@ async def test_card_alternative_reuses_pending_platega_payment(stored: Dict[str,
 
 
 @pytest.mark.anyio
+async def test_card_alternative_replaces_legacy_card_only_payment(stored: Dict[str, Any]) -> None:
+    payment = _onepayment_payment()
+    payment.metadata_json[CARD_ALT_METADATA_KEY] = {"platega_payment_id": 9001}
+    stored["platega_payments"][9001] = SimpleNamespace(
+        id=9001,
+        payment_method_code=11,
+        status="PENDING",
+        is_paid=False,
+        redirect_url="https://pay/card-only",
+        expires_at=datetime.utcnow() + timedelta(minutes=10),
+    )
+    service = FakeService({"local_payment_id": 9002, "redirect_url": "https://pay/new"})
+
+    result = await service.create_onepayment_card_alternative(None, payment)
+
+    assert result == {"platega_payment_id": 9002, "redirect_url": "https://pay/new", "reused": False}
+    assert len(service.platega_calls) == 1
+
+
+@pytest.mark.anyio
 async def test_card_alternative_replaces_expired_platega_payment(stored: Dict[str, Any]) -> None:
     payment = _onepayment_payment()
     payment.metadata_json[CARD_ALT_METADATA_KEY] = {"platega_payment_id": 9001}
     stored["platega_payments"][9001] = SimpleNamespace(
         id=9001,
+        payment_method_code=0,
         status="PENDING",
         is_paid=False,
         redirect_url="https://pay/old",

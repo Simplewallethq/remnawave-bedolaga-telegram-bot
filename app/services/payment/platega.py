@@ -839,13 +839,13 @@ class PlategaPaymentMixin:
                 paid_at=paid_at,
             )
             logger.info(
-                "1Payment #%s оплачен картой через Platega %s",
+                "1Payment #%s оплачен разово через Platega %s",
                 source.id,
                 payment.correlation_id,
             )
         except Exception as error:  # pragma: no cover - диагностический лог
             logger.warning(
-                "Не удалось отметить оплату картой для счёта 1Payment #%s: %s",
+                "Не удалось отметить разовую оплату для счёта 1Payment #%s: %s",
                 source_id,
                 error,
             )

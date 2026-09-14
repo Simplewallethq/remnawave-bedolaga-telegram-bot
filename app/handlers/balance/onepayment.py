@@ -1,4 +1,4 @@
-"""Хендлеры 1Payment: проверка счёта, кнопка «Оплатить картой» (через Platega)
+"""Хендлеры 1Payment: проверка счёта, кнопка разовой оплаты (через Platega)
 и управление СБП-привязкой в меню «Автоплатеж»."""
 
 from __future__ import annotations
@@ -233,14 +233,14 @@ async def check_onepayment_payment_status(
     card_alt_status: Optional[str] = None
     card_alt = get_card_alt_block(getattr(payment, "metadata_json", None))
     if card_alt and not payment.is_paid:
-        # Пользователь мог заплатить картой через Platega — проверяем и её счёт
+        # Пользователь мог заплатить разово через Platega — проверяем и её счёт
         # (при пропущенном вебхуке проверка сама финализирует оплату).
         try:
             card_info = await payment_service.get_platega_payment_status(
                 db, int(card_alt["platega_payment_id"])
             )
         except Exception as error:
-            logger.warning("Не удалось проверить карточный счёт для 1Payment: %s", error)
+            logger.warning("Не удалось проверить разовый Platega-счёт для 1Payment: %s", error)
             card_info = None
         if card_info:
             card_alt_paid = bool(card_info.get("is_paid"))
@@ -258,7 +258,7 @@ async def check_onepayment_payment_status(
         if card_alt_status:
             message_lines.append(
                 texts.t(
-                    "ONEPAYMENT_STATUS_CARD_LINE", "💳 Оплата картой: {status}"
+                    "ONEPAYMENT_STATUS_CARD_LINE", "💳 Разовая оплата: {status}"
                 ).format(status=card_alt_status)
             )
         message_lines.append(
@@ -275,7 +275,7 @@ async def check_onepayment_payment_status(
 
 def _card_alt_button_text(texts, amount_kopeks: int) -> str:
     return texts.t(
-        "ONEPAYMENT_CARD_ALT_BUTTON", "💳 Оплатить картой – {amount}"
+        "ONEPAYMENT_CARD_ALT_BUTTON", "💳 СБП или картой, разово — {amount}"
     ).format(amount=settings.format_price(amount_kopeks))
 
 
@@ -286,7 +286,7 @@ def _replace_card_alt_button(
     text: str,
     url: str,
 ) -> Optional[types.InlineKeyboardMarkup]:
-    """Та же клавиатура, где кнопка-callback «Оплатить картой» стала URL-кнопкой."""
+    """Та же клавиатура, где кнопка-callback разовой оплаты стала URL-кнопкой."""
     if markup is None:
         return None
     rows = []
@@ -311,8 +311,8 @@ async def request_onepayment_card_alternative(
     db_user: User,
     db: AsyncSession,
 ):
-    """«Оплатить картой» на СБП-счёте 1Payment: выставляет карточный счёт Platega
-    и подменяет кнопку на ссылку оплаты."""
+    """«СБП или картой, разово» на СБП-счёте 1Payment: выставляет универсальный
+    счёт Platega и подменяет кнопку на ссылку оплаты."""
     from app.services import payment_service as payment_module
 
     texts = get_texts(db_user.language)
@@ -339,7 +339,7 @@ async def request_onepayment_card_alternative(
         await callback.answer(
             texts.t(
                 "ONEPAYMENT_CARD_ALT_ERROR",
-                "❌ Не удалось подготовить оплату картой. Попробуйте позже или оплатите по СБП.",
+                "❌ Не удалось подготовить разовую оплату. Попробуйте позже или оплатите через СБП автоплатёж.",
             ),
             show_alert=True,
         )
@@ -365,7 +365,7 @@ async def request_onepayment_card_alternative(
         await callback.answer(
             texts.t(
                 "ONEPAYMENT_CARD_ALT_READY",
-                "💳 Ссылка готова — нажмите «Оплатить картой» ещё раз",
+                "💳 Ссылка готова — нажмите «СБП или картой, разово» ещё раз",
             ),
             show_alert=False,
         )
@@ -375,7 +375,7 @@ async def request_onepayment_card_alternative(
     await callback.message.answer(
         texts.t(
             "ONEPAYMENT_CARD_ALT_MESSAGE",
-            "💳 <b>Оплата картой — {amount}</b>\n\n🔒 Защищённый платеж\nОбычно занимает до 10 секунд",
+            "💳 <b>Разовая оплата — {amount}</b>\n\n🔒 Защищённый платеж\nОбычно занимает до 10 секунд",
         ).format(amount=settings.format_price(payment.amount_kopeks)),
         reply_markup=types.InlineKeyboardMarkup(
             inline_keyboard=[

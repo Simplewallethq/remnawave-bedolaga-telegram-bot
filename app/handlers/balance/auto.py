@@ -13,6 +13,7 @@ import logging
 import os
 
 from aiogram import types
+from aiogram.enums import ButtonStyle
 from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -153,7 +154,7 @@ async def process_auto_payment_amount(
 
 
 def _card_alternative_available(routed, amount_kopeks: int) -> bool:
-    """Кнопка «Оплатить картой» — только на счёте 1Payment и только если Platega
+    """Кнопка «СБП или картой, разово» — только на счёте 1Payment и только если Platega
     примет эту сумму."""
     if getattr(routed, "gateway", None) != "onepayment":
         return False
@@ -194,22 +195,33 @@ async def _render_invoice(
     )
     tariff_summary = state_data.get("tariff_checkout_summary")
 
-    # 1Payment умеет только СБП — рядом даём карту через Platega. Счёт Platega
-    # выставляется лениво, по нажатию (см. request_onepayment_card_alternative).
+    # 1Payment — СБП с автопродлением: кнопку подсвечиваем, а рядом даём разовую
+    # оплату через универсальную страницу Platega. Счёт Platega выставляется
+    # лениво, по нажатию (см. request_onepayment_card_alternative).
+    is_onepayment = getattr(routed, "gateway", None) == "onepayment"
     card_alt_enabled = _card_alternative_available(routed, amount_kopeks)
-    if card_alt_enabled:
+    pay_button_style = None
+    if is_onepayment:
         pay_button_text = texts.t(
             "PAYMENT_AUTO_PAY_BUTTON_SBP",
-            "\U0001f3e6 Оплатить по СБП – {amount}",
+            "\u2b50\ufe0f СБП автоплатёж — {amount}",
         ).format(amount=amount_label)
+        pay_button_style = ButtonStyle.SUCCESS
 
-    rows = [[types.InlineKeyboardButton(text=pay_button_text, url=routed.payment_url)]]
+    rows = [
+        [
+            types.InlineKeyboardButton(
+                text=pay_button_text, url=routed.payment_url, style=pay_button_style
+            )
+        ]
+    ]
     if card_alt_enabled:
         rows.append(
             [
                 types.InlineKeyboardButton(
                     text=texts.t(
-                        "ONEPAYMENT_CARD_ALT_BUTTON", "\U0001f4b3 Оплатить картой – {amount}"
+                        "ONEPAYMENT_CARD_ALT_BUTTON",
+                        "\U0001f4b3 СБП или картой, разово — {amount}",
                     ).format(amount=amount_label),
                     callback_data=f"{CARD_ALT_CALLBACK_PREFIX}{routed.local_payment_id}",
                 )
@@ -284,12 +296,13 @@ async def _render_invoice(
 
     # 1Payment (СБП): оплата привязывает счёт к автопродлению — предупреждаем
     # заранее и говорим, где отключить.
-    if getattr(routed, "gateway", None) == "onepayment":
+    if is_onepayment:
         instructions += "\n\n" + texts.t(
             "ONEPAYMENT_INVOICE_NOTE",
             "\U0001f501 Оплатив по СБП, вы подключаете автопродление подписки: "
             "перед окончанием срока стоимость продления (за вычетом баланса) "
-            "списывается автоматически. Отключить можно в разделе "
+            "списывается автоматически.\n\n"
+            "Отключить автоплатёж можно в любой момент в меню "
             "«Управление подпиской → Автоплатеж».",
         )
 
