@@ -30,6 +30,7 @@ from app.database.crud.ad_attribution import (
 from app.external import tv_pairing
 from app.utils.ad_attribution import parse_ad_payload
 from app.utils.bot_registry import is_primary_bot
+from app.branding.context import current_brand
 from app.database.models import PinnedMessage, SubscriptionStatus, UserStatus
 from app.keyboards.inline import (
     get_rules_keyboard,
@@ -968,8 +969,9 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
                     ad_source,
                     ad_campaign_id,
                 )
-            elif start_parameter.startswith("tv_"):
-                # Подключение телевизора со страницы letovpn.com/tv. В payload —
+            elif start_parameter.startswith("tv_") and not current_brand().is_copycat:
+                # Подключение телевизора со страницы letovpn.com/tv (только у
+                # основного бренда: страница и приложение — Leto). В payload —
                 # шестизначный код с экрана: device_id бэкенд наружу не отдаёт
                 # (по нему выдаётся токен аккаунта), а QR-токен не влезает в
                 # лимит Telegram в 64 символа. Код не логируем: пока сессия жива,
@@ -1427,6 +1429,10 @@ async def _show_privacy_policy_after_rules(
     Показывает политику конфиденциальности после принятия правил.
     Возвращает True, если политика была показана, False если её нет или произошла ошибка.
     """
+    if current_brand().is_copycat:
+        # Политика копикета — ссылка в его правилах, а текст в БД принадлежит основному бренду.
+        return False
+
     policy = await PrivacyPolicyService.get_policy(db, language, fallback=True)
 
     if not policy or not policy.is_enabled:

@@ -5,6 +5,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import redis.asyncio as redis
 
 from app.config import settings
+from app.middlewares.brand_context import BrandContextMiddleware
 from app.middlewares.global_error import GlobalErrorMiddleware
 from app.middlewares.private_chat_only import PrivateChatOnlyMiddleware
 from app.middlewares.auth import AuthMiddleware
@@ -126,11 +127,14 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
         try:
             m_bot = Bot(token=mirror_cfg["token"], default=_default)
             m_me = await m_bot.get_me()
-            bot_registry.register_bot(m_me.id, Path(mirror_cfg["logo"]), m_bot)
+            bot_registry.register_bot(
+                m_me.id, Path(mirror_cfg["logo"]), m_bot, brand_config=mirror_cfg,
+            )
             all_bots.append(m_bot)
             logger.info(
-                "Mirror bot registered: @%s id=%s logo=%s",
+                "Mirror bot registered: @%s id=%s logo=%s copycat=%s",
                 m_me.username, m_me.id, mirror_cfg["logo"],
+                bot_registry.get_brand_for_bot(m_me.id).is_copycat,
             )
         except Exception as exc:
             logger.error(
@@ -153,6 +157,10 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     
     
     dp = Dispatcher(storage=storage)
+
+    # Бренд бота, принявшего апдейт, — раньше всех остальных middleware:
+    # тексты, клавиатуры и саппорт ниже читают его из контекста.
+    dp.update.outer_middleware(BrandContextMiddleware())
 
     dp.message.middleware(PrivateChatOnlyMiddleware())
     dp.callback_query.middleware(PrivateChatOnlyMiddleware())

@@ -12,6 +12,8 @@ from app.utils.formatters import format_days_declension
 from app.localization.loader import DEFAULT_LANGUAGE
 from app.localization.texts import get_texts
 from app.utils.install_referrer import build_personal_play_link
+from app.branding.context import current_brand
+from app.branding.apps import HAPP_ANDROID_PLAY_URL, HAPP_WINDOWS_DOWNLOAD_URL
 from app.utils.miniapp_buttons import build_miniapp_or_callback_button
 from app.utils.pricing_utils import (
     format_period_description,
@@ -730,11 +732,13 @@ def get_info_menu_keyboard(
             )
         ])
 
-    if show_privacy_policy:
+    brand = current_brand()
+
+    if show_privacy_policy and brand.privacy_url:
         buttons.append([
             InlineKeyboardButton(
                 text=texts.t("MENU_PRIVACY_POLICY", "🛡️ Политика конф."),
-                url="https://telegra.ph/Politika-konfidencialnosti-07-20-101",
+                url=brand.privacy_url,
             )
         ])
 
@@ -746,12 +750,13 @@ def get_info_menu_keyboard(
             )
         ])
 
-    buttons.append([
-        InlineKeyboardButton(
-            text=texts.MENU_RULES,
-            url="https://telegra.ph/Polzovatelskoe-soglashenie-07-20-32",
-        )
-    ])
+    if brand.terms_url:
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.MENU_RULES,
+                url=brand.terms_url,
+            )
+        ])
 
     server_status_mode = settings.get_server_status_mode()
     server_status_text = texts.t("MENU_SERVER_STATUS", "📊 Статус серверов")
@@ -3483,15 +3488,24 @@ def get_connect_android_keyboard(
     """Android-specific Connect menu actions."""
     texts = get_texts(language)
     buttons: List[List[InlineKeyboardButton]] = []
-    leto_url = build_personal_play_link(
-        settings.LETO_APP_DOWNLOAD_LINK_ANDROID,
-        telegram_id,
+    leto_url = (
+        build_personal_play_link(settings.LETO_APP_DOWNLOAD_LINK_ANDROID, telegram_id)
+        if current_brand().has_own_app
+        else None
     )
     if leto_url:
         buttons.append([
             InlineKeyboardButton(
-                text=texts.t("CONNECT_DOWNLOAD_LETO_BUTTON", "☀️ Скачать Leto VPN"),
+                text=texts.t("CONNECT_DOWNLOAD_LETO_BUTTON", "☀️ Скачать {project_name} VPN"),
                 url=leto_url,
+            )
+        ])
+    else:
+        # Витрина без своего приложения: Android-пользователю нужен Happ.
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("CONNECT_DOWNLOAD_HAPP_ANDROID_BUTTON", "🤖 Скачать Happ"),
+                url=HAPP_ANDROID_PLAY_URL,
             )
         ])
     if happ_transfer_url:
@@ -3568,31 +3582,36 @@ def get_connect_windows_keyboard(
     # Leto actions, then both Happ ones. Read the download setting directly rather
     # than through build_personal_play_link — that one appends a Play Store install
     # referrer, which is meaningless on a direct .exe download.
-    leto_url = (settings.LETO_APP_DOWNLOAD_LINK_WINDOWS or "").strip()
+    leto_url = (
+        (settings.LETO_APP_DOWNLOAD_LINK_WINDOWS or "").strip()
+        if current_brand().has_own_app
+        else ""
+    )
     if leto_url:
         buttons.append([
             InlineKeyboardButton(
-                text=texts.t("CONNECT_DOWNLOAD_LETO_WINDOWS_BUTTON", "☀️ Скачать Leto App"),
+                text=texts.t("CONNECT_DOWNLOAD_LETO_WINDOWS_BUTTON", "☀️ Скачать {project_name} App"),
                 url=leto_url,
             )
         ])
-    # Unconditional: this is where the install warnings live now that the caption
-    # no longer carries them, so it must not disappear when the download link is
-    # unset — that is exactly the deploy where a user has nowhere else to look.
-    buttons.append([
-        InlineKeyboardButton(
-            text=texts.t("CONNECT_WINDOWS_GUIDE_BUTTON", "❓ Проблемы с Leto App"),
-            # Percent-encoded: Telegram rejects non-ASCII in button URLs. The
-            # double hyphen is GitHub's anchor for the em dash in the heading.
-            url=(
-                "https://github.com/letohq/Leto-Desktop"
-                "#%D0%BF%D1%80%D0%B5%D0%B4%D1%83%D0%BF%D1%80%D0%B5%D0%B6%D0%B4"
-                "%D0%B5%D0%BD%D0%B8%D1%8F-%D0%BF%D1%80%D0%B8-%D1%83%D1%81%D1%82"
-                "%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B5--%D1%8D%D1%82%D0%BE-"
-                "%D0%BD%D0%BE%D1%80%D0%BC%D0%B0%D0%BB%D1%8C%D0%BD%D0%BE"
-            ),
-        )
-    ])
+    # Показывается всегда, когда приложение у бренда своё: здесь живут
+    # предупреждения установщика, и пропасть вместе с незаданной ссылкой на
+    # скачивание они не должны. Витрине без своего приложения этот гайд не нужен.
+    if current_brand().has_own_app:
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("CONNECT_WINDOWS_GUIDE_BUTTON", "❓ Проблемы с {project_name} App"),
+                # Percent-encoded: Telegram rejects non-ASCII in button URLs. The
+                # double hyphen is GitHub's anchor for the em dash in the heading.
+                url=(
+                    "https://github.com/letohq/Leto-Desktop"
+                    "#%D0%BF%D1%80%D0%B5%D0%B4%D1%83%D0%BF%D1%80%D0%B5%D0%B6%D0%B4"
+                    "%D0%B5%D0%BD%D0%B8%D1%8F-%D0%BF%D1%80%D0%B8-%D1%83%D1%81%D1%82"
+                    "%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B5--%D1%8D%D1%82%D0%BE-"
+                    "%D0%BD%D0%BE%D1%80%D0%BC%D0%B0%D0%BB%D1%8C%D0%BD%D0%BE"
+                ),
+            )
+        ])
     buttons.append([
         InlineKeyboardButton(
             text=texts.t("CONNECT_DOWNLOAD_HAPP_WINDOWS_BUTTON", "💻 Скачать Happ"),
@@ -3625,7 +3644,11 @@ def get_connect_android_tv_keyboard(
     """
     texts = get_texts(language)
     buttons: List[List[InlineKeyboardButton]] = []
-    play_url = (settings.LETO_APP_DOWNLOAD_LINK_ANDROID_TV or "").strip()
+    play_url = (
+        (settings.LETO_APP_DOWNLOAD_LINK_ANDROID_TV or "").strip()
+        if current_brand().has_own_app
+        else ""
+    )
     if play_url:
         buttons.append([
             InlineKeyboardButton(
@@ -3682,20 +3705,22 @@ def get_onboarding_connection_keyboard(
             ),
         ])
     elif device_type == "android":
-        leto_android_url = build_personal_play_link(
-            settings.LETO_APP_DOWNLOAD_LINK_ANDROID, telegram_id
+        leto_android_url = (
+            build_personal_play_link(settings.LETO_APP_DOWNLOAD_LINK_ANDROID, telegram_id)
+            if current_brand().has_own_app
+            else None
         )
         if leto_android_url:
             buttons.append([
                 InlineKeyboardButton(
-                    text=texts.t("ONBOARDING_DOWNLOAD_LETO_ANDROID", "☀️ Скачать Leto App"),
+                    text=texts.t("ONBOARDING_DOWNLOAD_LETO_ANDROID", "☀️ Скачать {project_name} App"),
                     url=leto_android_url,
                 ),
             ])
         buttons.append([
             InlineKeyboardButton(
                 text=texts.t("ONBOARDING_DOWNLOAD_HAPP_ANDROID", "🤖 Скачать Happ"),
-                url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru",
+                url=HAPP_ANDROID_PLAY_URL,
             ),
         ])
     elif device_type == "windows":
@@ -3710,7 +3735,7 @@ def get_onboarding_connection_keyboard(
         buttons.append([
             InlineKeyboardButton(
                 text=texts.t("ONBOARDING_DOWNLOAD_HAPP_WINDOWS", "💻 Скачать Happ"),
-                url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
+                url=HAPP_WINDOWS_DOWNLOAD_URL,
             ),
         ])
 

@@ -5,7 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database.crud.rays import add_user_rays
 from app.database.crud.user import get_user_by_id
-from app.utils.user_utils import is_partner_account
+from app.branding.context import use_brand_for_user
+from app.localization.texts import get_texts
+from app.utils.bot_registry import bot_for_user
+from app.utils.user_utils import is_partner_account, is_rays_program_available_for
 from app.database.models import RayTransactionType, User
 from app.services.referral_service import send_referral_notification
 
@@ -62,6 +65,14 @@ async def award_rays_for_referral_purchase(
             )
             return False
 
+        # Витрина реферера без программы лучей (копикет): начислять нечего.
+        if not is_rays_program_available_for(referrer):
+            logger.info(
+                "☀️ Реферер %s — витрина без программы лучей, лучи не начисляются",
+                referrer.id,
+            )
+            return False
+
         # Лочим реферала и начисляем лучи рефереру в одной транзакции.
         buyer.rays_credited = True
         ray_tx = await add_user_rays(
@@ -85,13 +96,17 @@ async def award_rays_for_referral_purchase(
         )
 
         if bot and settings.is_referral_notifications_enabled() and referrer.telegram_id:
-            notification = (
-                f"✨ <b>Вам начислены лучи!</b>\n\n"
-                f"Ваш реферал <b>{buyer.full_name}</b> оформил подписку на длительный срок.\n\n"
-                f"🎁 Начислено: <b>{rays}</b> лучей\n"
-                f"💎 Всего лучей на балансе: <b>{referrer.rays_balance}</b>"
-            )
-            await send_referral_notification(bot, referrer.telegram_id, notification)
+            with use_brand_for_user(referrer):
+                notification = get_texts(getattr(referrer, "language", None)).t(
+                    "RAYS_AWARDED_NOTIFICATION",
+                    "✨ <b>Вам начислены лучи!</b>\n\n"
+                    "Ваш реферал <b>{buyer_name}</b> оформил подписку на длительный срок.\n\n"
+                    "🎁 Начислено: <b>{rays}</b> лучей\n"
+                    "💎 Всего лучей на балансе: <b>{balance}</b>",
+                ).format(buyer_name=buyer.full_name, rays=rays, balance=referrer.rays_balance)
+                await send_referral_notification(
+                    bot_for_user(referrer, bot), referrer.telegram_id, notification,
+                )
 
         return True
 

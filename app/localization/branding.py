@@ -40,11 +40,17 @@ def apply_brand(value: str, brand: str) -> str:
 
 
 def brand_text(value):
-    """Применить бренд текущей витрины, если она переименована."""
-    from app.config import settings
+    """Применить бренд текущего бота, если он переименован.
 
-    if not isinstance(value, str):
+    Страховка для строк, где «Leto» ещё написано буквально; основной путь —
+    плейсхолдер {project_name}, см. app.localization.texts.
+    """
+    if not isinstance(value, str) or not value:
         return value
-    if not settings.is_rebranded():
+
+    from app.branding.context import current_brand
+
+    profile = current_brand()
+    if not profile.is_copycat:
         return value
-    return apply_brand(value, settings.get_vpn_brand_name())
+    return apply_brand(value, profile.name)

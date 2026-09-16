@@ -70,6 +70,7 @@ from app.utils.pricing_utils import (
 )
 from app.utils.subscription_utils import (
     get_display_subscription_link,
+    get_raw_subscription_link,
     get_happ_cryptolink_redirect_link,
     convert_subscription_link_to_happ_scheme,
 )
@@ -493,7 +494,7 @@ async def get_subscription_info_text(subscription, texts, db_user, db: AsyncSess
     countries_info = await _get_countries_info(subscription.connected_squads)
     countries_text = ", ".join([c['name'] for c in countries_info]) if countries_info else "Нет"
 
-    subscription_url = getattr(subscription, 'subscription_url', None) or "Генерируется..."
+    subscription_url = get_raw_subscription_link(subscription) or "Генерируется..."
 
     if subscription.is_trial:
         status_text = "🎁 Тестовая"

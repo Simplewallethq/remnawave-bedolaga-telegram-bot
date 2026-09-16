@@ -65,9 +65,17 @@ def is_partner_account(user) -> bool:
     return bool(getattr(user, "is_partner", False))
 
 
+def _rays_enabled_for_user_brand(user) -> bool:
+    """Витрина пользователя продаёт лучи? Берём по user.bot_id, а не по контексту:
+    кабинет и web API зовут эти проверки вне апдейта бота."""
+    from app.utils.bot_registry import brand_for_user
+
+    return brand_for_user(user).rays_enabled
+
+
 def is_rays_program_available_for(user) -> bool:
     """Лучи доступны, если программа включена, витрина их продаёт и это не партнёр."""
-    if not settings.is_rays_program_enabled_for_brand():
+    if not _rays_enabled_for_user_brand(user):
         return False
     if is_partner_account(user):
         return False
@@ -76,7 +84,7 @@ def is_rays_program_available_for(user) -> bool:
 
 def is_rays_shop_available_for(user) -> bool:
     """Магазин наград доступен по тем же правилам, что и сама программа."""
-    if not settings.is_rays_program_enabled_for_brand():
+    if not _rays_enabled_for_user_brand(user):
         return False
     if is_partner_account(user):
         return False

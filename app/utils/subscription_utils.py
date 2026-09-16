@@ -126,11 +126,41 @@ async def cleanup_duplicate_subscriptions(db: AsyncSession) -> int:
     return total_deleted
 
 
+def rewrite_subscription_host(url: Optional[str], domain: Optional[str]) -> Optional[str]:
+    """Переносит ссылку подписки на другой хост; путь и параметры не трогаем.
+
+    Нейтральный домен копикета проксирует тот же путь панели, так что токен
+    в пути остаётся рабочим.
+    """
+    if not url or not domain:
+        return url
+    parsed = urlparse(url)
+    if not parsed.netloc:
+        return url
+    return urlunparse(parsed._replace(scheme="https", netloc=domain))
+
+
+def _brand_subscription_link(base_link: Optional[str]) -> Optional[str]:
+    from app.branding.context import current_brand
+
+    profile = current_brand()
+    if not profile.is_copycat:
+        return base_link
+    return rewrite_subscription_host(base_link, profile.subscription_domain)
+
+
 def get_display_subscription_link(subscription: Optional[Subscription]) -> Optional[str]:
     if not subscription:
         return None
 
     base_link = getattr(subscription, "subscription_url", None)
+
+    from app.branding.context import current_brand
+
+    if current_brand().is_copycat:
+        # Криптоссылка Happ зашифрована панелью от исходного URL — после
+        # подмены хоста она бы вела на домен основного бренда.
+        return _brand_subscription_link(base_link)
 
     if settings.is_happ_cryptolink_mode():
         crypto_link = getattr(subscription, "subscription_crypto_link", None)
@@ -201,7 +231,7 @@ def get_raw_subscription_link(subscription: Optional[Subscription]) -> Optional[
     if not subscription:
         return None
 
-    return getattr(subscription, "subscription_url", None)
+    return _brand_subscription_link(getattr(subscription, "subscription_url", None))
 
 
 def build_incy_deep_link(subscription_link: Optional[str]) -> Optional[str]:

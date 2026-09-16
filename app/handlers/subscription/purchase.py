@@ -164,6 +164,12 @@ from app.utils.subscription_utils import (
     resolve_simple_subscription_device_limit,
 )
 from app.utils.access_keys import build_access_key_section, format_copyable_code
+from app.branding.apps import (
+    HAPP_ANDROID_PLAY_URL,
+    HAPP_WINDOWS_DOWNLOAD_URL,
+    access_key_label,
+    brand_has_own_app,
+)
 from app.utils.timezone import format_local_datetime
 from app.utils.promo_offer import (
     build_promo_offer_hint,
@@ -2807,14 +2813,7 @@ async def handle_bind_device(
         )
         return
 
-    text = (
-        texts.t(
-            "CONNECT_ACCESS_KEY_LABEL",
-            "<b>Твой ключ доступа</b> (для приложений Leto, Happ, Incy)",
-        )
-        + "\n"
-        + format_copyable_code(link)
-    )
+    text = access_key_label(texts) + "\n" + format_copyable_code(link)
 
     back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
@@ -2834,15 +2833,18 @@ async def handle_bind_device(
 
 
 def _get_share_app_links() -> dict[str, str]:
+    leto_android = (settings.LETO_APP_DOWNLOAD_LINK_ANDROID or "").strip()
+    leto_windows = (settings.LETO_APP_DOWNLOAD_LINK_WINDOWS or "").strip() or (
+        "https://github.com/letohq/Leto-Desktop/releases/download/v1.0.0-beta/LETO-Setup-1.0.0.exe"
+    )
+    android = leto_android if brand_has_own_app() and leto_android else HAPP_ANDROID_PLAY_URL
     return {
-        "android": (
-            (settings.LETO_APP_DOWNLOAD_LINK_ANDROID or "").strip()
-            or "https://play.google.com/store/apps/details?id=com.leto.split"
-        ),
+        "android": android,
         "apple": settings.get_incy_download_link(),
         "windows": (
-            (settings.LETO_APP_DOWNLOAD_LINK_WINDOWS or "").strip()
-            or "https://github.com/letohq/Leto-Desktop/releases/download/v1.0.0-beta/LETO-Setup-1.0.0.exe"
+            leto_windows
+            if brand_has_own_app() and leto_windows
+            else (settings.get_happ_download_link("windows") or HAPP_WINDOWS_DOWNLOAD_URL)
         ),
     }
 
@@ -2878,7 +2880,7 @@ def _build_share_access_friend_message(
     return texts.t(
         "SHARE_ACCESS_FRIEND_MESSAGE",
         (
-            "Привет! Делюсь с тобой доступом к Leto VPN. Скачай приложение и "
+            "Привет! Делюсь с тобой доступом к {project_name} VPN. Скачай приложение и "
             "авторизуйся через ключ доступа.\n\n"
             "🤖 Android\n"
             "{android_link}\n\n"

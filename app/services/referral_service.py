@@ -6,8 +6,11 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.config import settings
+from app.branding.context import use_brand_for_user
 from app.database.crud.user import add_user_balance, get_user_by_id
 from app.database.crud.referral import create_referral_earning
+from app.localization.texts import get_texts
+from app.utils.bot_registry import bot_for_user
 from app.utils.user_utils import get_effective_referral_commission_percent
 
 logger = logging.getLogger(__name__)
@@ -94,26 +97,38 @@ async def process_referral_registration(
         if bot:
             referrer_name = escape(referrer.full_name or "друга")
             new_user_name = escape(new_user.full_name or "Пользователь")
-            referral_notification = (
-                f"🎉 <b>С прибытием!</b>\n"
-                f"Ты пришёл по приглашению {referrer_name}. "
-                f"Осваивайся — 3 дня VPN уже твои."
-            )
-            await send_referral_notification(bot, new_user.telegram_id, referral_notification)
+            # Реферер и реферал могут сидеть в разных ботах (код рефералки
+            # общий): каждому пишем из его бота и в его бренде.
+            with use_brand_for_user(new_user):
+                referral_notification = get_texts(getattr(new_user, "language", None)).t(
+                    "REFERRAL_WELCOME_NOTIFICATION",
+                    "🎉 <b>С прибытием!</b>\n"
+                    "Ты пришёл по приглашению {referrer_name}. "
+                    "Осваивайся — 3 дня VPN уже твои.",
+                ).format(referrer_name=referrer_name)
+                await send_referral_notification(
+                    bot_for_user(new_user, bot), new_user.telegram_id, referral_notification,
+                )
 
-            inviter_notification = (
-                f"👥 <b>+1 в команду</b>\n"
-                f"{new_user_name} пришёл по твоей ссылке — теперь тебе капает "
-                f"{commission_percent}% с каждого его платежа. Деньги можно вывести "
-                f"на карту (от 3000₽) или потратить на подписку.\n"
-                f"Позови ещё — ссылка та же."
-            )
-            await send_referral_notification(
-                bot,
-                referrer.telegram_id,
-                inviter_notification,
-                reply_markup=get_referral_link_keyboard(),
-            )
+            with use_brand_for_user(referrer):
+                inviter_notification = get_texts(getattr(referrer, "language", None)).t(
+                    "REFERRAL_INVITER_NEW_NOTIFICATION",
+                    "👥 <b>+1 в команду</b>\n"
+                    "{new_user_name} пришёл по твоей ссылке — теперь тебе капает "
+                    "{commission_percent}% с каждого его платежа. Деньги можно вывести "
+                    "на карту (от {min_withdrawal}₽) или потратить на подписку.\n"
+                    "Позови ещё — ссылка та же.",
+                ).format(
+                    new_user_name=new_user_name,
+                    commission_percent=commission_percent,
+                    min_withdrawal=settings.REFERRAL_WITHDRAWAL_MIN_RUBLES,
+                )
+                await send_referral_notification(
+                    bot_for_user(referrer, bot),
+                    referrer.telegram_id,
+                    inviter_notification,
+                    reply_markup=get_referral_link_keyboard(),
+                )
 
         logger.info(f"✅ Зарегистрирован реферал {new_user_id} для {referrer_id}.")
         return True
@@ -221,18 +236,25 @@ async def process_referral_topup(
 
         if bot:
             referral_name = escape(user.full_name or "Реферал")
-            commission_notification = (
-                f"💰 <b>+{settings.format_price(commission_amount)}</b>\n"
-                f"{referral_name} оплатил — твои {commission_percent}% уже на балансе. "
-                f"Накопишь 3000₽ — выведешь на карту.\n\n"
-                f"Зови ещё друзей и зарабатывай больше."
-            )
-            await send_referral_notification(
-                bot,
-                referrer.telegram_id,
-                commission_notification,
-                reply_markup=get_referral_link_keyboard(),
-            )
+            with use_brand_for_user(referrer):
+                commission_notification = get_texts(getattr(referrer, "language", None)).t(
+                    "REFERRAL_COMMISSION_NOTIFICATION",
+                    "💰 <b>+{amount}</b>\n"
+                    "{referral_name} оплатил — твои {commission_percent}% уже на балансе. "
+                    "Накопишь {min_withdrawal}₽ — выведешь на карту.\n\n"
+                    "Зови ещё друзей и зарабатывай больше.",
+                ).format(
+                    amount=settings.format_price(commission_amount),
+                    referral_name=referral_name,
+                    commission_percent=commission_percent,
+                    min_withdrawal=settings.REFERRAL_WITHDRAWAL_MIN_RUBLES,
+                )
+                await send_referral_notification(
+                    bot_for_user(referrer, bot),
+                    referrer.telegram_id,
+                    commission_notification,
+                    reply_markup=get_referral_link_keyboard(),
+                )
 
         return True
 

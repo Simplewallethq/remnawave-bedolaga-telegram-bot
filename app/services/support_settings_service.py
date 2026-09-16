@@ -51,6 +51,11 @@ class SupportSettingsService:
     # Mode
     @classmethod
     def get_system_mode(cls) -> str:
+        from app.branding.context import current_brand
+
+        if current_brand().is_copycat:
+            # Саппорт копикета — внешний бот, тикеты основного бренда ему не показываем.
+            return "contact"
         cls._load()
         mode = (cls._data.get("system_mode") or settings.get_support_system_mode()).strip().lower()
         return mode if mode in {"tickets", "contact", "both"} else "both"

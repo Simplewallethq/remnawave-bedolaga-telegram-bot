@@ -561,6 +561,9 @@ class Settings(BaseSettings):
     BRAND_CHANNEL_ENABLED: bool = True
     # Лучи и магазин наград: у копикэта остаётся голая рефка.
     BRAND_RAYS_ENABLED: bool = True
+    # Юридические страницы основного бренда. Копикеты задают свои в mirror_bots.yaml.
+    PRIVACY_POLICY_URL: str = "https://telegra.ph/Politika-konfidencialnosti-07-20-101"
+    TERMS_URL: str = "https://telegra.ph/Polzovatelskoe-soglashenie-07-20-32"
 
     # Автообновление десктопного приложения (публичный манифест /cabinet/app/update).
     # Правится в админке: релиз = смена версии/ссылки/хеша без редеплоя.
@@ -2267,81 +2270,53 @@ class Settings(BaseSettings):
 
         return unlimited_package["price"] if unlimited_package else 0
 
+    # --- Бренд текущего бота ---------------------------------------------
+    # Ниже — тонкие обёртки над профилем бренда того бота, который сейчас
+    # обрабатывает апдейт (или пользователя, для которого идёт рассылка).
+    # Основной бот берёт значения из этих же настроек, копикет — из своей
+    # записи в mirror_bots.yaml. См. app/branding.
+
+    @staticmethod
+    def _current_brand():
+        from app.branding.context import current_brand
+
+        return current_brand()
+
     def _clean_support_contact(self) -> str:
-        return (self.SUPPORT_USERNAME or "").strip()
+        return (self._current_brand().support or "").strip()
 
     def get_support_contact_url(self) -> Optional[str]:
-        contact = self._clean_support_contact()
-
-        if not contact:
-            return None
-
-        if contact.startswith(("http://", "https://", "tg://")):
-            return contact
-
-        contact_without_prefix = contact.lstrip("@")
-
-        if contact_without_prefix.startswith(("t.me/", "telegram.me/", "telegram.dog/")):
-            return f"https://{contact_without_prefix}"
-
-        if contact.startswith(("t.me/", "telegram.me/", "telegram.dog/")):
-            return f"https://{contact}"
-
-        if "." in contact_without_prefix:
-            return f"https://{contact_without_prefix}"
-
-        if contact_without_prefix:
-            return f"https://t.me/{contact_without_prefix}"
-
-        return None
+        return self._current_brand().support_url
 
     def get_support_contact_display(self) -> str:
-        contact = self._clean_support_contact()
-
-        if not contact:
-            return ""
-
-        if contact.startswith("@"):
-            return contact
-
-        if contact.startswith(("http://", "https://", "tg://")):
-            return contact
-
-        if contact.startswith(("t.me/", "telegram.me/", "telegram.dog/")):
-            url = self.get_support_contact_url()
-            return url if url else contact
-
-        contact_without_prefix = contact.lstrip("@")
-
-        if "." in contact_without_prefix:
-            url = self.get_support_contact_url()
-            return url if url else contact
-
-        if re.fullmatch(r"[A-Za-z0-9_]{3,}", contact_without_prefix):
-            return f"@{contact_without_prefix}"
-
-        return contact
+        return self._current_brand().support_display
 
     def get_support_contact_display_html(self) -> str:
-        return html.escape(self.get_support_contact_display())
+        return self._current_brand().support_display_html
 
     def get_vpn_brand_name(self) -> str:
-        """Имя приложения для этой витрины. По умолчанию — Leto."""
-        return (self.VPN_BRAND_NAME or "").strip() or "Leto"
+        """Имя приложения текущей витрины. По умолчанию — Leto."""
+        return self._current_brand().name
 
     def is_rays_program_enabled_for_brand(self) -> bool:
         """Копикэт-витрина может продавать подписку без программы лучей."""
-        return bool(self.BRAND_RAYS_ENABLED)
+        return self._current_brand().rays_enabled
 
     def is_rebranded(self) -> bool:
-        return self.get_vpn_brand_name().casefold() != "leto"
+        return self._current_brand().is_copycat
 
     def brand_has_own_app(self) -> bool:
         """Есть ли у витрины собственное приложение (иначе только Happ/Incy)."""
-        return bool(self.BRAND_HAS_OWN_APP)
+        return self._current_brand().has_own_app
 
     def is_brand_channel_enabled(self) -> bool:
-        return bool(self.BRAND_CHANNEL_ENABLED) and bool((self.CHANNEL_LINK or "").strip())
+        return self._current_brand().channel_enabled
+
+    def get_privacy_policy_url(self) -> str:
+        return self._current_brand().privacy_url
+
+    def get_terms_url(self) -> str:
+        return self._current_brand().terms_url
 
     def get_support_email(self) -> str:
         return (self.SUPPORT_EMAIL or "").strip()
@@ -2479,6 +2454,8 @@ class Settings(BaseSettings):
             if not isinstance(items, list):
                 return []
 
+        from app.branding.profile import COPYCAT_CONFIG_KEYS
+
         result = []
         seen_tokens = set()
         for item in items:
@@ -2489,7 +2466,12 @@ class Settings(BaseSettings):
                 continue
             seen_tokens.add(token)
             logo = self.resolve_bot_logo(item.get("logo") or self.LOGO_FILE)
-            result.append({"token": token, "logo": logo})
+            entry = {"token": token, "logo": logo}
+            # Поля бренда копикета; неизвестные ключи (image_url и т.п.) отбрасываются.
+            for key in COPYCAT_CONFIG_KEYS:
+                if key in item and item[key] is not None:
+                    entry[key] = item[key]
+            result.append(entry)
         return result
 
     def get_apple_iap_products(self) -> dict[str, dict]:

@@ -15,6 +15,7 @@ from app.database.models import SubscriptionStatus
 from app.keyboards.inline import get_channel_sub_keyboard
 from app.localization.loader import DEFAULT_LANGUAGE
 from app.localization.texts import get_texts
+from app.utils.bot_registry import get_brand_for_bot
 from app.utils.check_reg_process import is_registration_process
 from app.services.subscription_service import SubscriptionService
 from app.services.admin_notification_service import AdminNotificationService
@@ -81,24 +82,32 @@ class ChannelCheckerMiddleware(BaseMiddleware):
 
         bot: Bot = data["bot"]
 
-        channel_id = settings.CHANNEL_SUB_ID
+        brand = get_brand_for_bot(getattr(bot, "id", None))
+        if brand.is_copycat:
+            # У копикета свой канал (или никакого): в канал основного бренда его не отправляем.
+            if not brand.channel_id:
+                return await handler(event, data)
+            channel_id = brand.channel_id
+            channel_link = self._normalize_channel_link(brand.channel_link, channel_id)
+        else:
+            channel_id = settings.CHANNEL_SUB_ID
 
-        if not channel_id:
-            logger.warning("⚠️ CHANNEL_SUB_ID не установлен, пропускаем проверку")
-            return await handler(event, data)
+            if not channel_id:
+                logger.warning("⚠️ CHANNEL_SUB_ID не установлен, пропускаем проверку")
+                return await handler(event, data)
 
-        is_required = settings.CHANNEL_IS_REQUIRED_SUB
+            is_required = settings.CHANNEL_IS_REQUIRED_SUB
 
-        if not is_required:
-            logger.debug("⚠️ Обязательная подписка отключена, пропускаем проверку")
-            return await handler(event, data)
+            if not is_required:
+                logger.debug("⚠️ Обязательная подписка отключена, пропускаем проверку")
+                return await handler(event, data)
 
-        channel_link = self._normalize_channel_link(settings.CHANNEL_LINK, channel_id)
+            channel_link = self._normalize_channel_link(settings.CHANNEL_LINK, channel_id)
 
-        if not channel_link:
-            logger.warning(
-                "⚠️ CHANNEL_LINK не задан или невалиден, кнопка подписки будет скрыта"
-            )
+            if not channel_link:
+                logger.warning(
+                    "⚠️ CHANNEL_LINK не задан или невалиден, кнопка подписки будет скрыта"
+                )
 
         try:
             member = await bot.get_chat_member(chat_id=channel_id, user_id=telegram_id)

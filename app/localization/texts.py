@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.config import settings
 from app.localization.branding import brand_text
@@ -89,22 +89,49 @@ _TRAFFIC_TIERS = (
 )
 
 
-_SUPPORT_TEXT_KEYS = ("SUPPORT_INFO", "SUPPORT_TEXT")
+# Плейсхолдеры бренда. Подставляются простым replace, а не str.format:
+# хендлеры зовут .format(days=..., link=...) поверх готовой строки, и чужие
+# фигурные скобки должны остаться нетронутыми.
+_BRAND_PLACEHOLDERS = (
+    "{project_name}",
+    "{privacy_url}",
+    "{terms_url}",
+    "{channel_link}",
+    "{support_contact}",
+    "{support_url}",
+    "{support_email}",
+)
 
 
-def format_support_placeholders(text: Any) -> Any:
-    """Подставляет контакты поддержки из настроек в {support_contact}/{support_email}.
-
-    Строка целиком выбрасывается, если все её плейсхолдеры пустые — чтобы
-    не показывать «Telegram:» без контакта.
-    """
-    if not isinstance(text, str) or "{support_" not in text:
-        return text
-
-    replacements = {
-        "{support_contact}": str(settings.get_support_contact_display() or ""),
+def _brand_replacements(profile) -> Dict[str, str]:
+    return {
+        "{project_name}": profile.name,
+        "{privacy_url}": profile.privacy_url or "",
+        "{terms_url}": profile.terms_url or "",
+        "{channel_link}": profile.channel_link or "",
+        "{support_contact}": profile.support_display or "",
+        "{support_url}": profile.support_url or "",
         "{support_email}": str(settings.get_support_email() or ""),
     }
+
+
+def apply_brand_placeholders(text: Any, profile=None) -> Any:
+    """Подставляет значения бренда в {project_name}, {privacy_url}, {support_contact}…
+
+    Строка целиком выбрасывается, если все её плейсхолдеры пустые — чтобы
+    не показывать «Telegram:» без контакта или «Подпишись на канал» без канала.
+    """
+    if not isinstance(text, str) or "{" not in text:
+        return text
+    if not any(placeholder in text for placeholder in _BRAND_PLACEHOLDERS):
+        return text
+
+    if profile is None:
+        from app.branding.context import current_brand
+
+        profile = current_brand()
+
+    replacements = _brand_replacements(profile)
 
     lines = []
     for line in text.split("\n"):
@@ -112,10 +139,23 @@ def format_support_placeholders(text: Any) -> Any:
         if used and not any(replacements[key] for key in used):
             continue
         for placeholder, value in replacements.items():
-            line = line.replace(placeholder, value)
+            if placeholder in line:
+                line = line.replace(placeholder, value)
         lines.append(line)
 
     return "\n".join(lines)
+
+
+def format_support_placeholders(text: Any) -> Any:
+    """Совместимость: раньше подставлялись только контакты поддержки."""
+    return apply_brand_placeholders(text)
+
+
+def render_brand_text(value: Any) -> Any:
+    """Полный проход строки через бренд: имя (страховка) и плейсхолдеры."""
+    if not isinstance(value, str):
+        return value
+    return apply_brand_placeholders(brand_text(value))
 
 
 def _get_cached_rules_value(language: str) -> str:
@@ -125,6 +165,29 @@ def _get_cached_rules_value(language: str) -> str:
     default = _get_default_rules(language)
     _cached_rules[language] = default
     return default
+
+
+def _copycat_rules_value(language: str) -> Optional[str]:
+    """Правила копикета: короткий текст со ссылками на его документы.
+
+    Правила в БД принадлежат основному бренду, копикету их не показываем.
+    """
+    from app.branding.context import current_brand
+
+    if not current_brand().is_copycat:
+        return None
+    locale = load_locale(language)
+    value = locale.get("RULES_TEXT_COPYCAT")
+    if not value:
+        value = load_locale(DEFAULT_LANGUAGE).get("RULES_TEXT_COPYCAT", "")
+    return value or None
+
+
+def _rules_source_value(language: str) -> str:
+    copycat_rules = _copycat_rules_value(language)
+    if copycat_rules is not None:
+        return copycat_rules
+    return _get_cached_rules_value(language)
 
 
 def _build_dynamic_values(language: str) -> Dict[str, Any]:
@@ -173,14 +236,6 @@ class Texts:
 
         self._values.update(_build_dynamic_values(self.language))
 
-        for key in _SUPPORT_TEXT_KEYS:
-            if key in self._values:
-                self._values[key] = format_support_placeholders(self._values[key])
-            if key in self._fallback_values:
-                self._fallback_values[key] = format_support_placeholders(
-                    self._fallback_values[key]
-                )
-
     def __getattr__(self, item: str) -> Any:
         if item == "language":
             return super().__getattribute__(item)
@@ -203,18 +258,18 @@ class Texts:
             return self._get_value(key)
         except KeyError:
             if default is not None:
-                return brand_text(default)
+                return render_brand_text(default)
             raise
 
     def _get_value(self, item: str) -> Any:
         if item == "RULES_TEXT":
-            return brand_text(_get_cached_rules_value(self.language))
+            return render_brand_text(_rules_source_value(self.language))
 
         if item in self._values:
-            return brand_text(self._values[item])
+            return render_brand_text(self._values[item])
 
         if item in self._fallback_values:
-            return brand_text(self._fallback_values[item])
+            return render_brand_text(self._fallback_values[item])
 
         _logger.warning(
             "Missing localization key '%s' for language '%s'",
@@ -296,6 +351,10 @@ def get_rules_sync(language: str = DEFAULT_LANGUAGE) -> str:
 
 
 async def get_rules(language: str = DEFAULT_LANGUAGE) -> str:
+    copycat_rules = _copycat_rules_value(language)
+    if copycat_rules is not None:
+        return render_brand_text(copycat_rules)
+
     if language in _cached_rules:
         return _cached_rules[language]
 

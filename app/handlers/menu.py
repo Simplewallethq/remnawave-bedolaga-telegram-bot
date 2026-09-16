@@ -53,6 +53,15 @@ from app.database.crud.referral import get_user_referral_stats
 from app.database.crud.transaction import get_user_transactions
 from app.database.models import TransactionType
 from app.localization.texts import get_texts, get_rules, format_support_placeholders
+from app.branding.context import current_brand
+from app.branding.apps import (
+    access_key_label,
+    android_connect_text,
+    android_tv_happ_text,
+    brand_has_own_app,
+    onboarding_android_text,
+    windows_connect_text,
+)
 from app.database.models import PromoGroup, User
 from app.database.crud.user_message import get_random_active_message
 from app.services.subscription_checkout_service import (
@@ -371,7 +380,11 @@ async def show_info_menu(
     caption = f"{header}\n\n{prompt}" if prompt else header
 
     privacy_enabled = await PrivacyPolicyService.is_policy_enabled(db, db_user.language)
-    public_offer_enabled = await PublicOfferService.is_offer_enabled(db, db_user.language)
+    # Оферта из БД — документ основного бренда; у копикета свои ссылки в правилах.
+    public_offer_enabled = (
+        await PublicOfferService.is_offer_enabled(db, db_user.language)
+        and not current_brand().is_copycat
+    )
     faq_enabled = await FaqService.is_enabled(db, db_user.language)
     promo_groups_available = await has_auto_assign_promo_groups(db)
 
@@ -1226,14 +1239,14 @@ async def get_main_menu_text(
     if settings.is_brand_channel_enabled():
         base_text += texts.t(
             "MAIN_MENU_CHANNEL_HINT",
-            "\n\n<a href=\"https://t.me/vpnleto\">➡️</a> "
-            "<a href=\"https://t.me/vpnleto\">Подпишись на наш канал</a> — там много интересного",
+            "\n\n<a href=\"{channel_link}\">➡️</a> "
+            "<a href=\"{channel_link}\">Подпишись на наш канал</a> — там много интересного",
         )
     base_text += texts.t(
         "MAIN_MENU_LEGAL_LINKS",
-        "\n\n<a href=\"https://telegra.ph/Politika-konfidencialnosti-07-20-101\">Политика конфиденциальности</a>"
+        "\n\n<a href=\"{privacy_url}\">Политика конфиденциальности</a>"
         " | "
-        "<a href=\"https://telegra.ph/Polzovatelskoe-soglashenie-07-20-32\">Пользовательское соглашение</a>",
+        "<a href=\"{terms_url}\">Пользовательское соглашение</a>",
     )
 
     return _decorate_main_menu_text(
@@ -1424,10 +1437,7 @@ async def _build_connect_platform_selection_text(db: AsyncSession, user: User) -
             db,
             user,
             texts,
-            texts.t(
-                "CONNECT_ACCESS_KEY_LABEL",
-                "<b>Твой ключ доступа</b> (для приложений Leto, Happ, Incy)",
-            ),
+            access_key_label(texts),
         )
         + "\n\n"
         + texts.t(
@@ -1473,16 +1483,10 @@ async def handle_connect_platform_android(
             db,
             user,
             texts,
-            texts.t(
-                "CONNECT_ACCESS_KEY_LABEL",
-                "<b>Твой ключ доступа</b> (для приложений Leto, Happ, Incy)",
-            ),
+            access_key_label(texts),
         )
         + "\n\n"
-        + texts.t(
-            "CONNECT_ANDROID_TEXT",
-            "Скачай Leto VPN по кнопке ниже и авторизуйся через Telegram или с помощью ключа доступа.",
-        )
+        + android_connect_text(texts)
         + "\n\n"
         + texts.t(
             "CONNECT_ANDROID_HAPP_HINT",
@@ -1518,10 +1522,7 @@ async def handle_connect_platform_apple(
             db,
             user,
             texts,
-            texts.t(
-                "CONNECT_ACCESS_KEY_LABEL",
-                "<b>Твой ключ доступа</b> (для приложений Leto, Happ, Incy)",
-            ),
+            access_key_label(texts),
         )
         + "\n\n"
         + texts.t(
@@ -1558,24 +1559,9 @@ async def handle_connect_platform_windows(
     # access key first, then our app. Happ stays below as the fallback for anyone
     # who already uses it.
     text = (
-        await build_access_key_section(
-            db,
-            user,
-            texts,
-            texts.t(
-                "CONNECT_ACCESS_KEY_LABEL",
-                "<b>Твой ключ доступа</b> (для приложений Leto, Happ, Incy)",
-            ),
-        )
+        await build_access_key_section(db, user, texts, access_key_label(texts))
         + "\n\n"
-        + texts.t(
-            "CONNECT_WINDOWS_TEXT",
-            "<b>☀️ Leto App</b>\n"
-            "Скачай по ссылке ниже и установи. Затем войди через Telegram или "
-            "вставь ключ доступа — ключ выше.\n\n"
-            "<b>💻 Happ</b>\n"
-            "Скачай по кнопке ниже и вставь в него ключ доступа — ключ выше.",
-        )
+        + windows_connect_text(texts)
         + "\n\n"
         + texts.t(
             "CONNECT_WINDOWS_HAPP_HINT",
@@ -1605,6 +1591,24 @@ async def handle_connect_platform_android_tv(
         return
 
     texts = get_texts(user.language)
+    if not brand_has_own_app():
+        # У витрины нет своего TV-приложения: на телевизоре Happ, а ему нужен ключ.
+        text = (
+            await build_access_key_section(db, user, texts, access_key_label(texts))
+            + "\n\n"
+            + android_tv_happ_text(texts)
+        )
+        await edit_or_answer_photo(
+            callback,
+            text,
+            get_connect_android_tv_keyboard(user.language),
+            parse_mode="HTML",
+            photo_path=os.path.join("images", "connection.webp"),
+            disable_web_page_preview=True,
+        )
+        await callback.answer()
+        return
+
     # Deliberately no access-key section: the TV pairs by showing a QR and a
     # six-digit code that the user confirms on their phone, so the key would only
     # be a thing they cannot type with a remote.
@@ -1677,10 +1681,7 @@ async def handle_onboarding_device_selection(
 
     texts = get_texts(user.language)
     if device_type == "android":
-        connection_text = texts.t(
-            "ONBOARDING_CONNECTION_TEXT_ANDROID",
-            "Установи приложение Leto по кнопке ниже.\n\nПосле авторизуйся в приложении через Telegram → все настроится в один клик.",
-        )
+        connection_text = onboarding_android_text(texts)
     elif is_ios_device_type(device_type):
         connection_text = texts.t(
             "ONBOARDING_CONNECTION_TEXT_IOS",
@@ -1992,10 +1993,11 @@ async def handle_referral(callback: types.CallbackQuery, db_user: User, db: Asyn
         lines.append(
             texts.t("REFERRAL_HOW_SHOP", "• Лучи можно обменять на призы в Магазине наград")
         )
-    if settings.REFERRAL_TERMS_URL:
+    referral_terms_url = current_brand().referral_terms_url
+    if referral_terms_url:
         lines += [
             "",
-            f'<a href="{settings.REFERRAL_TERMS_URL}">'
+            f'<a href="{referral_terms_url}">'
             + texts.t("REFERRAL_TERMS_LINK", "📖 Полные условия программы →")
             + "</a>",
         ]

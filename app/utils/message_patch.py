@@ -8,7 +8,6 @@ from app.config import settings
 from app.localization.texts import get_texts
 from app.utils.bot_registry import get_logo_for_bot, resolve_photo_for_bot
 
-LOGO_PATH = Path(settings.LOGO_FILE)
 _PRIVACY_RESTRICTED_CODE = "BUTTON_USER_PRIVACY_RESTRICTED"
 
 
