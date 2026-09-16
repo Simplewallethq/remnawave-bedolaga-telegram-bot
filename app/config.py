@@ -547,6 +547,8 @@ class Settings(BaseSettings):
     LETO_APP_DOWNLOAD_LINK_IOS: Optional[str] = None
     LETO_APP_DOWNLOAD_LINK_WINDOWS: Optional[str] = None
     LETO_APP_DOWNLOAD_LINK_MACOS: Optional[str] = None
+    # Android TV ships a separate build, installed from Google Play.
+    LETO_APP_DOWNLOAD_LINK_ANDROID_TV: Optional[str] = None
 
     # --- Бренд копикэта -------------------------------------------------
     # Один код обслуживает несколько витрин. Имя приложения нигде не
@@ -1872,10 +1874,11 @@ class Settings(BaseSettings):
             value = (value or "").strip()
             return value or None
 
+        # Happ Lite replaces the old RU/International split: it is one listing for
+        # everyone, so a second entry here would just point at the same app twice.
         happ_defaults = {
             "ios": [
-                {"kind": "app_store_ru", "url": "https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643"},
-                {"kind": "app_store", "url": "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"},
+                {"kind": "app_store", "url": "https://apps.apple.com/ru/app/happ-lite/id6799917773"},
             ],
             "android": [
                 {"kind": "google_play", "url": "https://play.google.com/store/apps/details?id=com.happproxy&hl=ru"},
@@ -1884,8 +1887,7 @@ class Settings(BaseSettings):
                 {"kind": "direct", "url": "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"},
             ],
             "macos": [
-                {"kind": "app_store_ru", "url": "https://apps.apple.com/ru/app/happ-proxy-utility/id6783623643"},
-                {"kind": "app_store", "url": "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"},
+                {"kind": "app_store", "url": "https://apps.apple.com/ru/app/happ-lite/id6799917773"},
             ],
         }
         leto_links = {

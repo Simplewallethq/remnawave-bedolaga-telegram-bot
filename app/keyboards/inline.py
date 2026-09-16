@@ -3463,6 +3463,7 @@ def get_connection_platform_keyboard(
         [InlineKeyboardButton(text="🤖 Android", callback_data="connect_platform_android")],
         [InlineKeyboardButton(text="🍎 iPhone/MacOS", callback_data="connect_platform_apple")],
         [InlineKeyboardButton(text="💻 Windows", callback_data="connect_platform_windows")],
+        [InlineKeyboardButton(text="📺 Android TV", callback_data="connect_platform_androidtv")],
         [InlineKeyboardButton(
             text=texts.t("SUB_SHARE_ACCESS_BUTTON", "🔗 Поделиться доступом"),
             callback_data="connect_share_access",
@@ -3527,10 +3528,12 @@ def get_connect_apple_keyboard(
             )]
         )
 
+    # One Happ button, no store split: Happ Lite is served from the same listing to
+    # everyone, so labelling it RU or International would only be noise.
     buttons.append(
         [InlineKeyboardButton(
-            text=texts.t("CONNECT_DOWNLOAD_HAPP_IOS_BUTTON", "🍎 Скачать Happ (Int. App Store)"),
-            url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+            text=texts.t("CONNECT_DOWNLOAD_HAPP_IOS_BUTTON", "🍎 Скачать Happ"),
+            url="https://apps.apple.com/ru/app/happ-lite/id6799917773",
         )]
     )
     if happ_transfer_url:
@@ -3552,12 +3555,43 @@ def get_connect_windows_keyboard(
     """Windows-specific Connect menu actions."""
     texts = get_texts(language)
     buttons: List[List[InlineKeyboardButton]] = []
+    # Our own client leads, mirroring Android. Read the setting directly rather than
+    # through build_personal_play_link: that one appends a Play Store install
+    # referrer, which is meaningless on a direct .exe download.
+    # The link is optional in config, so when it is unset the menu falls back to
+    # Happ alone instead of offering a dead button.
+    leto_url = (settings.LETO_APP_DOWNLOAD_LINK_WINDOWS or "").strip()
+    if leto_url:
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("CONNECT_DOWNLOAD_LETO_WINDOWS_BUTTON", "☀️ Скачать Leto VPN"),
+                url=leto_url,
+            )
+        ])
     buttons.extend([
         [InlineKeyboardButton(
             text=texts.t("CONNECT_DOWNLOAD_HAPP_WINDOWS_BUTTON", "💻 Скачать Happ"),
             url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
         )],
     ])
+    # The caption only lists the two failures people actually hit; the rest
+    # (file deleted on download, installer needing admin rights, checksums)
+    # lives in the README, which CONNECT_WINDOWS_WARNING points at.
+    if leto_url:
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("CONNECT_WINDOWS_GUIDE_BUTTON", "❓ Проблемы с установкой"),
+                # Percent-encoded: Telegram rejects non-ASCII in button URLs. The
+                # double hyphen is GitHub's anchor for the em dash in the heading.
+                url=(
+                    "https://github.com/letohq/Leto-Desktop"
+                    "#%D0%BF%D1%80%D0%B5%D0%B4%D1%83%D0%BF%D1%80%D0%B5%D0%B6%D0%B4"
+                    "%D0%B5%D0%BD%D0%B8%D1%8F-%D0%BF%D1%80%D0%B8-%D1%83%D1%81%D1%82"
+                    "%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B5--%D1%8D%D1%82%D0%BE-"
+                    "%D0%BD%D0%BE%D1%80%D0%BC%D0%B0%D0%BB%D1%8C%D0%BD%D0%BE"
+                ),
+            )
+        ])
     if happ_transfer_url:
         buttons.append([
             InlineKeyboardButton(
@@ -3565,6 +3599,35 @@ def get_connect_windows_keyboard(
                 url=happ_transfer_url,
             )
         ])
+    buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data="howto")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_connect_android_tv_keyboard(
+    language: str = DEFAULT_LANGUAGE,
+) -> InlineKeyboardMarkup:
+    """Android TV Connect menu actions.
+
+    No access-key or Happ-transfer buttons here: the TV signs in by showing a QR
+    plus a six-digit code that the user confirms on their phone at letovpn.com/tv,
+    so a key pasted into the TV would be the wrong instruction entirely.
+    """
+    texts = get_texts(language)
+    buttons: List[List[InlineKeyboardButton]] = []
+    play_url = (settings.LETO_APP_DOWNLOAD_LINK_ANDROID_TV or "").strip()
+    if play_url:
+        buttons.append([
+            InlineKeyboardButton(
+                text=texts.t("CONNECT_DOWNLOAD_LETO_TV_BUTTON", "📺 Скачать Leto для TV"),
+                url=play_url,
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(
+            text=texts.t("CONNECT_TV_PAIR_BUTTON", "🔗 Привязать телевизор"),
+            url="https://letovpn.com/tv",
+        )
+    ])
     buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data="howto")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -3631,6 +3694,14 @@ def get_onboarding_connection_keyboard(
             ),
         ])
     elif device_type == "windows":
+        leto_windows_url = (settings.LETO_APP_DOWNLOAD_LINK_WINDOWS or "").strip()
+        if leto_windows_url:
+            buttons.append([
+                InlineKeyboardButton(
+                    text=texts.t("ONBOARDING_DOWNLOAD_LETO_WINDOWS", "☀️ Скачать Leto App"),
+                    url=leto_windows_url,
+                ),
+            ])
         buttons.append([
             InlineKeyboardButton(
                 text=texts.t("ONBOARDING_DOWNLOAD_HAPP_WINDOWS", "💻 Скачать Happ"),

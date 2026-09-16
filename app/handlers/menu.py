@@ -34,6 +34,7 @@ from app.keyboards.inline import (
     get_connection_platform_keyboard,
     get_connect_android_keyboard,
     get_connect_apple_keyboard,
+    get_connect_android_tv_keyboard,
     get_connect_windows_keyboard,
 )
 from app.utils.subscription_utils import (
@@ -1525,9 +1526,7 @@ async def handle_connect_platform_apple(
         + "\n\n"
         + texts.t(
             "CONNECT_APPLE_TEXT",
-            "<b>Для iOS/macOS доступны два приложения:</b>\n"
-            "<b>Incy</b> — RU App Store\n"
-            "<b>Happ</b> — международный App Store\n\n"
+            "<b>Для iOS/macOS доступны два приложения: Incy и Happ.</b>\n\n"
             "В любое из приложений (после скачивания) можно передать ключ доступа по кнопке ниже.",
         )
     )
@@ -1555,14 +1554,48 @@ async def handle_connect_platform_windows(
         return
 
     texts = get_texts(user.language)
-    link = _get_connection_key(user)
+    # Windows has its own Leto client now, so this screen follows the Android one:
+    # access key first, then our app. Happ stays below as the fallback for anyone
+    # who already uses it.
     text = (
-        texts.t(
-            "CONNECT_WINDOWS_TEXT",
-            "Для Windows Leto работает через Happ. Скачай приложение и вставь туда ссылку-ключ ниже:",
+        await build_access_key_section(
+            db,
+            user,
+            texts,
+            texts.t(
+                "CONNECT_ACCESS_KEY_LABEL",
+                "<b>Твой ключ доступа</b> (для приложений Leto, Happ, Incy)",
+            ),
         )
         + "\n\n"
-        + _format_connection_key(link)
+        + texts.t(
+            "CONNECT_WINDOWS_TEXT",
+            "Скачай Leto VPN для Windows по кнопке ниже, распакуй архив и запусти "
+            "установщик. После установки авторизуйся через Telegram или ключом доступа.",
+        )
+        + "\n\n"
+        + texts.t(
+            "CONNECT_WINDOWS_WARNING",
+            "<b>⚠️ Windows покажет предупреждение — это нормально</b>\n"
+            "Приложение пока без платной подписи издателя, а VPN создаёт сетевой "
+            "адаптер и меняет маршруты — защита реагирует на само поведение.\n\n"
+            "• <b>Экран SmartScreen:</b> «Подробнее» → «Выполнить в любом случае». "
+            "Кнопка появляется только после «Подробнее».\n"
+            "• <b>Файл пропал после скачивания:</b> «Безопасность Windows» → «Защита "
+            "от вирусов и угроз» → «Журнал защиты» → найди <code>LETO-Setup</code> → "
+            "«Действия» → «Разрешить на устройстве», затем скачай заново.\n"
+            "• <b>Антивирус блокирует подключение:</b> добавь папку "
+            "<code>C:\\Program Files\\LETO</code> в исключения. Чаще всего нужно для "
+            "Kaspersky, ESET, Avast и Dr.Web. Симптом: приложение открылось, но "
+            "подключение висит на «Подключение…».\n"
+            "• <b>Установщик не запускается:</b> правой кнопкой → «Запуск от имени "
+            "администратора». Права нужны для сетевого адаптера и маршрутов.",
+        )
+        + "\n\n"
+        + texts.t(
+            "CONNECT_WINDOWS_HAPP_HINT",
+            "Если у тебя есть Happ, можешь передать ключ доступа в него по кнопке ниже.",
+        )
     )
     await edit_or_answer_photo(
         callback,
@@ -1571,6 +1604,40 @@ async def handle_connect_platform_windows(
             user.language,
             happ_transfer_url=_get_happ_transfer_url(user),
         ),
+        parse_mode="HTML",
+        photo_path=os.path.join("images", "connection.webp"),
+        disable_web_page_preview=True,
+    )
+    await callback.answer()
+
+
+async def handle_connect_platform_android_tv(
+    callback: types.CallbackQuery,
+    db: AsyncSession,
+):
+    user = await _get_connect_menu_user(callback, db)
+    if user is None:
+        return
+
+    texts = get_texts(user.language)
+    # Deliberately no access-key section: the TV pairs by showing a QR and a
+    # six-digit code that the user confirms on their phone, so the key would only
+    # be a thing they cannot type with a remote.
+    text = texts.t(
+        "CONNECT_ANDROID_TV_TEXT",
+        "<b>📺 Как подключить Android TV</b>\n\n"
+        "1. Установи Leto на телевизор из Google Play по кнопке ниже.\n"
+        "2. Открой приложение: на экране появится QR-код и код из 6 цифр.\n"
+        "3. Отсканируй QR телефоном или зайди на <code>letovpn.com/tv</code> и "
+        "введи этот код.\n"
+        "4. Войди на телефоне через Telegram или почту — телевизор привяжется сам "
+        "и откроет главный экран.\n\n"
+        "Вводить ключ доступа с пульта не нужно: вход подтверждается на телефоне.",
+    )
+    await edit_or_answer_photo(
+        callback,
+        text,
+        get_connect_android_tv_keyboard(user.language),
         parse_mode="HTML",
         photo_path=os.path.join("images", "connection.webp"),
         disable_web_page_preview=True,
@@ -1633,6 +1700,16 @@ async def handle_onboarding_device_selection(
         connection_text = texts.t(
             "ONBOARDING_CONNECTION_TEXT_IOS",
             "Установи приложение Incy по кнопке ниже.\n\nПосле установки нажми кнопку \"Подключиться\"  ниже → все настроится автоматически.",
+        )
+    elif device_type == "windows":
+        connection_text = texts.t(
+            "ONBOARDING_CONNECTION_TEXT_WINDOWS",
+            "Установи Leto VPN по кнопке ниже: распакуй архив и запусти установщик.\n\n"
+            "После установки авторизуйся через Telegram → всё настроится в один клик.\n\n"
+            "<b>⚠️ Windows покажет предупреждение — это нормально.</b> Приложение пока "
+            "без платной подписи издателя. Нажми «Подробнее» → «Выполнить в любом "
+            "случае». Если файл пропал после скачивания или антивирус блокирует "
+            "подключение — подробная инструкция в разделе «Подключиться» → Windows.",
         )
     else:
         connection_text = texts.t(
@@ -2060,6 +2137,11 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         handle_connect_platform_windows,
         F.data == "connect_platform_windows",
+    )
+
+    dp.callback_query.register(
+        handle_connect_platform_android_tv,
+        F.data == "connect_platform_androidtv",
     )
 
     dp.callback_query.register(

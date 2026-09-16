@@ -19,6 +19,7 @@ def test_connect_platform_keyboard_has_requested_order():
         ("🤖 Android", "connect_platform_android"),
         ("🍎 iPhone/MacOS", "connect_platform_apple"),
         ("💻 Windows", "connect_platform_windows"),
+        ("📺 Android TV", "connect_platform_androidtv"),
         ("🔗 Переслать друзьям", "connect_share_access"),
         ("🏠 Основное меню", "main_menu"),
     ]
@@ -38,6 +39,7 @@ async def test_connect_menu_has_english_text_and_buttons():
         ("🤖 Android", "connect_platform_android"),
         ("🍎 iPhone/MacOS", "connect_platform_apple"),
         ("💻 Windows", "connect_platform_windows"),
+        ("📺 Android TV", "connect_platform_androidtv"),
         ("🔗 Send to friends", "connect_share_access"),
         ("🏠 Main menu", "main_menu"),
     ]
@@ -84,7 +86,7 @@ def test_connect_apple_and_windows_keyboards_omit_transfers_without_urls(monkeyp
         ("🍎 Скачать Happ", None),
         ("⬅️ Назад", "howto"),
     ]
-    assert apple_rows[1][0].url == "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"
+    assert apple_rows[1][0].url == "https://apps.apple.com/ru/app/happ-lite/id6799917773"
     assert [(row[0].text, row[0].callback_data) for row in windows_rows] == [
         ("💻 Скачать Happ", None),
         ("⬅️ Назад", "howto"),
@@ -125,7 +127,7 @@ def test_connect_platform_keyboards_include_transfer_buttons(monkeypatch):
     assert [[(button.text, button.url) for button in row] for row in apple_rows] == [
         [("🍏 Скачать Incy", inline.settings.get_incy_download_link())],
         [("➡️ Ключ в Incy", incy_url)],
-        [("🍎 Скачать Happ", "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215")],
+        [("🍎 Скачать Happ", "https://apps.apple.com/ru/app/happ-lite/id6799917773")],
         [("➡️ Ключ в Happ", happ_url)],
         [("⬅️ Назад", None)],
     ]
