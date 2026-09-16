@@ -43,6 +43,8 @@ class BroadcastConfig:
     selected_buttons: list[str]
     media: Optional[BroadcastMediaConfig] = None
     initiator_name: Optional[str] = None
+    # Область ботов: leto | all | copycat:<bot_id>
+    bot_scope: str = "leto"
 
 
 @dataclass(slots=True)
@@ -118,9 +120,10 @@ class BroadcastService:
                 broadcast.status = "in_progress"
                 broadcast.sent_count = 0
                 broadcast.failed_count = 0
+                broadcast.bot_scope = config.bot_scope
                 await session.commit()
 
-            recipients = await self._fetch_recipients(config.target)
+            recipients = await self._fetch_recipients(config.target, config.bot_scope)
 
             async with AsyncSessionLocal() as session:
                 broadcast = await session.get(BroadcastHistory, broadcast_id)
@@ -216,12 +219,12 @@ class BroadcastService:
             logger.exception("Критическая ошибка при выполнении рассылки %s: %s", broadcast_id, exc)
             await self._mark_failed(broadcast_id, sent_count, failed_count)
 
-    async def _fetch_recipients(self, target: str):
+    async def _fetch_recipients(self, target: str, bot_scope: str = "leto"):
         async with AsyncSessionLocal() as session:
             if target.startswith("custom_"):
                 criteria = target[len("custom_"):]
-                return await get_custom_users(session, criteria)
-            return await get_target_users(session, target)
+                return await get_custom_users(session, criteria, bot_scope=bot_scope)
+            return await get_target_users(session, target, bot_scope=bot_scope)
 
     async def _run_standard_broadcast(
         self,

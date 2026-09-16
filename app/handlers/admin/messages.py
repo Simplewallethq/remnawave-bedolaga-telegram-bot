@@ -24,6 +24,7 @@ from app.keyboards.admin import (
     get_admin_messages_keyboard, get_broadcast_target_keyboard,
     get_custom_criteria_keyboard, get_broadcast_history_keyboard,
     get_admin_pagination_keyboard, get_broadcast_media_keyboard,
+    get_broadcast_bot_scope_keyboard,
     get_media_confirm_keyboard, get_updated_message_buttons_selector_keyboard_with_media,
     BROADCAST_BUTTON_ROWS, DEFAULT_BROADCAST_BUTTONS,
     get_broadcast_button_config, get_broadcast_button_labels, get_pinned_message_keyboard
@@ -32,6 +33,12 @@ from app.localization.texts import get_texts
 from app.database.crud.user import get_users_list
 from app.database.crud.subscription import get_expiring_subscriptions
 from app.utils.decorators import admin_required, error_handler
+from app.utils.bot_registry import (
+    bot_for_user,
+    copycat_bot_ids,
+    get_brand_for_bot,
+    is_copycat_user,
+)
 from app.utils.miniapp_buttons import build_miniapp_or_callback_button
 from app.services.pinned_message_service import (
     broadcast_pinned_message,
@@ -617,24 +624,14 @@ async def select_custom_criteria(
         "direct": "Прямая регистрация"
     }
     
-    user_count = await get_custom_users_count(db, criteria)
-    
-    await state.update_data(broadcast_target=f"custom_{criteria}")
-    
-    await callback.message.edit_text(
-        f"📨 <b>Создание рассылки</b>\n\n"
-        f"🎯 <b>Критерий:</b> {criteria_names.get(criteria, criteria)}\n"
-        f"👥 <b>Получателей:</b> {user_count}\n\n"
-        f"Введите текст сообщения для рассылки:\n\n"
-        f"<i>Поддерживается HTML разметка</i>",
-        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_messages")]
-        ]),
-        parse_mode="HTML" 
+    await state.update_data(
+        broadcast_target=f"custom_{criteria}",
+        broadcast_target_label="Критерий",
+        broadcast_target_name=criteria_names.get(criteria, criteria),
+        broadcast_scope_back="admin_msg_custom",
     )
-    
-    await state.set_state(AdminStates.waiting_for_broadcast_message)
-    await callback.answer()
+
+    await _continue_after_target_selection(callback, db_user, state, db)
 
 
 @admin_required
@@ -662,24 +659,104 @@ async def select_broadcast_target(
         "trial_zero": "Триальная подписка, трафик 0 ГБ",
     }
     
-    user_count = await get_target_users_count(db, target)
-    
-    await state.update_data(broadcast_target=target)
-    
+    await state.update_data(
+        broadcast_target=target,
+        broadcast_target_label="Аудитория",
+        broadcast_target_name=target_names.get(target, target),
+        broadcast_scope_back="admin_msg_by_sub",
+    )
+
+    await _continue_after_target_selection(callback, db_user, state, db)
+
+
+async def _continue_after_target_selection(
+    callback: types.CallbackQuery,
+    db_user: User,
+    state: FSMContext,
+    db: AsyncSession,
+) -> None:
+    """После выбора аудитории: спросить область ботов (если есть копикеты) или сразу текст."""
+    if copycat_bot_ids():
+        data = await state.get_data()
+        await state.update_data(broadcast_bot_scope=DEFAULT_BOT_SCOPE)
+        await callback.message.edit_text(
+            "🤖 <b>Выбор ботов</b>\n\n"
+            f"🎯 <b>{data.get('broadcast_target_label', 'Аудитория')}:</b> "
+            f"{data.get('broadcast_target_name', data.get('broadcast_target', ''))}\n\n"
+            "В каких ботах отправить рассылку?",
+            reply_markup=get_broadcast_bot_scope_keyboard(
+                db_user.language,
+                back_callback=data.get("broadcast_scope_back", "admin_msg_by_sub"),
+            ),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+        return
+
+    await state.update_data(broadcast_bot_scope=DEFAULT_BOT_SCOPE)
+    await _prompt_broadcast_text(callback, state, db)
+
+
+async def _prompt_broadcast_text(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    db: AsyncSession,
+) -> None:
+    """Показать число получателей и попросить текст рассылки."""
+    data = await state.get_data()
+    target = data.get("broadcast_target") or ""
+    bot_scope = data.get("broadcast_bot_scope", DEFAULT_BOT_SCOPE)
+    label = data.get("broadcast_target_label", "Аудитория")
+    target_name = data.get("broadcast_target_name") or get_target_display_name(target)
+
+    if target.startswith("custom_"):
+        user_count = await get_custom_users_count(
+            db, target[len("custom_"):], bot_scope=bot_scope
+        )
+    else:
+        user_count = await get_target_users_count(db, target, bot_scope=bot_scope)
+
+    scope_line = ""
+    if copycat_bot_ids():
+        scope_line = f"🤖 <b>Боты:</b> {get_bot_scope_display_name(bot_scope)}\n"
+
     await callback.message.edit_text(
         f"📨 <b>Создание рассылки</b>\n\n"
-        f"🎯 <b>Аудитория:</b> {target_names.get(target, target)}\n"
+        f"🎯 <b>{label}:</b> {target_name}\n"
+        f"{scope_line}"
         f"👥 <b>Получателей:</b> {user_count}\n\n"
         f"Введите текст сообщения для рассылки:\n\n"
         f"<i>Поддерживается HTML разметка</i>",
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_messages")]
         ]),
-        parse_mode="HTML" 
+        parse_mode="HTML",
     )
-    
+
     await state.set_state(AdminStates.waiting_for_broadcast_message)
     await callback.answer()
+
+
+@admin_required
+@error_handler
+async def select_broadcast_scope(
+    callback: types.CallbackQuery,
+    db_user: User,
+    state: FSMContext,
+    db: AsyncSession
+):
+    bot_scope = callback.data[len("broadcast_scope:"):].strip()
+    if not is_valid_bot_scope(bot_scope):
+        await callback.answer("❌ Неизвестная область ботов", show_alert=True)
+        return
+
+    data = await state.get_data()
+    if not data.get("broadcast_target"):
+        await callback.answer("❌ Сначала выберите аудиторию", show_alert=True)
+        return
+
+    await state.update_data(broadcast_bot_scope=bot_scope)
+    await _prompt_broadcast_text(callback, state, db)
 
 
 @admin_required
@@ -1044,8 +1121,14 @@ async def confirm_button_selection(
     has_media = data.get('has_media', False)
     media_type = data.get('media_type')
     
-    user_count = await get_target_users_count(db, target) if not target.startswith('custom_') else await get_custom_users_count(db, target.replace('custom_', ''))
+    bot_scope = data.get('broadcast_bot_scope', DEFAULT_BOT_SCOPE)
+    user_count = (
+        await get_target_users_count(db, target, bot_scope=bot_scope)
+        if not target.startswith('custom_')
+        else await get_custom_users_count(db, target.replace('custom_', ''), bot_scope=bot_scope)
+    )
     target_display = get_target_display_name(target)
+    scope_info = f"\n🤖 <b>Боты:</b> {get_bot_scope_display_name(bot_scope)}"
     
     media_info = ""
     if has_media:
@@ -1067,7 +1150,7 @@ async def confirm_button_selection(
     preview_text = f"""
 📨 <b>Предварительный просмотр рассылки</b>
 
-🎯 <b>Аудитория:</b> {target_display}
+🎯 <b>Аудитория:</b> {target_display}{scope_info}
 👥 <b>Получателей:</b> {user_count}
 
 📝 <b>Сообщение:</b>
@@ -1141,6 +1224,9 @@ async def confirm_broadcast(
     media_type = data.get('media_type')
     media_file_id = data.get('media_file_id')
     media_caption = data.get('media_caption')
+    bot_scope = data.get('broadcast_bot_scope', DEFAULT_BOT_SCOPE)
+    if not is_valid_bot_scope(bot_scope):
+        bot_scope = DEFAULT_BOT_SCOPE
     
     await callback.message.edit_text(
         "📨 Начинаю рассылку...\n\n"
@@ -1150,12 +1236,13 @@ async def confirm_broadcast(
     )
     
     if target.startswith('custom_'):
-        users = await get_custom_users(db, target.replace('custom_', ''))
+        users = await get_custom_users(db, target.replace('custom_', ''), bot_scope=bot_scope)
     else:
-        users = await get_target_users(db, target)
+        users = await get_target_users(db, target, bot_scope=bot_scope)
     
     broadcast_history = BroadcastHistory(
         target_type=target,
+        bot_scope=bot_scope,
         message_text=message_text,
         has_media=has_media,
         media_type=media_type,
@@ -1186,35 +1273,53 @@ async def confirm_broadcast(
     async def send_single_broadcast(user):
         """Отправляет одно сообщение рассылки с семафором ограничения"""
         async with semaphore:
+            # Пользователю зеркала пишем из его бота: основной для него «chat not found».
+            bot = bot_for_user(user, callback.bot)
             for attempt in range(3):
                 try:
                     if has_media and media_file_id:
-                        if media_type == "photo":
-                            await callback.bot.send_photo(
-                                chat_id=user.telegram_id,
-                                photo=media_file_id,
-                                caption=message_text,
-                                parse_mode="HTML",
-                                reply_markup=broadcast_keyboard
+                        try:
+                            if media_type == "photo":
+                                await bot.send_photo(
+                                    chat_id=user.telegram_id,
+                                    photo=media_file_id,
+                                    caption=message_text,
+                                    parse_mode="HTML",
+                                    reply_markup=broadcast_keyboard
+                                )
+                            elif media_type == "video":
+                                await bot.send_video(
+                                    chat_id=user.telegram_id,
+                                    video=media_file_id,
+                                    caption=message_text,
+                                    parse_mode="HTML",
+                                    reply_markup=broadcast_keyboard
+                                )
+                            elif media_type == "document":
+                                await bot.send_document(
+                                    chat_id=user.telegram_id,
+                                    document=media_file_id,
+                                    caption=message_text,
+                                    parse_mode="HTML",
+                                    reply_markup=broadcast_keyboard
+                                )
+                        except TelegramBadRequest as media_error:
+                            # file_id привязан к боту, который загрузил медиа (основному);
+                            # зеркало его не знает — отдаём хотя бы текст.
+                            if bot is callback.bot:
+                                raise
+                            logger.warning(
+                                f"Рассылка: зеркало не смогло отправить медиа пользователю "
+                                f"{user.telegram_id} ({media_error}), шлём текст"
                             )
-                        elif media_type == "video":
-                            await callback.bot.send_video(
+                            await bot.send_message(
                                 chat_id=user.telegram_id,
-                                video=media_file_id,
-                                caption=message_text,
-                                parse_mode="HTML",
-                                reply_markup=broadcast_keyboard
-                            )
-                        elif media_type == "document":
-                            await callback.bot.send_document(
-                                chat_id=user.telegram_id,
-                                document=media_file_id,
-                                caption=message_text,
+                                text=message_text,
                                 parse_mode="HTML",
                                 reply_markup=broadcast_keyboard
                             )
                     else:
-                        await callback.bot.send_message(
+                        await bot.send_message(
                             chat_id=user.telegram_id,
                             text=message_text,
                             parse_mode="HTML",
@@ -1303,12 +1408,74 @@ async def confirm_broadcast(
     logger.info(f"Рассылка выполнена админом {db_user.telegram_id}: {sent_count}/{len(users)} (медиа: {has_media})")
 
 
-async def get_target_users_count(db: AsyncSession, target: str) -> int:
-    users = await get_target_users(db, target)
+DEFAULT_BOT_SCOPE = "leto"
+_COPYCAT_SCOPE_PREFIX = "copycat:"
+
+
+def is_valid_bot_scope(bot_scope: str | None) -> bool:
+    """Допустимые значения: leto | all | copycat:<bot_id>."""
+    if not isinstance(bot_scope, str):
+        return False
+    if bot_scope in ("leto", "all"):
+        return True
+    if bot_scope.startswith(_COPYCAT_SCOPE_PREFIX):
+        return bot_scope[len(_COPYCAT_SCOPE_PREFIX):].isdigit()
+    return False
+
+
+def _user_in_bot_scope(user, bot_scope: str | None) -> bool:
+    """Попадает ли пользователь в область ботов рассылки.
+
+    "all" — все; "leto" — основной бот и обычные зеркала (не копикеты);
+    "copycat:<bot_id>" — только пользователи этого копикета.
+    """
+    if not bot_scope or bot_scope == DEFAULT_BOT_SCOPE:
+        return not is_copycat_user(user)
+    if bot_scope == "all":
+        return True
+    if bot_scope.startswith(_COPYCAT_SCOPE_PREFIX):
+        raw_id = bot_scope[len(_COPYCAT_SCOPE_PREFIX):]
+        if not raw_id.isdigit():
+            return False
+        return getattr(user, "bot_id", None) == int(raw_id)
+    return False
+
+
+def _filter_by_bot_scope(users, bot_scope: str | None) -> list:
+    if bot_scope == "all":
+        return list(users)
+    return [user for user in users if _user_in_bot_scope(user, bot_scope)]
+
+
+def get_bot_scope_display_name(bot_scope: str | None) -> str:
+    """Подпись области ботов для превью/истории рассылок."""
+    if not bot_scope or bot_scope == DEFAULT_BOT_SCOPE:
+        return "Leto (основной + зеркала)"
+    if bot_scope == "all":
+        return "Все боты"
+    if bot_scope.startswith(_COPYCAT_SCOPE_PREFIX):
+        raw_id = bot_scope[len(_COPYCAT_SCOPE_PREFIX):]
+        if raw_id.isdigit():
+            brand_name = get_brand_for_bot(int(raw_id)).name
+            return f"{brand_name} (копикет)"
+    return str(bot_scope)
+
+
+async def get_target_users_count(
+    db: AsyncSession, target: str, *, bot_scope: str = DEFAULT_BOT_SCOPE
+) -> int:
+    users = await get_target_users(db, target, bot_scope=bot_scope)
     return len(users)
 
 
-async def get_target_users(db: AsyncSession, target: str) -> list:
+async def get_target_users(
+    db: AsyncSession, target: str, *, bot_scope: str = DEFAULT_BOT_SCOPE
+) -> list:
+    users = await _get_target_users_unscoped(db, target)
+    return _filter_by_bot_scope(users, bot_scope)
+
+
+async def _get_target_users_unscoped(db: AsyncSession, target: str) -> list:
     # Загружаем всех активных пользователей батчами, чтобы не ограничиваться 10к
     users: list[User] = []
     offset = 0
@@ -1510,12 +1677,16 @@ async def get_target_users(db: AsyncSession, target: str) -> list:
     return []
 
 
-async def get_custom_users_count(db: AsyncSession, criteria: str) -> int:
-    users = await get_custom_users(db, criteria)
+async def get_custom_users_count(
+    db: AsyncSession, criteria: str, *, bot_scope: str = DEFAULT_BOT_SCOPE
+) -> int:
+    users = await get_custom_users(db, criteria, bot_scope=bot_scope)
     return len(users)
 
 
-async def get_custom_users(db: AsyncSession, criteria: str) -> list:
+async def get_custom_users(
+    db: AsyncSession, criteria: str, *, bot_scope: str = DEFAULT_BOT_SCOPE
+) -> list:
     now = datetime.utcnow()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_ago = now - timedelta(days=7)
@@ -1560,7 +1731,7 @@ async def get_custom_users(db: AsyncSession, criteria: str) -> list:
         return []
     
     result = await db.execute(stmt)
-    return result.scalars().all()
+    return _filter_by_bot_scope(result.scalars().all(), bot_scope)
 
 
 async def get_users_statistics(db: AsyncSession) -> dict:
@@ -1663,6 +1834,8 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(handle_pinned_broadcast_now, F.data.startswith("admin_pinned_broadcast_now:"))
     dp.callback_query.register(handle_pinned_broadcast_skip, F.data.startswith("admin_pinned_broadcast_skip:"))
     dp.callback_query.register(show_broadcast_targets, F.data.in_(["admin_msg_all", "admin_msg_by_sub"]))
+    # Область ботов регистрируем раньше: "broadcast_scope:..." тоже начинается с "broadcast_".
+    dp.callback_query.register(select_broadcast_scope, F.data.startswith("broadcast_scope:"))
     dp.callback_query.register(select_broadcast_target, F.data.startswith("broadcast_"))
     dp.callback_query.register(confirm_broadcast, F.data == "admin_confirm_broadcast")
     

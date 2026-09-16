@@ -2218,6 +2218,8 @@ class BroadcastHistory(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     target_type = Column(String(100), nullable=False)
+    # Область ботов: leto (основной + зеркала) | all | copycat:<bot_id>
+    bot_scope = Column(String(32), nullable=True)
     message_text = Column(Text, nullable=False)  
     has_media = Column(Boolean, default=False)
     media_type = Column(String(20), nullable=True) 

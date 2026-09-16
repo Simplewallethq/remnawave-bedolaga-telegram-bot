@@ -1358,6 +1358,40 @@ def get_broadcast_target_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
     ])
 
 
+def get_broadcast_bot_scope_keyboard(
+    language: str = "ru",
+    back_callback: str = "admin_msg_by_sub",
+) -> InlineKeyboardMarkup:
+    """Область ботов для рассылки: Leto (основной + зеркала), каждый копикет, все."""
+    from app.utils.bot_registry import copycat_bot_ids, get_brand_for_bot
+
+    texts = get_texts(language)
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                text=_t(texts, "ADMIN_BROADCAST_SCOPE_LETO", "🏠 Leto (основной + зеркала)"),
+                callback_data="broadcast_scope:leto",
+            )
+        ]
+    ]
+    for bot_id in sorted(copycat_bot_ids()):
+        brand_name = get_brand_for_bot(bot_id).name or str(bot_id)
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"🎭 {brand_name}",
+                callback_data=f"broadcast_scope:copycat:{bot_id}",
+            )
+        ])
+    keyboard.append([
+        InlineKeyboardButton(
+            text=_t(texts, "ADMIN_BROADCAST_SCOPE_ALL", "🌐 Все боты"),
+            callback_data="broadcast_scope:all",
+        )
+    ])
+    keyboard.append([InlineKeyboardButton(text=texts.BACK, callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
 def get_custom_criteria_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
     texts = get_texts(language)
 

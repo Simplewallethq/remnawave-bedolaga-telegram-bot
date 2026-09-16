@@ -3414,6 +3414,20 @@ async def relax_users_telegram_id_nullable() -> bool:
         return False
 
 
+async def ensure_broadcast_history_bot_scope_column():
+    try:
+        async with engine.begin() as conn:
+            if not await check_column_exists("broadcast_history", "bot_scope"):
+                await conn.execute(
+                    text("ALTER TABLE broadcast_history ADD COLUMN bot_scope VARCHAR(32) NULL")
+                )
+        logger.info("✅ Поле bot_scope в broadcast_history готово")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления поля bot_scope в broadcast_history: {e}")
+        return False
+
+
 async def add_media_fields_to_broadcast_history():
     logger.info("=== ДОБАВЛЕНИЕ ПОЛЕЙ МЕДИА В BROADCAST_HISTORY ===")
     
@@ -8488,6 +8502,13 @@ async def run_universal_migration():
             logger.info("✅ Колонка bot_id добавлена")
         else:
             logger.warning("⚠️ Не удалось добавить колонку bot_id")
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ BOT_SCOPE В BROADCAST_HISTORY ===")
+        bot_scope_ready = await ensure_broadcast_history_bot_scope_column()
+        if bot_scope_ready:
+            logger.info("✅ Колонка bot_scope в broadcast_history добавлена")
+        else:
+            logger.warning("⚠️ Не удалось добавить колонку bot_scope в broadcast_history")
 
         logger.info("=== ДОБАВЛЕНИЕ МЕДИА ПОЛЕЙ В BROADCAST_HISTORY ===")
         media_fields_added = await add_media_fields_to_broadcast_history()

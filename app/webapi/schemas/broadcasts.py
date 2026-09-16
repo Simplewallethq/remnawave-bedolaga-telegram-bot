@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import ClassVar, Optional
 
 from pydantic import BaseModel, Field, validator
 
 from app.keyboards.admin import BROADCAST_BUTTONS, DEFAULT_BROADCAST_BUTTONS
+
+
+BOT_SCOPE_PATTERN = re.compile(r"^(leto|all|copycat:\d+)$")
 
 
 class BroadcastMedia(BaseModel):
@@ -21,6 +25,8 @@ class BroadcastCreateRequest(BaseModel):
         default_factory=lambda: list(DEFAULT_BROADCAST_BUTTONS)
     )
     media: Optional[BroadcastMedia] = None
+    # Область ботов: leto (основной + зеркала) | all | copycat:<bot_id>
+    bot_scope: str = "leto"
 
     _ALLOWED_TARGETS: ClassVar[set[str]] = {
         "all",
@@ -62,6 +68,17 @@ class BroadcastCreateRequest(BaseModel):
 
         raise ValueError("Unsupported target value")
 
+    @validator("bot_scope", pre=True)
+    def validate_bot_scope(cls, value) -> str:
+        if value is None:
+            return "leto"
+        normalized = str(value).strip().lower()
+        if not normalized:
+            return "leto"
+        if not BOT_SCOPE_PATTERN.fullmatch(normalized):
+            raise ValueError("Unsupported bot_scope value (expected leto, all or copycat:<bot_id>)")
+        return normalized
+
     @validator("selected_buttons", pre=True)
     def validate_selected_buttons(cls, value):
         if value is None:
@@ -87,6 +104,7 @@ class BroadcastCreateRequest(BaseModel):
 class BroadcastResponse(BaseModel):
     id: int
     target_type: str
+    bot_scope: Optional[str] = None
     message_text: str
     has_media: bool
     media_type: Optional[str] = None

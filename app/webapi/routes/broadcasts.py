@@ -29,6 +29,7 @@ def _serialize_broadcast(broadcast: BroadcastHistory) -> BroadcastResponse:
     return BroadcastResponse(
         id=broadcast.id,
         target_type=broadcast.target_type,
+        bot_scope=getattr(broadcast, "bot_scope", None),
         message_text=broadcast.message_text,
         has_media=broadcast.has_media,
         media_type=broadcast.media_type,
@@ -59,6 +60,7 @@ async def create_broadcast(
 
     broadcast = BroadcastHistory(
         target_type=payload.target,
+        bot_scope=payload.bot_scope,
         message_text=message_text,
         has_media=media_payload is not None,
         media_type=media_payload.type if media_payload else None,
@@ -89,6 +91,7 @@ async def create_broadcast(
         selected_buttons=payload.selected_buttons,
         media=media_config,
         initiator_name=getattr(token, "name", None) or getattr(token, "created_by", None),
+        bot_scope=payload.bot_scope,
     )
 
     await broadcast_service.start_broadcast(broadcast.id, config)
