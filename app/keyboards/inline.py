@@ -3577,8 +3577,10 @@ def get_connect_windows_keyboard(
     # The caption only lists the two failures people actually hit; the rest
     # (file deleted on download, installer needing admin rights, checksums)
     # lives in the README, which CONNECT_WINDOWS_WARNING points at.
-    if leto_url:
-        buttons.append([
+    # Unconditional: the guide is about Windows install warnings in general, so it
+    # is just as useful to someone installing Happ, and it does not depend on our
+    # own download link being configured.
+    buttons.append([
             InlineKeyboardButton(
                 text=texts.t("CONNECT_WINDOWS_GUIDE_BUTTON", "❓ Проблемы с установкой"),
                 # Percent-encoded: Telegram rejects non-ASCII in button URLs. The
