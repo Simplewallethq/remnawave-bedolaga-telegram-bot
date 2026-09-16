@@ -3560,40 +3560,41 @@ def get_connect_windows_keyboard(
     # referrer, which is meaningless on a direct .exe download.
     # The link is optional in config, so when it is unset the menu falls back to
     # Happ alone instead of offering a dead button.
+    # Buttons are grouped per app, in the order the caption describes them: both
+    # Leto actions, then both Happ ones. Read the download setting directly rather
+    # than through build_personal_play_link — that one appends a Play Store install
+    # referrer, which is meaningless on a direct .exe download.
     leto_url = (settings.LETO_APP_DOWNLOAD_LINK_WINDOWS or "").strip()
     if leto_url:
         buttons.append([
             InlineKeyboardButton(
-                text=texts.t("CONNECT_DOWNLOAD_LETO_WINDOWS_BUTTON", "☀️ Скачать Leto VPN"),
+                text=texts.t("CONNECT_DOWNLOAD_LETO_WINDOWS_BUTTON", "☀️ Скачать Leto App"),
                 url=leto_url,
             )
         ])
-    buttons.extend([
-        [InlineKeyboardButton(
+    # Unconditional: this is where the install warnings live now that the caption
+    # no longer carries them, so it must not disappear when the download link is
+    # unset — that is exactly the deploy where a user has nowhere else to look.
+    buttons.append([
+        InlineKeyboardButton(
+            text=texts.t("CONNECT_WINDOWS_GUIDE_BUTTON", "❓ Проблемы с Leto App"),
+            # Percent-encoded: Telegram rejects non-ASCII in button URLs. The
+            # double hyphen is GitHub's anchor for the em dash in the heading.
+            url=(
+                "https://github.com/letohq/Leto-Desktop"
+                "#%D0%BF%D1%80%D0%B5%D0%B4%D1%83%D0%BF%D1%80%D0%B5%D0%B6%D0%B4"
+                "%D0%B5%D0%BD%D0%B8%D1%8F-%D0%BF%D1%80%D0%B8-%D1%83%D1%81%D1%82"
+                "%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B5--%D1%8D%D1%82%D0%BE-"
+                "%D0%BD%D0%BE%D1%80%D0%BC%D0%B0%D0%BB%D1%8C%D0%BD%D0%BE"
+            ),
+        )
+    ])
+    buttons.append([
+        InlineKeyboardButton(
             text=texts.t("CONNECT_DOWNLOAD_HAPP_WINDOWS_BUTTON", "💻 Скачать Happ"),
             url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
-        )],
+        )
     ])
-    # The caption only lists the two failures people actually hit; the rest
-    # (file deleted on download, installer needing admin rights, checksums)
-    # lives in the README, which CONNECT_WINDOWS_WARNING points at.
-    # Unconditional: the guide is about Windows install warnings in general, so it
-    # is just as useful to someone installing Happ, and it does not depend on our
-    # own download link being configured.
-    buttons.append([
-            InlineKeyboardButton(
-                text=texts.t("CONNECT_WINDOWS_GUIDE_BUTTON", "❓ Проблемы с установкой"),
-                # Percent-encoded: Telegram rejects non-ASCII in button URLs. The
-                # double hyphen is GitHub's anchor for the em dash in the heading.
-                url=(
-                    "https://github.com/letohq/Leto-Desktop"
-                    "#%D0%BF%D1%80%D0%B5%D0%B4%D1%83%D0%BF%D1%80%D0%B5%D0%B6%D0%B4"
-                    "%D0%B5%D0%BD%D0%B8%D1%8F-%D0%BF%D1%80%D0%B8-%D1%83%D1%81%D1%82"
-                    "%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B5--%D1%8D%D1%82%D0%BE-"
-                    "%D0%BD%D0%BE%D1%80%D0%BC%D0%B0%D0%BB%D1%8C%D0%BD%D0%BE"
-                ),
-            )
-        ])
     if happ_transfer_url:
         buttons.append([
             InlineKeyboardButton(
