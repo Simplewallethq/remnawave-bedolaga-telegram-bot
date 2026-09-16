@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.utils.bot_registry import bot_for_user
+from app.branding.filters import is_copycat_recipient
 from app.database.crud.promo_offer_log import log_promo_offer_action
 from app.database.models import InteractiveNotificationLog, PromoOfferLog, User
 
@@ -150,6 +151,9 @@ class VpnDepositBonusService:
         panel_first_connected_at: Optional[datetime | str] = None,
     ) -> bool:
         if not user or not user.id or not user.telegram_id:
+            return False
+        if is_copycat_recipient(user):
+            # Бонус за депозит — воронка Leto, копикетам не ставим в очередь.
             return False
         if not self.is_debug_user_allowed(user):
             logger.info(
@@ -463,6 +467,8 @@ class VpnDepositBonusService:
 
     async def send_success_message(self, bot: Any, user: User) -> None:
         if not bot or not user.telegram_id:
+            return
+        if is_copycat_recipient(user):
             return
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[

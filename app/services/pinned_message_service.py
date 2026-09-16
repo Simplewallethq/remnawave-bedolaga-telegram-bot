@@ -13,6 +13,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.utils.bot_registry import bot_for_user
+from app.branding.context import use_brand_for_user
+from app.branding.filters import is_copycat_recipient
 from app.database.crud.user import get_users_list
 from app.database.database import AsyncSessionLocal
 from app.database.models import PinnedMessage, User, UserStatus
@@ -106,6 +108,10 @@ async def deliver_pinned_message_to_user(
     user: User,
     pinned_message: Optional[PinnedMessage] = None,
 ) -> bool:
+    # Закреп — контент основного бренда; пользователям копикетов его не шлём.
+    if is_copycat_recipient(user):
+        return False
+
     pinned_message = pinned_message or await get_active_pinned_message(db)
     if not pinned_message:
         return False
@@ -115,7 +121,8 @@ async def deliver_pinned_message_to_user(
         if last_pinned_id == pinned_message.id:
             return False
 
-    success = await _send_and_pin_message(bot_for_user(user, bot), user.telegram_id, pinned_message)
+    with use_brand_for_user(user):
+        success = await _send_and_pin_message(bot_for_user(user, bot), user.telegram_id, pinned_message)
     if success:
         await _mark_pinned_delivery(user_id=getattr(user, "id", None), pinned_message_id=pinned_message.id)
     return success
@@ -141,7 +148,8 @@ async def broadcast_pinned_message(
         if not batch:
             break
 
-        users.extend(batch)
+        # Закреп — контент основного бренда, пользователям копикетов не шлём.
+        users.extend(u for u in batch if not is_copycat_recipient(u))
         offset += batch_size
 
     sent_count = 0
@@ -153,11 +161,12 @@ async def broadcast_pinned_message(
         async with semaphore:
             for attempt in range(3):
                 try:
-                    success = await _send_and_pin_message(
-                        bot_for_user(user, bot),
-                        user.telegram_id,
-                        pinned_message,
-                    )
+                    with use_brand_for_user(user):
+                        success = await _send_and_pin_message(
+                            bot_for_user(user, bot),
+                            user.telegram_id,
+                            pinned_message,
+                        )
                     if success:
                         sent_count += 1
                     else:
@@ -212,7 +221,7 @@ async def unpin_active_pinned_message(
         if not batch:
             break
 
-        users.extend(batch)
+        users.extend(u for u in batch if not is_copycat_recipient(u))
         offset += batch_size
 
     unpinned_count = 0

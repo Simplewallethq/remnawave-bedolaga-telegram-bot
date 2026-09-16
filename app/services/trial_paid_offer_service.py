@@ -31,6 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.branding.filters import not_copycat_user_clause
+from app.utils.bot_registry import is_copycat_user
 from app.database.models import Subscription, SubscriptionPlan, User, UserStatus
 from app.localization.texts import get_texts
 from app.utils.formatters import format_days_declension
@@ -67,6 +69,10 @@ class TrialPaidOfferService:
         """
         if not settings.is_trial_paid_offer_enabled():
             return None
+        if is_copycat_user(user):
+            # Копикеты не участвуют в эксперименте: у них обычный бесплатный триал.
+            user.trial_offer_variant = VARIANT_CONTROL
+            return VARIANT_CONTROL
         percent = settings.get_trial_paid_offer_percent()
         variant = VARIANT_PAID if random.random() * 100 < percent else VARIANT_CONTROL
         user.trial_offer_variant = variant
@@ -86,6 +92,8 @@ class TrialPaidOfferService:
         """Показывать ли оффер вместо триала: тест включён, вариант paid_trial,
         подписки ещё не было и платной истории нет."""
         if not user or not settings.is_trial_paid_offer_enabled():
+            return False
+        if is_copycat_user(user):
             return False
         if not self.is_paid_variant(user):
             return False
@@ -407,6 +415,7 @@ class TrialPaidOfferService:
                 User.paid_trial_fallback_at.is_(None),
                 User.created_at < before,
                 Subscription.id.is_(None),
+                not_copycat_user_clause(),
             )
             .options(selectinload(User.subscription))
             .order_by(User.created_at.desc())

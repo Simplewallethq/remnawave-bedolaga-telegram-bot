@@ -19,6 +19,7 @@ from app.database.models import (
     User,
     UserStatus,
 )
+from app.branding.filters import not_copycat_user_clause
 from app.utils.pricing_utils import apply_percentage_discount
 
 
@@ -214,6 +215,7 @@ class HotInvoiceOfferService:
                 ),
                 User.telegram_id.isnot(None),
                 User.status == UserStatus.ACTIVE.value,
+                not_copycat_user_clause(),
                 ~payment_after_invoice,
             )
             .order_by(PlategaPayment.id.asc())
@@ -257,6 +259,7 @@ class HotInvoiceOfferService:
                 PlategaPayment.id > after_payment_id,
                 User.telegram_id.isnot(None),
                 User.status == UserStatus.ACTIVE.value,
+                not_copycat_user_clause(),
             )
             .order_by(PlategaPayment.id.asc())
             .limit(limit)

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database.crud.discount_offer import mark_offer_claimed
+from app.branding.filters import not_copycat_user_clause
 from app.database.models import (
     DiscountOffer,
     InteractiveNotificationLog,
@@ -268,6 +269,7 @@ class ExpiredSubscriptionOfferService:
                 User.telegram_id.isnot(None),
                 User.status == UserStatus.ACTIVE.value,
                 User.has_had_paid_subscription.is_(True),
+                not_copycat_user_clause(),
             )
             .order_by(Subscription.id.asc())
             .limit(limit)

@@ -9,6 +9,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import and_, func, or_, select, text, update
 
 from app.config import settings
+from app.branding.filters import not_copycat_user_clause
 from app.database.database import AsyncSessionLocal
 from app.database.models import (
     InteractiveNotificationLog,
@@ -121,6 +122,7 @@ class LegacyNotifyOnceService:
                     User.status == UserStatus.ACTIVE.value,
                     self._legacy_cohort_condition(),
                     self._inactive_subscription_condition(now),
+                    not_copycat_user_clause(),
                 )
                 .order_by(User.id.asc())
                 .limit(self.BATCH_LIMIT)

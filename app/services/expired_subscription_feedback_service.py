@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.utils.bot_registry import bot_for_user
+from app.branding.filters import is_copycat_recipient, not_copycat_user_clause
 from app.database.crud.feedback import (
     create_feedback,
     get_feedback_by_event_key,
@@ -208,6 +209,7 @@ class ExpiredSubscriptionFeedbackService:
                     Subscription.is_partner == False,  # noqa: E712
                     Subscription.end_date >= start_utc_naive,
                     Subscription.end_date < end_utc_naive,
+                    not_copycat_user_clause(),
                 )
             )
             .order_by(User.id)
@@ -231,6 +233,9 @@ class ExpiredSubscriptionFeedbackService:
         feedback: Feedback,
         ended_on_msk,
     ) -> dict:
+        if is_copycat_recipient(user):
+            # Опрос написан про Leto — копикетам не шлём.
+            return {"status": "unreachable"}
         try:
             sent_message = await bot_for_user(user, bot).send_message(
                 chat_id=user.telegram_id,

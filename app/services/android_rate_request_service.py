@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.utils.bot_registry import bot_for_user
+from app.branding.filters import is_copycat_recipient, not_copycat_user_clause
 from app.config import settings
 from app.database.crud.notification import (
     get_latest_notification_sent_at,
@@ -221,6 +222,7 @@ class AndroidRateRequestService:
                     and_(
                         User.telegram_id == ANDROID_RATE_REQUEST_DEBUG_TELEGRAM_ID,
                         User.id > after_user_id,
+                        not_copycat_user_clause(),
                     )
                 )
                 .order_by(User.id)
@@ -292,6 +294,7 @@ class AndroidRateRequestService:
                         latest_rate_requests.c.latest_sent_at.is_(None),
                         latest_rate_requests.c.latest_sent_at <= cooldown_boundary,
                     ),
+                    not_copycat_user_clause(),
                 )
             )
             .order_by(User.id)
@@ -355,6 +358,9 @@ class AndroidRateRequestService:
     async def _send_rate_request(
         self, bot, user: User, sent_notification_id: int
     ) -> str:
+        if is_copycat_recipient(user):
+            # Отзыв в Google Play просят только про Leto — копикетам не шлём.
+            return "unreachable"
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [

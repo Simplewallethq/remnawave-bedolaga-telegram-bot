@@ -22,6 +22,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.branding.context import use_brand_for_user
 from app.utils.bot_registry import bot_for_user
 from app.config import settings
 from app.database.models import (
@@ -573,16 +574,17 @@ class OnePaymentPaymentMixin:
         if not bot or not getattr(user, "telegram_id", None):
             return
         bot = bot_for_user(user, bot)
-        try:
-            keyboard = await self.build_topup_success_keyboard(user)
-            await bot.send_message(
-                user.telegram_id,
-                format_topup_success_message(settings.format_price(amount_kopeks)),
-                parse_mode="HTML",
-                reply_markup=keyboard,
-            )
-        except Exception as error:
-            logger.error("Ошибка отправки уведомления пользователю 1Payment: %s", error)
+        with use_brand_for_user(user):
+            try:
+                keyboard = await self.build_topup_success_keyboard(user)
+                await bot.send_message(
+                    user.telegram_id,
+                    format_topup_success_message(settings.format_price(amount_kopeks)),
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+            except Exception as error:
+                logger.error("Ошибка отправки уведомления пользователю 1Payment: %s", error)
 
     # ------------------------------------------------------------ статус (кнопка)
 
@@ -1094,25 +1096,26 @@ class OnePaymentPaymentMixin:
         if not bot or not getattr(user, "telegram_id", None):
             return
         bot = bot_for_user(user, bot)
-        try:
-            from app.utils.timezone import format_local_datetime
+        with use_brand_for_user(user):
+            try:
+                from app.utils.timezone import format_local_datetime
 
-            texts = get_texts(getattr(user, "language", None) or settings.DEFAULT_LANGUAGE)
-            text = texts.t(
-                "ONEPAYMENT_RECURRING_SUCCESS",
-                "✅ <b>Подписка продлена автоматически</b>\n\n"
-                "По СБП списано {amount}. Подписка продлена на {days} дн. — до {end_date}.\n\n"
-                "Отключить автоплатёж можно в разделе «Управление подпиской → Автоплатеж».",
-            ).format(
-                amount=settings.format_price(charged_kopeks),
-                days=period_days,
-                end_date=format_local_datetime(subscription.end_date, "%d.%m.%Y %H:%M")
-                if subscription.end_date
-                else "—",
-            )
-            await bot.send_message(user.telegram_id, text, parse_mode="HTML")
-        except Exception as error:
-            logger.error("1Payment: не удалось уведомить об автопродлении пользователя %s: %s", user.id, error)
+                texts = get_texts(getattr(user, "language", None) or settings.DEFAULT_LANGUAGE)
+                text = texts.t(
+                    "ONEPAYMENT_RECURRING_SUCCESS",
+                    "✅ <b>Подписка продлена автоматически</b>\n\n"
+                    "По СБП списано {amount}. Подписка продлена на {days} дн. — до {end_date}.\n\n"
+                    "Отключить автоплатёж можно в разделе «Управление подпиской → Автоплатеж».",
+                ).format(
+                    amount=settings.format_price(charged_kopeks),
+                    days=period_days,
+                    end_date=format_local_datetime(subscription.end_date, "%d.%m.%Y %H:%M")
+                    if subscription.end_date
+                    else "—",
+                )
+                await bot.send_message(user.telegram_id, text, parse_mode="HTML")
+            except Exception as error:
+                logger.error("1Payment: не удалось уведомить об автопродлении пользователя %s: %s", user.id, error)
 
     async def _notify_onepayment_recurring_failed(
         self, user: Any, amount_kopeks: int, *, binding_failed: bool = False
@@ -1121,33 +1124,34 @@ class OnePaymentPaymentMixin:
         if not bot or not getattr(user, "telegram_id", None):
             return
         bot = bot_for_user(user, bot)
-        try:
-            from aiogram.types import InlineKeyboardMarkup
+        with use_brand_for_user(user):
+            try:
+                from aiogram.types import InlineKeyboardMarkup
 
-            from app.utils.miniapp_buttons import build_miniapp_or_callback_button
+                from app.utils.miniapp_buttons import build_miniapp_or_callback_button
 
-            texts = get_texts(getattr(user, "language", None) or settings.DEFAULT_LANGUAGE)
-            if binding_failed:
-                text = texts.t(
-                    "ONEPAYMENT_RECURRING_FAILED_FINAL",
-                    "❌ <b>Автоплатёж по СБП отключён</b>\n\n"
-                    "Несколько попыток списать {amount} не удались. Продлите подписку вручную — "
-                    "при оплате по СБП автоплатёж подключится заново.",
-                ).format(amount=settings.format_price(amount_kopeks))
-            else:
-                text = texts.t(
-                    "ONEPAYMENT_RECURRING_FAILED",
-                    "❌ <b>Не удалось списать оплату по СБП</b>\n\n"
-                    "Банк отклонил автосписание {amount} за продление подписки. "
-                    "Мы повторим попытку позже, а пока подписку можно продлить вручную.",
-                ).format(amount=settings.format_price(amount_kopeks))
+                texts = get_texts(getattr(user, "language", None) or settings.DEFAULT_LANGUAGE)
+                if binding_failed:
+                    text = texts.t(
+                        "ONEPAYMENT_RECURRING_FAILED_FINAL",
+                        "❌ <b>Автоплатёж по СБП отключён</b>\n\n"
+                        "Несколько попыток списать {amount} не удались. Продлите подписку вручную — "
+                        "при оплате по СБП автоплатёж подключится заново.",
+                    ).format(amount=settings.format_price(amount_kopeks))
+                else:
+                    text = texts.t(
+                        "ONEPAYMENT_RECURRING_FAILED",
+                        "❌ <b>Не удалось списать оплату по СБП</b>\n\n"
+                        "Банк отклонил автосписание {amount} за продление подписки. "
+                        "Мы повторим попытку позже, а пока подписку можно продлить вручную.",
+                    ).format(amount=settings.format_price(amount_kopeks))
 
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [build_miniapp_or_callback_button(text="⏰ Продлить подписку", callback_data="subscription")],
-                    [build_miniapp_or_callback_button(text="📱 Моя подписка", callback_data="subscription")],
-                ]
-            )
-            await bot.send_message(user.telegram_id, text, parse_mode="HTML", reply_markup=keyboard)
-        except Exception as error:
-            logger.error("1Payment: не удалось уведомить о неудачном списании пользователя %s: %s", user.id, error)
+                keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [build_miniapp_or_callback_button(text="⏰ Продлить подписку", callback_data="subscription")],
+                        [build_miniapp_or_callback_button(text="📱 Моя подписка", callback_data="subscription")],
+                    ]
+                )
+                await bot.send_message(user.telegram_id, text, parse_mode="HTML", reply_markup=keyboard)
+            except Exception as error:
+                logger.error("1Payment: не удалось уведомить о неудачном списании пользователя %s: %s", user.id, error)

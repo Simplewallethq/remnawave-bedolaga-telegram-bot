@@ -10,6 +10,8 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.utils.bot_registry import get_bot_instance
+from app.branding.context import use_brand_for_user
+from app.branding.filters import is_copycat_recipient
 from app.config import settings
 from app.database.crud.user import add_user_balance
 from app.database.models import (
@@ -85,6 +87,8 @@ async def send_poll_to_users(
             bot_id=getattr(user, "bot_id", None),
         )
         for user in users
+        # Опросы — контент основного бренда, пользователям копикетов не шлём.
+        if not is_copycat_recipient(user)
     ]
 
     # Получаем список пользователей, которые уже прошли опрос, за один запрос
@@ -134,16 +138,17 @@ async def send_poll_to_users(
 
                     await new_db.flush()
 
-                    text = _build_poll_invitation_text(poll, user_snapshot.language)
-                    keyboard = build_start_keyboard(response.id, user_snapshot.language)
+                    with use_brand_for_user(user_snapshot):
+                        text = _build_poll_invitation_text(poll, user_snapshot.language)
+                        keyboard = build_start_keyboard(response.id, user_snapshot.language)
 
-                    await (get_bot_instance(user_snapshot.bot_id) or bot).send_message(
-                        chat_id=user_snapshot.telegram_id,
-                        text=text,
-                        reply_markup=keyboard,
-                        parse_mode="HTML",
-                        disable_web_page_preview=True,
-                    )
+                        await (get_bot_instance(user_snapshot.bot_id) or bot).send_message(
+                            chat_id=user_snapshot.telegram_id,
+                            text=text,
+                            reply_markup=keyboard,
+                            parse_mode="HTML",
+                            disable_web_page_preview=True,
+                        )
 
                     await new_db.commit()
                     return "sent"

@@ -9,6 +9,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import exists, select, text, update
 
 from app.database.database import AsyncSessionLocal
+from app.branding.filters import not_copycat_user_clause
 from app.database.models import InteractiveNotificationLog, Subscription, User, UserStatus
 from app.services.legacy_notify_once_service import LegacyNotifyOnceService
 
@@ -196,6 +197,7 @@ class LegacyReviewBonusService:
                 LegacyNotifyOnceService._legacy_cohort_condition(),
                 LegacyNotifyOnceService._inactive_subscription_condition(now),
                 ~already_attempted,
+                not_copycat_user_clause(),
             )
             .order_by(User.id.asc())
             .limit(self.DAILY_LIMIT)

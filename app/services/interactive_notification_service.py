@@ -10,7 +10,8 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
-from app.utils.bot_registry import bot_for_user, get_bot_instance
+from app.branding.filters import is_copycat_recipient, not_copycat_user_clause
+from app.utils.bot_registry import bot_for_user, get_bot_instance, is_copycat_bot
 from app.database.database import AsyncSessionLocal
 from app.database.models import InteractiveNotificationLog, Subscription, User
 from app.services.cold_solo_offer_service import cold_solo_offer_service
@@ -609,6 +610,8 @@ class InteractiveNotificationService:
     ) -> Optional[int]:
         if not self.bot or candidate.user.telegram_id is None:
             return None
+        if is_copycat_recipient(candidate.user):
+            return None
         bot = bot_for_user(candidate.user, self.bot)
 
         if slot_key == hot_invoice_offer_service.FIRST_SLOT_KEY:
@@ -823,7 +826,11 @@ class InteractiveNotificationService:
         if not user_id:
             return None
         result = await db.execute(
-            select(User).where(User.id == user_id, User.status == "active")
+            select(User).where(
+                User.id == user_id,
+                User.status == "active",
+                not_copycat_user_clause(),
+            )
         )
         return result.scalar_one_or_none()
 
@@ -834,7 +841,7 @@ class InteractiveNotificationService:
         first_touch: bool,
         bot_id: Optional[int] = None,
     ) -> Optional[int]:
-        if not self.bot:
+        if not self.bot or is_copycat_bot(bot_id):
             return None
         bot = get_bot_instance(bot_id) or self.bot
 
@@ -1070,6 +1077,8 @@ class InteractiveNotificationService:
     ) -> Optional[int]:
         if not self.bot or candidate.user.telegram_id is None:
             return None
+        if is_copycat_recipient(candidate.user):
+            return None
         bot = bot_for_user(candidate.user, self.bot)
 
         plan_code = candidate.plan_code
@@ -1184,7 +1193,10 @@ class InteractiveNotificationService:
                 result = await db.execute(
                     select(User)
                     .options(selectinload(User.subscription))
-                    .where(User.id == legacy_pro_offer_service.debug_user_id())
+                    .where(
+                        User.id == legacy_pro_offer_service.debug_user_id(),
+                        not_copycat_user_clause(),
+                    )
                     .limit(1)
                 )
                 user = result.scalars().first()
@@ -1292,7 +1304,7 @@ class InteractiveNotificationService:
                 result = await db.execute(
                     select(User)
                     .options(selectinload(User.subscription))
-                    .where(User.telegram_id.in_(batch_ids))
+                    .where(User.telegram_id.in_(batch_ids), not_copycat_user_clause())
                     .order_by(User.id.asc())
                 )
                 users = list(result.scalars().all())
@@ -1363,7 +1375,7 @@ class InteractiveNotificationService:
         offer_id: int,
         bot_id: Optional[int] = None,
     ) -> Optional[int]:
-        if not self.bot:
+        if not self.bot or is_copycat_bot(bot_id):
             return None
         bot = get_bot_instance(bot_id) or self.bot
 
@@ -1423,6 +1435,7 @@ class InteractiveNotificationService:
                         User.telegram_id.isnot(None),
                         or_(Subscription.is_trial.is_(True), Subscription.is_paid_trial.is_(True)),
                         Subscription.end_date <= cutoff,
+                        not_copycat_user_clause(),
                     )
                     .order_by(User.id.asc())
                     .limit(self.BATCH_LIMIT)
@@ -1508,6 +1521,7 @@ class InteractiveNotificationService:
                     .where(
                         User.id > last_user_id,
                         User.telegram_id.isnot(None),
+                        not_copycat_user_clause(),
                     )
                     .order_by(User.id.asc())
                     .limit(self.BATCH_LIMIT)
@@ -1590,7 +1604,7 @@ class InteractiveNotificationService:
         offer_id: int,
         bot_id: Optional[int] = None,
     ) -> Optional[int]:
-        if not self.bot:
+        if not self.bot or is_copycat_bot(bot_id):
             return None
         bot = get_bot_instance(bot_id) or self.bot
 

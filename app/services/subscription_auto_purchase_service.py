@@ -36,6 +36,7 @@ from app.services.subscription_purchase_service import (
 )
 from app.services.subscription_service import SubscriptionService
 from app.services.user_cart_service import user_cart_service
+from app.branding.context import use_brand_for_user
 from app.utils.bot_registry import bot_for_user, get_logo_for_bot
 from app.utils.pricing_utils import format_period_description
 from app.utils.success_notifications import (
@@ -387,56 +388,57 @@ async def _auto_extend_subscription(
     await user_cart_service.delete_user_cart(user.id)
     await clear_subscription_checkout_draft(user.id)
 
-    texts = get_texts(getattr(user, "language", "ru"))
-    period_label = format_period_description(
-        prepared.period_days,
-        getattr(user, "language", "ru"),
-    )
-    new_end_date = updated_subscription.end_date
-    end_date_label = format_local_datetime(new_end_date, "%d.%m.%Y %H:%M")
+    with use_brand_for_user(user):
+        texts = get_texts(getattr(user, "language", "ru"))
+        period_label = format_period_description(
+            prepared.period_days,
+            getattr(user, "language", "ru"),
+        )
+        new_end_date = updated_subscription.end_date
+        end_date_label = format_local_datetime(new_end_date, "%d.%m.%Y %H:%M")
 
-    if bot:
-        try:
-            notification_service = AdminNotificationService(bot)
-            await notification_service.send_subscription_extension_notification(
-                db,
-                user,
-                updated_subscription,
-                transaction,
-                prepared.period_days,
-                old_end_date,
-                new_end_date=new_end_date,
-                balance_after=user.balance_kopeks,
-                record_event=False,
-            )
-        except Exception as error:  # pragma: no cover - defensive logging
-            logger.error(
-                "⚠️ Автопокупка: не удалось уведомить администраторов о продлении пользователя %s: %s",
-                user.telegram_id,
-                error,
-            )
+        if bot:
+            try:
+                notification_service = AdminNotificationService(bot)
+                await notification_service.send_subscription_extension_notification(
+                    db,
+                    user,
+                    updated_subscription,
+                    transaction,
+                    prepared.period_days,
+                    old_end_date,
+                    new_end_date=new_end_date,
+                    balance_after=user.balance_kopeks,
+                    record_event=False,
+                )
+            except Exception as error:  # pragma: no cover - defensive logging
+                logger.error(
+                    "⚠️ Автопокупка: не удалось уведомить администраторов о продлении пользователя %s: %s",
+                    user.telegram_id,
+                    error,
+                )
 
-        try:
-            full_message = format_subscription_renewal_success(
-                plan=subscription_plan_name(updated_subscription),
-                days=prepared.period_days,
-                end_date=new_end_date,
-            )
+            try:
+                full_message = format_subscription_renewal_success(
+                    plan=subscription_plan_name(updated_subscription),
+                    days=prepared.period_days,
+                    end_date=new_end_date,
+                )
 
-            keyboard = build_success_management_keyboard()
+                keyboard = build_success_management_keyboard()
 
-            await bot.send_message(
-                chat_id=user.telegram_id,
-                text=full_message,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
-        except Exception as error:  # pragma: no cover - defensive logging
-            logger.error(
-                "⚠️ Автопокупка: не удалось уведомить пользователя %s о продлении: %s",
-                user.telegram_id,
-                error,
-            )
+                await bot.send_message(
+                    chat_id=user.telegram_id,
+                    text=full_message,
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                )
+            except Exception as error:  # pragma: no cover - defensive logging
+                logger.error(
+                    "⚠️ Автопокупка: не удалось уведомить пользователя %s о продлении: %s",
+                    user.telegram_id,
+                    error,
+                )
 
     logger.info(
         "✅ Автопокупка: подписка продлена на %s дней для пользователя %s",
@@ -549,59 +551,60 @@ async def _auto_add_devices(
 
     await user_cart_service.delete_user_cart(user.id)
 
-    texts = get_texts(getattr(user, "language", "ru"))
+    with use_brand_for_user(user):
+        texts = get_texts(getattr(user, "language", "ru"))
 
-    if bot:
-        try:
-            notification_service = AdminNotificationService(bot)
-            await notification_service.send_subscription_update_notification(
-                db, user, subscription, "devices", old_device_limit, device_count, price_kopeks
-            )
-        except Exception as error:
-            logger.error(
-                "⚠️ Автопокупка устройств: ошибка уведомления админов для пользователя %s: %s",
-                user.telegram_id, error,
-            )
+        if bot:
+            try:
+                notification_service = AdminNotificationService(bot)
+                await notification_service.send_subscription_update_notification(
+                    db, user, subscription, "devices", old_device_limit, device_count, price_kopeks
+                )
+            except Exception as error:
+                logger.error(
+                    "⚠️ Автопокупка устройств: ошибка уведомления админов для пользователя %s: %s",
+                    user.telegram_id, error,
+                )
 
-        try:
-            success_text = (
-                "✅ Количество устройств увеличено!\n\n"
-                f"📱 Было: {old_device_limit} → Стало: {device_count}\n"
-                f"💰 Списано: {texts.format_price(price_kopeks)}"
-            )
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(
-                        text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 My subscription"),
-                        callback_data="subscription",
-                    )],
-                    [InlineKeyboardButton(
-                        text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "🏠 Main menu"),
-                        callback_data="back_to_menu",
-                    )],
-                ]
-            )
-            logo_path = get_logo_for_bot(bot.id if bot else None)
-            if settings.ENABLE_LOGO_MODE and logo_path.exists():
-                await bot.send_photo(
-                    chat_id=user.telegram_id,
-                    photo=FSInputFile(logo_path),
-                    caption=success_text,
-                    reply_markup=keyboard,
-                    parse_mode="HTML",
+            try:
+                success_text = (
+                    "✅ Количество устройств увеличено!\n\n"
+                    f"📱 Было: {old_device_limit} → Стало: {device_count}\n"
+                    f"💰 Списано: {texts.format_price(price_kopeks)}"
                 )
-            else:
-                await bot.send_message(
-                    chat_id=user.telegram_id,
-                    text=success_text,
-                    reply_markup=keyboard,
-                    parse_mode="HTML",
+                keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 My subscription"),
+                            callback_data="subscription",
+                        )],
+                        [InlineKeyboardButton(
+                            text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "🏠 Main menu"),
+                            callback_data="back_to_menu",
+                        )],
+                    ]
                 )
-        except Exception as error:
-            logger.error(
-                "⚠️ Автопокупка устройств: ошибка уведомления пользователя %s: %s",
-                user.telegram_id, error,
-            )
+                logo_path = get_logo_for_bot(bot.id if bot else None)
+                if settings.ENABLE_LOGO_MODE and logo_path.exists():
+                    await bot.send_photo(
+                        chat_id=user.telegram_id,
+                        photo=FSInputFile(logo_path),
+                        caption=success_text,
+                        reply_markup=keyboard,
+                        parse_mode="HTML",
+                    )
+                else:
+                    await bot.send_message(
+                        chat_id=user.telegram_id,
+                        text=success_text,
+                        reply_markup=keyboard,
+                        parse_mode="HTML",
+                    )
+            except Exception as error:
+                logger.error(
+                    "⚠️ Автопокупка устройств: ошибка уведомления пользователя %s: %s",
+                    user.telegram_id, error,
+                )
 
     logger.info(
         "✅ Автопокупка устройств: %s → %s для пользователя %s",
@@ -613,59 +616,60 @@ async def _auto_add_devices(
 async def _notify_auto_tariff_success(bot: Bot, user: User, period_label: str) -> None:
     """Send the user the same kind of success card the legacy auto-purchase sends."""
     bot = bot_for_user(user, bot)
-    texts = get_texts(getattr(user, "language", "ru"))
-    try:
-        auto_message = texts.t(
-            "AUTO_PURCHASE_SUBSCRIPTION_SUCCESS",
-            "✅ Subscription purchased automatically after balance top-up ({period}).",
-        ).format(period=period_label)
-        hint_message = texts.t(
-            "AUTO_PURCHASE_SUBSCRIPTION_HINT",
-            "Open the ‘My subscription’ section to access your link.",
-        )
-        full_message = "\n\n".join(
-            part.strip() for part in [auto_message, hint_message] if part and part.strip()
-        )
-
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 My subscription"),
-                        callback_data="subscription",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "🏠 Main menu"),
-                        callback_data="back_to_menu",
-                    )
-                ],
-            ]
-        )
-
-        logo_path = get_logo_for_bot(bot.id if bot else None)
-        if settings.ENABLE_LOGO_MODE and logo_path.exists():
-            await bot.send_photo(
-                chat_id=user.telegram_id,
-                photo=FSInputFile(logo_path),
-                caption=full_message,
-                reply_markup=keyboard,
-                parse_mode="HTML",
+    with use_brand_for_user(user):
+        texts = get_texts(getattr(user, "language", "ru"))
+        try:
+            auto_message = texts.t(
+                "AUTO_PURCHASE_SUBSCRIPTION_SUCCESS",
+                "✅ Subscription purchased automatically after balance top-up ({period}).",
+            ).format(period=period_label)
+            hint_message = texts.t(
+                "AUTO_PURCHASE_SUBSCRIPTION_HINT",
+                "Open the ‘My subscription’ section to access your link.",
             )
-        else:
-            await bot.send_message(
-                chat_id=user.telegram_id,
-                text=full_message,
-                reply_markup=keyboard,
-                parse_mode="HTML",
+            full_message = "\n\n".join(
+                part.strip() for part in [auto_message, hint_message] if part and part.strip()
             )
-    except Exception as error:  # pragma: no cover - defensive logging
-        logger.error(
-            "⚠️ Автопокупка тарифа: не удалось уведомить пользователя %s: %s",
-            user.telegram_id,
-            error,
-        )
+
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text=texts.t("MY_SUBSCRIPTION_BUTTON", "📱 My subscription"),
+                            callback_data="subscription",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text=texts.t("BACK_TO_MAIN_MENU_BUTTON", "🏠 Main menu"),
+                            callback_data="back_to_menu",
+                        )
+                    ],
+                ]
+            )
+
+            logo_path = get_logo_for_bot(bot.id if bot else None)
+            if settings.ENABLE_LOGO_MODE and logo_path.exists():
+                await bot.send_photo(
+                    chat_id=user.telegram_id,
+                    photo=FSInputFile(logo_path),
+                    caption=full_message,
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                )
+            else:
+                await bot.send_message(
+                    chat_id=user.telegram_id,
+                    text=full_message,
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                )
+        except Exception as error:  # pragma: no cover - defensive logging
+            logger.error(
+                "⚠️ Автопокупка тарифа: не удалось уведомить пользователя %s: %s",
+                user.telegram_id,
+                error,
+            )
 
 
 async def _auto_tariff_purchase(
@@ -1274,48 +1278,49 @@ async def auto_purchase_saved_cart_after_topup(
     subscription = purchase_result.get("subscription")
     transaction = purchase_result.get("transaction")
     was_trial_conversion = purchase_result.get("was_trial_conversion", False)
-    texts = get_texts(getattr(user, "language", "ru"))
+    with use_brand_for_user(user):
+        texts = get_texts(getattr(user, "language", "ru"))
 
-    if bot:
-        try:
-            notification_service = AdminNotificationService(bot)
-            await notification_service.send_subscription_purchase_notification(
-                db,
-                user,
-                subscription,
-                transaction,
-                selection.period.days,
-                was_trial_conversion,
-                record_event=False,
-            )
-        except Exception as error:  # pragma: no cover - defensive logging
-            logger.error(
-                "⚠️ Автопокупка: не удалось отправить уведомление админам (%s): %s",
-                user.telegram_id,
-                error,
-            )
+        if bot:
+            try:
+                notification_service = AdminNotificationService(bot)
+                await notification_service.send_subscription_purchase_notification(
+                    db,
+                    user,
+                    subscription,
+                    transaction,
+                    selection.period.days,
+                    was_trial_conversion,
+                    record_event=False,
+                )
+            except Exception as error:  # pragma: no cover - defensive logging
+                logger.error(
+                    "⚠️ Автопокупка: не удалось отправить уведомление админам (%s): %s",
+                    user.telegram_id,
+                    error,
+                )
 
-        try:
-            full_message = format_subscription_purchase_success(
-                plan=subscription_plan_name(subscription),
-                period=selection.period.days,
-                end_date=getattr(subscription, "end_date", None),
-            )
+            try:
+                full_message = format_subscription_purchase_success(
+                    plan=subscription_plan_name(subscription),
+                    period=selection.period.days,
+                    end_date=getattr(subscription, "end_date", None),
+                )
 
-            keyboard = build_success_management_keyboard()
+                keyboard = build_success_management_keyboard()
 
-            await bot.send_message(
-                chat_id=user.telegram_id,
-                text=full_message,
-                reply_markup=keyboard,
-                parse_mode="HTML",
-            )
-        except Exception as error:  # pragma: no cover - defensive logging
-            logger.error(
-                "⚠️ Автопокупка: не удалось уведомить пользователя %s: %s",
-                user.telegram_id,
-                error,
-            )
+                await bot.send_message(
+                    chat_id=user.telegram_id,
+                    text=full_message,
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                )
+            except Exception as error:  # pragma: no cover - defensive logging
+                logger.error(
+                    "⚠️ Автопокупка: не удалось уведомить пользователя %s: %s",
+                    user.telegram_id,
+                    error,
+                )
 
     logger.info(
         "✅ Автопокупка: подписка на %s дней оформлена для пользователя %s",
