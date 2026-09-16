@@ -89,6 +89,7 @@ def test_connect_apple_and_windows_keyboards_omit_transfers_without_urls(monkeyp
     assert apple_rows[1][0].url == "https://apps.apple.com/ru/app/happ-lite/id6799917773"
     assert [(row[0].text, row[0].callback_data) for row in windows_rows] == [
         ("💻 Скачать Happ", None),
+        ("❓ Проблемы с установкой", None),
         ("⬅️ Назад", "howto"),
     ]
     assert windows_rows[0][0].url == (
@@ -133,6 +134,7 @@ def test_connect_platform_keyboards_include_transfer_buttons(monkeypatch):
     ]
     assert [(row[0].text, row[0].url) for row in windows_rows] == [
         ("💻 Скачать Happ", "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"),
+        ("❓ Проблемы с установкой", "https://github.com/letohq/Leto-Desktop#%D0%BF%D1%80%D0%B5%D0%B4%D1%83%D0%BF%D1%80%D0%B5%D0%B6%D0%B4%D0%B5%D0%BD%D0%B8%D1%8F-%D0%BF%D1%80%D0%B8-%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B5--%D1%8D%D1%82%D0%BE-%D0%BD%D0%BE%D1%80%D0%BC%D0%B0%D0%BB%D1%8C%D0%BD%D0%BE"),
         ("➡️ Ключ в Happ", happ_url),
         ("⬅️ Назад", None),
     ]

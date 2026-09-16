@@ -3610,9 +3610,13 @@ def get_connect_android_tv_keyboard(
 ) -> InlineKeyboardMarkup:
     """Android TV Connect menu actions.
 
-    No access-key or Happ-transfer buttons here: the TV signs in by showing a QR
-    plus a six-digit code that the user confirms on their phone at letovpn.com/tv,
-    so a key pasted into the TV would be the wrong instruction entirely.
+    Only Back by default. A phone cannot install anything onto the TV, so a
+    download button here would be a dead end — the user searches the TV's own
+    Google Play instead. There is no pairing button either: the TV shows the QR
+    and the code, and the instructions to follow are on the TV screen itself.
+
+    The optional Play link is shown only when configured, for people who want to
+    open the listing on their phone first.
     """
     texts = get_texts(language)
     buttons: List[List[InlineKeyboardButton]] = []
@@ -3620,16 +3624,10 @@ def get_connect_android_tv_keyboard(
     if play_url:
         buttons.append([
             InlineKeyboardButton(
-                text=texts.t("CONNECT_DOWNLOAD_LETO_TV_BUTTON", "📺 Скачать Leto для TV"),
+                text=texts.t("CONNECT_DOWNLOAD_LETO_TV_BUTTON", "📺 Открыть в Google Play"),
                 url=play_url,
             )
         ])
-    buttons.append([
-        InlineKeyboardButton(
-            text=texts.t("CONNECT_TV_PAIR_BUTTON", "🔗 Привязать телевизор"),
-            url="https://letovpn.com/tv",
-        )
-    ])
     buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data="howto")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
