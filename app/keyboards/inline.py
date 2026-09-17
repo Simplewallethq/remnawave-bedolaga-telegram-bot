@@ -3514,20 +3514,10 @@ def get_connect_apple_keyboard(
 ) -> InlineKeyboardMarkup:
     """iPhone/macOS-specific Connect menu actions."""
     texts = get_texts(language)
-    buttons: List[List[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(
-            text=texts.t("CONNECT_DOWNLOAD_INCY_BUTTON", "🍏 Скачать Incy (RU App Store)"),
-            url=settings.get_incy_download_link(),
-        )]
-    ]
-    if incy_transfer_url:
-        buttons.append(
-            [InlineKeyboardButton(
-                text=texts.t("CONNECT_TRANSFER_INCY_BUTTON", "🛠 Передать ключ в Incy"),
-                url=incy_transfer_url,
-            )]
-        )
+    buttons: List[List[InlineKeyboardButton]] = []
 
+    # Happ leads on this screen: it's the app most people install here, so
+    # download + key-transfer come first, ahead of Incy.
     # One Happ button, no store split: Happ Lite is served from the same listing to
     # everyone, so labelling it RU or International would only be noise.
     buttons.append(
@@ -3541,6 +3531,20 @@ def get_connect_apple_keyboard(
             [InlineKeyboardButton(
                 text=texts.t("CONNECT_TRANSFER_HAPP_BUTTON", "🛠 Передать ключ в Happ"),
                 url=happ_transfer_url,
+            )]
+        )
+
+    buttons.append(
+        [InlineKeyboardButton(
+            text=texts.t("CONNECT_DOWNLOAD_INCY_BUTTON", "🍏 Скачать Incy (RU App Store)"),
+            url=settings.get_incy_download_link(),
+        )]
+    )
+    if incy_transfer_url:
+        buttons.append(
+            [InlineKeyboardButton(
+                text=texts.t("CONNECT_TRANSFER_INCY_BUTTON", "🛠 Передать ключ в Incy"),
+                url=incy_transfer_url,
             )]
         )
 

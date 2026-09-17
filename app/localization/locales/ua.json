@@ -1655,7 +1655,7 @@
   "CONNECT_ANDROID_HAPP_HINT": "Якщо користуєшся Happ, можеш передати до нього ключ доступу за кнопкою нижче.",
   "CONNECT_ANDROID_KEY_LABEL": "Ключ-посилання (також підходить для Happ, Incy):",
   "CONNECT_DOWNLOAD_LETO_BUTTON": "☀️ Завантажити Leto VPN",
-  "CONNECT_APPLE_TEXT": "<b>Для iOS/macOS доступні два застосунки: Incy і Happ.</b>\n\nДо будь-якого застосунку після встановлення можна передати ключ доступу за кнопкою нижче.",
+  "CONNECT_APPLE_TEXT": "<b>Для iOS/macOS доступні два застосунки: Happ і Incy.</b>\n\nДо будь-якого застосунку після встановлення можна передати ключ доступу за кнопкою нижче.",
   "CONNECT_DOWNLOAD_INCY_BUTTON": "🍏 Завантажити Incy",
   "CONNECT_DOWNLOAD_HAPP_IOS_BUTTON": "🍎 Завантажити Happ",
   "CONNECT_TRANSFER_INCY_BUTTON": "➡️ Ключ в Incy",

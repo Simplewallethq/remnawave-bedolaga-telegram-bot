@@ -2841,8 +2841,8 @@ def _get_share_app_links() -> dict[str, str]:
         ),
         "apple": settings.get_incy_download_link(),
         "windows": (
-            settings.get_happ_download_link("windows")
-            or "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"
+            (settings.LETO_APP_DOWNLOAD_LINK_WINDOWS or "").strip()
+            or "https://github.com/letohq/Leto-Desktop/releases/download/v1.0.0-beta/LETO-Setup-1.0.0.exe"
         ),
     }
 

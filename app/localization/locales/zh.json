@@ -1980,7 +1980,7 @@
     "CONNECT_ANDROID_HAPP_HINT": "如果您使用 Happ，可以通过下方按钮将访问密钥发送到 Happ。",
     "CONNECT_ANDROID_KEY_LABEL": "密钥链接（同样适用于 Happ 和 Incy）：",
     "CONNECT_DOWNLOAD_LETO_BUTTON": "☀️ 下载 Leto VPN",
-    "CONNECT_APPLE_TEXT": "<b>iOS/macOS 有两个可用应用：Incy 和 Happ。</b>\n\n下载任一应用后，都可以通过下方按钮将访问密钥发送到应用中。",
+    "CONNECT_APPLE_TEXT": "<b>iOS/macOS 有两个可用应用：Happ 和 Incy。</b>\n\n下载任一应用后，都可以通过下方按钮将访问密钥发送到应用中。",
     "CONNECT_DOWNLOAD_INCY_BUTTON": "🍏 下载 Incy",
     "CONNECT_DOWNLOAD_HAPP_IOS_BUTTON": "🍎 下载 Happ",
     "CONNECT_TRANSFER_INCY_BUTTON": "➡️ 密钥发送到 Incy",
