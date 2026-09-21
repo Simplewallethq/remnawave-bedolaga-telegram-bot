@@ -296,3 +296,12 @@ def test_brand_name_is_the_head_of_the_telegram_title(title, expected):
     from app.branding.profile import clean_brand_name
 
     assert clean_brand_name(title) == expected
+
+
+def test_support_contact_follows_the_bot_even_when_texts_were_built_earlier(registry):
+    # Texts может быть создан вне скоупа бренда (кабинет, фоновые задачи):
+    # контакт всё равно должен подставиться при чтении.
+    texts = get_texts("ru")
+    with brand_scope(COPYCAT_ID):
+        assert "@shuka_support" in texts.SUPPORT_INFO
+    assert "@shuka_support" not in texts.SUPPORT_INFO

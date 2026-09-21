@@ -225,7 +225,9 @@ def _build_dynamic_values(language: str) -> Dict[str, Any]:
 
     support_template = config.get("support_info")
     if support_template:
-        values["SUPPORT_INFO"] = format_support_placeholders(support_template)
+        # Плейсхолдеры остаются в шаблоне: контакт подставляется при чтении,
+        # в бренде того бота, который сейчас отвечает пользователю.
+        values["SUPPORT_INFO"] = support_template
 
     return values
 
