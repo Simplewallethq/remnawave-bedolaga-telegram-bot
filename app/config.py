@@ -569,6 +569,10 @@ class Settings(BaseSettings):
     # хост ключ-ссылки (прокси на ту же панель).
     COPYCAT_SUPPORT_USERNAME: str = "@vpnsupporthq_bot"
     COPYCAT_SUBSCRIPTION_DOMAIN: str = "sbs.newagetechnologies.live"
+    # Страница-переход в Happ (Telegram не пускает happ:// в кнопку). У витрин
+    # она живёт на их домене, иначе кнопка «Подключиться» показывала бы адрес
+    # основного бренда.
+    COPYCAT_HAPP_REDIRECT_TEMPLATE: str = "https://sbs.newagetechnologies.live/redirect/?redirect_to="
 
     # Автообновление десктопного приложения (публичный манифест /cabinet/app/update).
     # Правится в админке: релиз = смена версии/ссылки/хеша без редеплоя.
@@ -1801,6 +1805,9 @@ class Settings(BaseSettings):
         return self.is_contests_enabled()
 
     def get_happ_cryptolink_redirect_template(self) -> Optional[str]:
+        brand_template = (self._current_brand().happ_redirect_template or "").strip()
+        if brand_template:
+            return brand_template
         template = (self.HAPP_CRYPTOLINK_REDIRECT_TEMPLATE or "").strip()
         return template or None
 

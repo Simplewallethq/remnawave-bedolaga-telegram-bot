@@ -260,3 +260,18 @@ async def test_copycat_rules_text_links_to_its_documents(registry):
         assert "https://example.com/terms" in rules and "https://example.com/privacy" in rules
         assert "Shuka" in rules
         assert get_texts("ru").RULES_TEXT == rules
+
+
+def test_copycat_happ_button_never_points_at_the_primary_domain(registry, monkeypatch):
+    from app.utils.subscription_utils import get_happ_cryptolink_redirect_link
+
+    monkeypatch.setattr(
+        settings, "HAPP_CRYPTOLINK_REDIRECT_TEMPLATE", "https://miniapp.letovpn.com/redirect/?redirect_to="
+    )
+    link = "https://sbs.newagetechnologies.live/sub/token"
+    with brand_scope(MIRROR_ID):
+        assert get_happ_cryptolink_redirect_link(link).startswith("https://miniapp.letovpn.com/redirect/")
+    with brand_scope(COPYCAT_ID):
+        redirect = get_happ_cryptolink_redirect_link(link)
+        assert redirect.startswith(settings.COPYCAT_HAPP_REDIRECT_TEMPLATE)
+        assert "letovpn" not in redirect

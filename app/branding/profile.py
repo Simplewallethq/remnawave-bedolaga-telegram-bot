@@ -30,6 +30,7 @@ COPYCAT_CONFIG_KEYS = (
     "channel_id",
     "support",
     "subscription_domain",
+    "happ_redirect_template",
     "referral_terms_url",
     "has_own_app",
     "rays_enabled",
@@ -51,6 +52,7 @@ class BrandProfile:
     has_own_app: bool
     rays_enabled: bool
     referral_terms_url: Optional[str]
+    happ_redirect_template: Optional[str] = None
 
     @property
     def support_url(self) -> Optional[str]:
@@ -125,6 +127,7 @@ def primary_profile() -> BrandProfile:
         has_own_app=bool(settings.BRAND_HAS_OWN_APP),
         rays_enabled=bool(settings.BRAND_RAYS_ENABLED),
         referral_terms_url=_clean(settings.REFERRAL_TERMS_URL) or None,
+        happ_redirect_template=None,
     )
 
 
@@ -181,4 +184,9 @@ def mirror_profile_from_config(bot_id: int, config: Mapping[str, Any] | None) ->
         has_own_app=_as_bool(config.get("has_own_app"), False),
         rays_enabled=_as_bool(config.get("rays_enabled"), False),
         referral_terms_url=_clean(config.get("referral_terms_url")) or None,
+        happ_redirect_template=(
+            _clean(config.get("happ_redirect_template"))
+            or _clean(settings.COPYCAT_HAPP_REDIRECT_TEMPLATE)
+            or None
+        ),
     )
