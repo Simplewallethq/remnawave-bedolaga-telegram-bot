@@ -1362,26 +1362,39 @@ def get_broadcast_bot_scope_keyboard(
     language: str = "ru",
     back_callback: str = "admin_msg_by_sub",
 ) -> InlineKeyboardMarkup:
-    """Область ботов для рассылки: Leto (основной + зеркала), каждый копикет, все."""
+    """Область ботов: основной бот, все витрины, все боты.
+
+    Витрин больше сотни, поэтому кнопка на каждую рисуется только у маленькой
+    установки — иначе клавиатура не влезает в лимит Telegram.
+    """
     from app.utils.bot_registry import copycat_bot_ids, get_brand_for_bot
 
     texts = get_texts(language)
+    copycats = sorted(copycat_bot_ids())
     keyboard = [
         [
             InlineKeyboardButton(
-                text=_t(texts, "ADMIN_BROADCAST_SCOPE_LETO", "🏠 Leto (основной + зеркала)"),
+                text=_t(texts, "ADMIN_BROADCAST_SCOPE_LETO", "🏠 Основной бот"),
                 callback_data="broadcast_scope:leto",
             )
-        ]
-    ]
-    for bot_id in sorted(copycat_bot_ids()):
-        brand_name = get_brand_for_bot(bot_id).name or str(bot_id)
-        keyboard.append([
+        ],
+        [
             InlineKeyboardButton(
-                text=f"🎭 {brand_name}",
-                callback_data=f"broadcast_scope:copycat:{bot_id}",
+                text=_t(texts, "ADMIN_BROADCAST_SCOPE_COPYCATS", "🎭 Все витрины")
+                + f" ({len(copycats)})",
+                callback_data="broadcast_scope:copycats",
             )
-        ])
+        ],
+    ]
+    if len(copycats) <= 8:
+        for bot_id in copycats:
+            brand_name = get_brand_for_bot(bot_id).name or str(bot_id)
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🎭 {brand_name}",
+                    callback_data=f"broadcast_scope:copycat:{bot_id}",
+                )
+            ])
     keyboard.append([
         InlineKeyboardButton(
             text=_t(texts, "ADMIN_BROADCAST_SCOPE_ALL", "🌐 Все боты"),

@@ -36,13 +36,23 @@ COPYCAT_CFG = {
 @pytest.fixture
 def registry():
     bot_registry.clear()
-    bot_registry.register_bot(MIRROR_ID, Path("bot_images/doctor.png"), brand_config={"token": "t", "logo": "bot_images/doctor.png", "image_url": "https://x"})
+    bot_registry.register_bot(
+        MIRROR_ID,
+        Path("bot_images/doctor.png"),
+        brand_config={
+            "token": "t",
+            "logo": "bot_images/doctor.png",
+            "image_url": "https://x",
+            "name": "Doctor",
+            "copycat": False,
+        },
+    )
     bot_registry.register_bot(COPYCAT_ID, Path("bot_images/shuka.jpg"), brand_config=COPYCAT_CFG)
     yield bot_registry
     bot_registry.clear()
 
 
-def test_plain_mirror_keeps_primary_brand_with_own_logo(registry):
+def test_mirror_opted_out_keeps_primary_brand_with_own_logo(registry):
     profile = registry.get_brand_for_bot(MIRROR_ID)
     base = primary_profile()
     assert profile.is_copycat is False
@@ -60,19 +70,37 @@ def test_copycat_profile_and_fallbacks(registry):
     assert profile.subscription_domain == "sub.neutral.com"
     assert profile.has_own_app is False and profile.rays_enabled is False
 
-    sparse = mirror_profile_from_config(5, {"copycat": True, "name": "Mini"})
+    sparse = mirror_profile_from_config(5, {"name": "Mini"})
     base = primary_profile()
+    assert sparse.is_copycat is True
     assert sparse.privacy_url == base.privacy_url
     assert sparse.terms_url == base.terms_url
-    assert sparse.support == base.support
+    # Саппорт и домен ключа общие для всех витрин, а не от основного бота.
+    assert sparse.support == settings.COPYCAT_SUPPORT_USERNAME
+    assert sparse.subscription_domain == settings.COPYCAT_SUBSCRIPTION_DOMAIN
     assert sparse.logo == base.logo
     # Канал основного бренда не наследуется.
     assert sparse.channel_link is None and sparse.channel_enabled is False
 
 
-def test_copycat_without_name_is_a_plain_mirror(registry):
-    profile = mirror_profile_from_config(6, {"copycat": True, "logo": "x.png"})
+def test_mirror_without_a_name_stays_on_the_primary_brand(registry):
+    profile = mirror_profile_from_config(6, {"logo": "x.png"})
     assert profile.is_copycat is False and profile.name == "Leto"
+
+
+def test_mirror_is_a_copycat_unless_it_opts_out(registry):
+    # Боты из mirror_bots.yaml — витрины: отдельного флага для этого не нужно.
+    assert mirror_profile_from_config(8, {"name": "Shield"}).is_copycat is True
+    assert mirror_profile_from_config(9, {"name": "Shield", "copycat": False}).is_copycat is False
+
+
+def test_brand_name_does_not_double_the_vpn_word(registry):
+    texts = get_texts("ru")
+    for name, expected in (("Adrenalin VPN", "Adrenalin VPN"), ("Doctor", "Doctor VPN")):
+        profile = mirror_profile_from_config(10, {"name": name})
+        rendered = apply_brand_placeholders("Скачай {project_name} VPN сейчас", profile)
+        assert rendered == f"Скачай {expected} сейчас"
+    assert texts is not None
 
 
 def test_unknown_bot_and_no_scope_resolve_to_primary(registry):
@@ -163,6 +191,9 @@ def test_mirror_bots_config_passes_copycat_fields(tmp_path, monkeypatch):
     assert [b["token"] for b in bots] == ["1:a", "2:b", "3:c"]
     assert "image_url" not in bots[0] and "copycat" not in bots[0]
     assert bots[1]["copycat"] is True and bots[1]["name"] == "Shuka" and bots[1]["support"] == "@s"
+    # Первая запись — прод-формат без имени: имя подставляет app/bot.py из Telegram.
+    assert mirror_profile_from_config(1, bots[0]).is_copycat is False
+    assert mirror_profile_from_config(1, {**bots[0], "name": "Doctor"}).is_copycat is True
     assert mirror_profile_from_config(2, bots[1]).is_copycat is True
     assert mirror_profile_from_config(3, bots[2]).is_copycat is False
 

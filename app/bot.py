@@ -127,6 +127,9 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
         try:
             m_bot = Bot(token=mirror_cfg["token"], default=_default)
             m_me = await m_bot.get_me()
+            # Имя витрины — как бот назван в Telegram: руками 100+ названий не ведём.
+            mirror_cfg = {**mirror_cfg}
+            mirror_cfg.setdefault("name", (m_me.full_name or "").strip())
             bot_registry.register_bot(
                 m_me.id, Path(mirror_cfg["logo"]), m_bot, brand_config=mirror_cfg,
             )

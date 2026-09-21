@@ -2,9 +2,12 @@
 
 Основной бот строит профиль из `settings` при каждом обращении: значения
 приходят из .env и из БД (админка правит их на лету), кешировать нельзя.
-Обычное зеркало — тот же профиль со своей картинкой. Копикет — запись
-`copycat: true` в mirror_bots.yaml; пропущенные поля берутся из основного
-бота как фолбэк, кроме канала: чужой канал выдал бы витрину с головой.
+
+Каждый бот из mirror_bots.yaml — витрина со своим брендом: имя берётся из
+названия бота в Telegram, саппорт и домен ключ-ссылки — общие для витрин
+(`COPYCAT_SUPPORT_*`), картинка своя. Пропущенные поля добираются из
+основного бота, кроме канала: чужой канал выдал бы витрину с головой.
+Зеркалу, которое должно остаться под основным брендом, ставят `copycat: false`.
 """
 
 from __future__ import annotations
@@ -126,14 +129,20 @@ def primary_profile() -> BrandProfile:
 
 
 def is_copycat_config(config: Mapping[str, Any] | None) -> bool:
-    """Запись зеркала описывает копикет: `copycat: true` и есть имя."""
+    """Запись зеркала описывает копикет.
+
+    По умолчанию да: боты из mirror_bots.yaml — это витрины под своими
+    названиями. `copycat: false` оставляет зеркало под основным брендом.
+    Без имени бренда подставлять нечего — такая запись тоже остаётся зеркалом
+    (имя приходит из Telegram при регистрации бота, см. app/bot.py).
+    """
     if not isinstance(config, Mapping):
         return False
-    if not _as_bool(config.get("copycat"), False):
+    if not _as_bool(config.get("copycat"), True):
         return False
     if not _clean(config.get("name")):
         logger.warning(
-            "Mirror bot marked copycat without a name (token %s...) — treated as a plain mirror",
+            "Mirror bot has no brand name (token %s...) — treated as a plain mirror",
             _clean(config.get("token"))[:10],
         )
         return False
@@ -142,6 +151,8 @@ def is_copycat_config(config: Mapping[str, Any] | None) -> bool:
 
 def mirror_profile_from_config(bot_id: int, config: Mapping[str, Any] | None) -> BrandProfile:
     """Профиль зеркала по его записи из mirror_bots.yaml."""
+    from app.config import settings
+
     base = primary_profile()
     config = config or {}
     logo = _clean(config.get("logo")) or base.logo
@@ -157,9 +168,16 @@ def mirror_profile_from_config(bot_id: int, config: Mapping[str, Any] | None) ->
         terms_url=_clean(config.get("terms_url")) or base.terms_url,
         channel_link=_clean(config.get("channel_link")) or None,
         channel_id=_clean(config.get("channel_id")) or None,
-        support=_clean(config.get("support")) or base.support,
+        support=(
+            _clean(config.get("support"))
+            or _clean(settings.COPYCAT_SUPPORT_USERNAME)
+            or base.support
+        ),
         logo=logo,
-        subscription_domain=normalize_subscription_domain(config.get("subscription_domain")),
+        subscription_domain=(
+            normalize_subscription_domain(config.get("subscription_domain"))
+            or normalize_subscription_domain(settings.COPYCAT_SUBSCRIPTION_DOMAIN)
+        ),
         has_own_app=_as_bool(config.get("has_own_app"), False),
         rays_enabled=_as_bool(config.get("rays_enabled"), False),
         referral_terms_url=_clean(config.get("referral_terms_url")) or None,

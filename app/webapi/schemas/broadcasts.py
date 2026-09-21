@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, validator
 from app.keyboards.admin import BROADCAST_BUTTONS, DEFAULT_BROADCAST_BUTTONS
 
 
-BOT_SCOPE_PATTERN = re.compile(r"^(leto|all|copycat:\d+)$")
+BOT_SCOPE_PATTERN = re.compile(r"^(leto|copycats|all|copycat:\d+)$")
 
 
 class BroadcastMedia(BaseModel):
@@ -76,7 +76,9 @@ class BroadcastCreateRequest(BaseModel):
         if not normalized:
             return "leto"
         if not BOT_SCOPE_PATTERN.fullmatch(normalized):
-            raise ValueError("Unsupported bot_scope value (expected leto, all or copycat:<bot_id>)")
+            raise ValueError(
+                "Unsupported bot_scope value (expected leto, copycats, all or copycat:<bot_id>)"
+            )
         return normalized
 
     @validator("selected_buttons", pre=True)

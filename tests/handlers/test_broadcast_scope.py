@@ -117,18 +117,20 @@ def test_is_valid_bot_scope(scope, valid):
 
 
 def test_scope_display_name_uses_brand_name(registry):
-    assert admin_messages.get_bot_scope_display_name("leto") == "Leto (основной + зеркала)"
-    assert admin_messages.get_bot_scope_display_name(None) == "Leto (основной + зеркала)"
+    assert admin_messages.get_bot_scope_display_name("leto") == "Основной бот"
+    assert admin_messages.get_bot_scope_display_name(None) == "Основной бот"
     assert admin_messages.get_bot_scope_display_name("all") == "Все боты"
+    assert admin_messages.get_bot_scope_display_name("copycats") == "Все витрины (2)"
     assert admin_messages.get_bot_scope_display_name(f"copycat:{COPYCAT_BOT_ID}") == "Shuka (копикет)"
 
 
-def test_scope_keyboard_lists_leto_every_copycat_and_all(registry):
+def test_scope_keyboard_lists_every_storefront_while_there_are_few(registry):
     keyboard = admin_keyboards.get_broadcast_bot_scope_keyboard("ru", back_callback="admin_msg_custom")
     rows = keyboard.inline_keyboard
     callbacks = [button.callback_data for row in rows for button in row]
     assert callbacks == [
         "broadcast_scope:leto",
+        "broadcast_scope:copycats",
         f"broadcast_scope:copycat:{COPYCAT_BOT_ID}",
         f"broadcast_scope:copycat:{OTHER_COPYCAT_BOT_ID}",
         "broadcast_scope:all",
@@ -137,6 +139,38 @@ def test_scope_keyboard_lists_leto_every_copycat_and_all(registry):
     texts = [button.text for row in rows for button in row]
     assert "🎭 Shuka" in texts
     assert "🎭 Other" in texts
+
+
+def test_scope_keyboard_stays_short_with_a_hundred_storefronts(registry, tmp_path):
+    from pathlib import Path as _Path
+
+    for index in range(9):
+        registry.register_bot(
+            9100 + index,
+            _Path("logo.png"),
+            brand_config={"token": f"{index}:t", "name": f"Brand {index}"},
+        )
+    callbacks = [
+        button.callback_data
+        for row in admin_keyboards.get_broadcast_bot_scope_keyboard("ru").inline_keyboard
+        for button in row
+    ]
+    assert callbacks == [
+        "broadcast_scope:leto",
+        "broadcast_scope:copycats",
+        "broadcast_scope:all",
+        "admin_msg_by_sub",
+    ]
+
+
+def test_every_storefront_scope_selects_only_copycat_users(registry):
+    leto_user = SimpleNamespace(bot_id=None)
+    mirror_user = SimpleNamespace(bot_id=MIRROR_BOT_ID)
+    copycat_user = SimpleNamespace(bot_id=COPYCAT_BOT_ID)
+    assert admin_messages._user_in_bot_scope(copycat_user, "copycats") is True
+    assert admin_messages._user_in_bot_scope(leto_user, "copycats") is False
+    assert admin_messages._user_in_bot_scope(mirror_user, "copycats") is False
+    assert admin_messages.is_valid_bot_scope("copycats") is True
 
 
 def test_schema_bot_scope_defaults_to_leto():

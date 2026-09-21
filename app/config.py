@@ -564,6 +564,11 @@ class Settings(BaseSettings):
     # Юридические страницы основного бренда. Копикеты задают свои в mirror_bots.yaml.
     PRIVACY_POLICY_URL: str = "https://telegra.ph/Politika-konfidencialnosti-07-20-101"
     TERMS_URL: str = "https://telegra.ph/Polzovatelskoe-soglashenie-07-20-32"
+    # Общие значения для всех копикетов: заполняются, когда в записи бота
+    # ничего не задано. Саппорт — общий бот поддержки витрин, домен — нейтральный
+    # хост ключ-ссылки (прокси на ту же панель).
+    COPYCAT_SUPPORT_USERNAME: str = "@vpnsupporthq_bot"
+    COPYCAT_SUBSCRIPTION_DOMAIN: str = "sbs.newagetechnologies.live"
 
     # Автообновление десктопного приложения (публичный манифест /cabinet/app/update).
     # Правится в админке: релиз = смена версии/ссылки/хеша без редеплоя.

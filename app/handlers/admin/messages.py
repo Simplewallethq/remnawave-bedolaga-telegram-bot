@@ -1413,10 +1413,10 @@ _COPYCAT_SCOPE_PREFIX = "copycat:"
 
 
 def is_valid_bot_scope(bot_scope: str | None) -> bool:
-    """Допустимые значения: leto | all | copycat:<bot_id>."""
+    """Допустимые значения: leto | copycats | all | copycat:<bot_id>."""
     if not isinstance(bot_scope, str):
         return False
-    if bot_scope in ("leto", "all"):
+    if bot_scope in ("leto", "copycats", "all"):
         return True
     if bot_scope.startswith(_COPYCAT_SCOPE_PREFIX):
         return bot_scope[len(_COPYCAT_SCOPE_PREFIX):].isdigit()
@@ -1426,13 +1426,15 @@ def is_valid_bot_scope(bot_scope: str | None) -> bool:
 def _user_in_bot_scope(user, bot_scope: str | None) -> bool:
     """Попадает ли пользователь в область ботов рассылки.
 
-    "all" — все; "leto" — основной бот и обычные зеркала (не копикеты);
-    "copycat:<bot_id>" — только пользователи этого копикета.
+    "all" — все; "leto" — основной бот и зеркала под его брендом;
+    "copycats" — все витрины; "copycat:<bot_id>" — только эта витрина.
     """
     if not bot_scope or bot_scope == DEFAULT_BOT_SCOPE:
         return not is_copycat_user(user)
     if bot_scope == "all":
         return True
+    if bot_scope == "copycats":
+        return is_copycat_user(user)
     if bot_scope.startswith(_COPYCAT_SCOPE_PREFIX):
         raw_id = bot_scope[len(_COPYCAT_SCOPE_PREFIX):]
         if not raw_id.isdigit():
@@ -1450,7 +1452,9 @@ def _filter_by_bot_scope(users, bot_scope: str | None) -> list:
 def get_bot_scope_display_name(bot_scope: str | None) -> str:
     """Подпись области ботов для превью/истории рассылок."""
     if not bot_scope or bot_scope == DEFAULT_BOT_SCOPE:
-        return "Leto (основной + зеркала)"
+        return "Основной бот"
+    if bot_scope == "copycats":
+        return f"Все витрины ({len(copycat_bot_ids())})"
     if bot_scope == "all":
         return "Все боты"
     if bot_scope.startswith(_COPYCAT_SCOPE_PREFIX):

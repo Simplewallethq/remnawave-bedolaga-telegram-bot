@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any, Dict, Optional
 
 from app.config import settings
@@ -93,6 +94,7 @@ _TRAFFIC_TIERS = (
 # хендлеры зовут .format(days=..., link=...) поверх готовой строки, и чужие
 # фигурные скобки должны остаться нетронутыми.
 _BRAND_PLACEHOLDERS = (
+    "{project_name} VPN",
     "{project_name}",
     "{privacy_url}",
     "{terms_url}",
@@ -103,8 +105,17 @@ _BRAND_PLACEHOLDERS = (
 )
 
 
+def _brand_name_with_vpn(name: str) -> str:
+    """«Adrenalin VPN» + « VPN» — это «Adrenalin VPN VPN»; слово не дублируем."""
+    if re.search(r"\bvpn\b", name, re.IGNORECASE):
+        return name
+    return f"{name} VPN"
+
+
 def _brand_replacements(profile) -> Dict[str, str]:
     return {
+        # Составной токен идёт первым: замена «{project_name}» выполняется после.
+        "{project_name} VPN": _brand_name_with_vpn(profile.name),
         "{project_name}": profile.name,
         "{privacy_url}": profile.privacy_url or "",
         "{terms_url}": profile.terms_url or "",
