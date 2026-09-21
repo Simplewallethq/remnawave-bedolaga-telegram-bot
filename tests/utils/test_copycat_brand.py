@@ -275,3 +275,24 @@ def test_copycat_happ_button_never_points_at_the_primary_domain(registry, monkey
         redirect = get_happ_cryptolink_redirect_link(link)
         assert redirect.startswith(settings.COPYCAT_HAPP_REDIRECT_TEMPLATE)
         assert "letovpn" not in redirect
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Dr. Guard | Быстрый доступ ⚡", "Dr. Guard"),
+        ("Lagom VPN — надежный ВПН без рекламы", "Lagom VPN"),
+        ("🔐Батя VPN - БОТ", "Батя VPN"),
+        ("🫰 VPN Kima ⚡️Ловит даже на парковке, интернет без границ.", "VPN Kima"),
+        ("✨Sirous VPN", "Sirous VPN"),
+        ("C-VPN 🌏 • Все Обходы", "C-VPN"),
+        ("v2RayTun | VLESS | HAPP | KEYS", "v2RayTun"),
+        ("Shield.tg | Работает без сбоев", "Shield.tg"),
+        ("ЩукаВПН", "ЩукаВПН"),
+        ("", ""),
+    ],
+)
+def test_brand_name_is_the_head_of_the_telegram_title(title, expected):
+    from app.branding.profile import clean_brand_name
+
+    assert clean_brand_name(title) == expected

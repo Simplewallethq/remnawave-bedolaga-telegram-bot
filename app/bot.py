@@ -5,6 +5,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import redis.asyncio as redis
 
 from app.config import settings
+from app.branding.profile import clean_brand_name
 from app.middlewares.brand_context import BrandContextMiddleware
 from app.middlewares.global_error import GlobalErrorMiddleware
 from app.middlewares.private_chat_only import PrivateChatOnlyMiddleware
@@ -129,7 +130,7 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
             m_me = await m_bot.get_me()
             # Имя витрины — как бот назван в Telegram: руками 100+ названий не ведём.
             mirror_cfg = {**mirror_cfg}
-            mirror_cfg.setdefault("name", (m_me.full_name or "").strip())
+            mirror_cfg.setdefault("name", clean_brand_name(m_me.full_name))
             bot_registry.register_bot(
                 m_me.id, Path(mirror_cfg["logo"]), m_bot, brand_config=mirror_cfg,
             )

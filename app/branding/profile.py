@@ -13,10 +13,37 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, replace
 from typing import Any, Mapping, Optional
 
 logger = logging.getLogger(__name__)
+
+# Названия ботов в Telegram почти всегда несут слоган: «Dr. Guard | Быстрый
+# доступ ⚡», «Lagom VPN — надежный ВПН без рекламы». Именем проекта должна
+# стать только голова названия, иначе слоган расползётся по всем текстам.
+_NAME_SEPARATORS = re.compile(r"\s*(?:[|｜/\\–—·•›»→]|\s-\s)\s*")
+_NAME_EMOJI = re.compile(
+    "[\U0001F000-\U0001FAFF\u2190-\u21FF\u2300-\u23FF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u20E3]"
+)
+_NAME_EDGES = re.compile(r"^[^\w(]+|[^\w)]+$", re.UNICODE)
+
+
+def clean_brand_name(title: Any) -> str:
+    """Имя проекта из названия бота в Telegram."""
+    name = _clean(title)
+    if not name:
+        return ""
+    head = _NAME_SEPARATORS.split(name, 1)[0].strip() or name
+    head = _NAME_EDGES.sub("", head).strip()
+    # Слоган после эмодзи внутри названия — тоже не часть имени.
+    match = _NAME_EMOJI.search(head)
+    if match:
+        candidate = _NAME_EDGES.sub("", head[: match.start()]).strip()
+        if len(candidate) >= 2:
+            head = candidate
+    head = re.sub(r"\s{2,}", " ", head).strip()
+    return head or name
 
 DEFAULT_BRAND_NAME = "Leto"
 
