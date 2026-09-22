@@ -95,11 +95,16 @@ class SupportSettingsService:
     # Descriptions (per language)
     @classmethod
     def get_support_info_text(cls, language: str) -> str:
+        from app.branding.context import current_brand
+
         cls._load()
         lang = (language or settings.DEFAULT_LANGUAGE).split("-")[0].lower()
         overrides = cls._data.get("support_info_texts") or {}
         text = overrides.get(lang)
-        if text and isinstance(text, str) and text.strip():
+        # Текст из админки написан под основной бренд и содержит его контакт
+        # буквально — витрине он выдал бы чужую поддержку. Ей отдаём локаль
+        # с плейсхолдером, который подставит её собственный саппорт.
+        if text and isinstance(text, str) and text.strip() and not current_brand().is_copycat:
             return text
         # Fallback to dynamic localization default
         from app.localization.texts import get_texts

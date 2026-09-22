@@ -1893,5 +1893,6 @@
   "CONNECT_WINDOWS_TEXT_HAPP": "<b>💻 Happ</b>\nDownload it with the button below and paste the access key above into it.",
   "CONNECT_ANDROID_TV_TEXT_HAPP": "<b>📺 How to connect Android TV</b>\n\n1. Open <b>Google Play</b> on the TV and search for <b>Happ</b>. Install it.\n2. Launch Happ and add a subscription — paste the access key.\n3. Done: pick a country and connect.",
   "CONNECT_DOWNLOAD_HAPP_ANDROID_BUTTON": "🤖 Download Happ",
-  "RULES_TEXT_COPYCAT": "📋 <b>Service rules</b>\n\nBy using {project_name} you accept the <a href=\"{terms_url}\">Terms of Service</a> and the <a href=\"{privacy_url}\">Privacy Policy</a>."
+  "RULES_TEXT_COPYCAT": "📋 <b>Service rules</b>\n\nBy using {project_name} you accept the <a href=\"{terms_url}\">Terms of Service</a> and the <a href=\"{privacy_url}\">Privacy Policy</a>.",
+  "REFERRAL_HOW_BALANCE_NO_WITHDRAWAL": "• The money lands on your balance — spend it on your subscription"
 }

@@ -1918,5 +1918,6 @@
   "CONNECT_WINDOWS_TEXT_HAPP": "<b>💻 Happ</b>\nСкачай по кнопке ниже и вставь в него ключ доступа — ключ выше.",
   "CONNECT_ANDROID_TV_TEXT_HAPP": "<b>📺 Как подключить Android TV</b>\n\n1. Открой <b>Google Play</b> на телевизоре и найди в поиске <b>Happ</b>. Установи приложение.\n2. Запусти Happ и добавь подписку — вставь ключ доступа (ключ можно скопировать в боте).\n3. Готово: выбери страну и включай.",
   "CONNECT_DOWNLOAD_HAPP_ANDROID_BUTTON": "🤖 Скачать Happ",
-  "RULES_TEXT_COPYCAT": "📋 <b>Правила сервиса</b>\n\nИспользуя {project_name}, вы принимаете <a href=\"{terms_url}\">Пользовательское соглашение</a> и <a href=\"{privacy_url}\">Политику конфиденциальности</a>."
+  "RULES_TEXT_COPYCAT": "📋 <b>Правила сервиса</b>\n\nИспользуя {project_name}, вы принимаете <a href=\"{terms_url}\">Пользовательское соглашение</a> и <a href=\"{privacy_url}\">Политику конфиденциальности</a>.",
+  "REFERRAL_HOW_BALANCE_NO_WITHDRAWAL": "• Деньги идут на баланс — трать их на подписку"
 }

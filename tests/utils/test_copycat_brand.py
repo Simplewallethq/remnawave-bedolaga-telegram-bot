@@ -305,3 +305,32 @@ def test_support_contact_follows_the_bot_even_when_texts_were_built_earlier(regi
     with brand_scope(COPYCAT_ID):
         assert "@shuka_support" in texts.SUPPORT_INFO
     assert "@shuka_support" not in texts.SUPPORT_INFO
+
+
+def test_storefront_support_screen_ignores_the_primary_brands_custom_text(registry, monkeypatch):
+    from app.services.support_settings_service import SupportSettingsService
+
+    SupportSettingsService._load()
+    monkeypatch.setitem(
+        SupportSettingsService._data,
+        "support_info_texts",
+        {"ru": "Поддержка\n\nTelegram: @letovpnsupport\n\nОтвечаем за 24 часа."},
+    )
+    with brand_scope(MIRROR_ID):
+        assert "@letovpnsupport" in SupportSettingsService.get_support_info_text("ru")
+    with brand_scope(COPYCAT_ID):
+        info = SupportSettingsService.get_support_info_text("ru")
+        assert "@letovpnsupport" not in info
+        assert "@shuka_support" in info
+
+
+def test_storefront_referral_screen_has_no_rays_and_no_card_payout(registry):
+    from app.utils.user_utils import is_rays_program_available_for, is_rays_shop_available_for
+
+    user = SimpleNamespace(bot_id=COPYCAT_ID, is_partner=False)
+    assert is_rays_program_available_for(user) is False
+    assert is_rays_shop_available_for(user) is False
+    texts = get_texts("ru")
+    with brand_scope(COPYCAT_ID):
+        line = texts.t("REFERRAL_HOW_BALANCE_NO_WITHDRAWAL", "")
+        assert "вывод" not in line.lower() and "карт" not in line.lower()

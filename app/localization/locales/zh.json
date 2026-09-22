@@ -1705,5 +1705,6 @@
     "CONNECT_WINDOWS_TEXT_HAPP": "<b>💻 Happ</b>\n用下面的按钮下载，并把上面的访问密钥粘贴进去。",
     "CONNECT_ANDROID_TV_TEXT_HAPP": "<b>📺 如何连接 Android TV</b>\n\n1. 在电视上打开 <b>Google Play</b>，搜索 <b>Happ</b> 并安装。\n2. 打开 Happ 添加订阅，粘贴访问密钥。\n3. 完成：选择国家并连接。",
     "CONNECT_DOWNLOAD_HAPP_ANDROID_BUTTON": "🤖 下载 Happ",
-    "RULES_TEXT_COPYCAT": "📋 <b>服务规则</b>\n\n使用 {project_name} 即表示你接受<a href=\"{terms_url}\">用户协议</a>和<a href=\"{privacy_url}\">隐私政策</a>。"
+    "RULES_TEXT_COPYCAT": "📋 <b>服务规则</b>\n\n使用 {project_name} 即表示你接受<a href=\"{terms_url}\">用户协议</a>和<a href=\"{privacy_url}\">隐私政策</a>。",
+    "REFERRAL_HOW_BALANCE_NO_WITHDRAWAL": "• 佣金进入余额，可直接用于订阅"
 }

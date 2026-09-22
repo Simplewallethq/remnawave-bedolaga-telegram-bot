@@ -1981,10 +1981,17 @@ async def handle_referral(callback: types.CallbackQuery, db_user: User, db: Asyn
             "REFERRAL_HOW_COMMISSION",
             "• Получай {percent}% со <b>всех</b> платежей друзей",
         ).format(percent=percent),
-        texts.t(
-            "REFERRAL_HOW_BALANCE",
-            "• Деньги идут на баланс (вывод на карту от {min_withdrawal}₽)",
-        ).format(min_withdrawal=settings.REFERRAL_WITHDRAWAL_MIN_RUBLES),
+        (
+            texts.t(
+                "REFERRAL_HOW_BALANCE_NO_WITHDRAWAL",
+                "• Деньги идут на баланс — трать их на подписку",
+            )
+            if current_brand().is_copycat
+            else texts.t(
+                "REFERRAL_HOW_BALANCE",
+                "• Деньги идут на баланс (вывод на карту от {min_withdrawal}₽)",
+            ).format(min_withdrawal=settings.REFERRAL_WITHDRAWAL_MIN_RUBLES)
+        ),
     ]
     if rays_enabled:
         lines.append(
