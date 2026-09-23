@@ -32,6 +32,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.branding.filters import not_copycat_user_clause
+from app.branding.context import brand_for_interaction
 from app.utils.bot_registry import is_copycat_user
 from app.database.models import Subscription, SubscriptionPlan, User, UserStatus
 from app.localization.texts import get_texts
@@ -93,7 +94,9 @@ class TrialPaidOfferService:
         подписки ещё не было и платной истории нет."""
         if not user or not settings.is_trial_paid_offer_enabled():
             return False
-        if is_copycat_user(user):
+        # Оффер — воронка основного бренда: в витрине его не показываем, даже
+        # старому пользователю основного бота, который открыл витрину.
+        if brand_for_interaction(user).is_copycat:
             return False
         if not self.is_paid_variant(user):
             return False

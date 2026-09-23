@@ -66,11 +66,13 @@ def is_partner_account(user) -> bool:
 
 
 def _rays_enabled_for_user_brand(user) -> bool:
-    """Витрина пользователя продаёт лучи? Берём по user.bot_id, а не по контексту:
-    кабинет и web API зовут эти проверки вне апдейта бота."""
-    from app.utils.bot_registry import brand_for_user
+    """Продаёт ли лучи витрина, в которой пользователь сейчас.
 
-    return brand_for_user(user).rays_enabled
+    В боте — тот бот, что отвечает; в кабинете и web API — бот регистрации.
+    """
+    from app.branding.context import brand_for_interaction
+
+    return brand_for_interaction(user).rays_enabled
 
 
 def is_rays_program_available_for(user) -> bool:

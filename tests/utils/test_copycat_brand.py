@@ -334,3 +334,60 @@ def test_storefront_referral_screen_has_no_rays_and_no_card_payout(registry):
     with brand_scope(COPYCAT_ID):
         line = texts.t("REFERRAL_HOW_BALANCE_NO_WITHDRAWAL", "")
         assert "вывод" not in line.lower() and "карт" not in line.lower()
+
+
+def test_old_primary_user_in_a_storefront_sees_the_storefront(registry, monkeypatch):
+    """Пользователь основного бота (bot_id пустой), открывший витрину."""
+    from app.services.trial_paid_offer_service import trial_paid_offer_service
+    from app.utils.user_utils import is_rays_program_available_for, is_rays_shop_available_for
+
+    monkeypatch.setattr(settings, "RAYS_PROGRAM_ENABLED", True)
+    monkeypatch.setattr(settings, "RAYS_SHOP_ENABLED", True)
+    monkeypatch.setattr(settings, "BRAND_RAYS_ENABLED", True)
+    monkeypatch.setattr(trial_paid_offer_service, "is_paid_variant", lambda user: True)
+    monkeypatch.setattr(type(settings), "is_trial_paid_offer_enabled", lambda self: True)
+    old_user = SimpleNamespace(
+        bot_id=None, is_partner=False, subscription=None, has_had_paid_subscription=False,
+    )
+
+    # Вне бота (кабинет, API) — бренд по боту регистрации: основной, лучи есть.
+    assert is_rays_program_available_for(old_user) is True
+    assert trial_paid_offer_service.is_offer_available(old_user) is True
+
+    # В витрине — решает отвечающий бот.
+    with brand_scope(COPYCAT_ID):
+        assert is_rays_program_available_for(old_user) is False
+        assert is_rays_shop_available_for(old_user) is False
+        assert trial_paid_offer_service.is_offer_available(old_user) is False
+
+    # В основном боте всё как было.
+    with brand_scope(MIRROR_ID):
+        assert is_rays_program_available_for(old_user) is True
+
+
+@pytest.mark.anyio
+async def test_rays_accrual_follows_the_referrers_bot_not_the_buyers(registry, monkeypatch):
+    from app.services import rays_service
+
+    monkeypatch.setattr(settings, "RAYS_PROGRAM_ENABLED", True)
+    monkeypatch.setattr(settings, "BRAND_RAYS_ENABLED", True)
+    referrer = SimpleNamespace(id=1, bot_id=None, is_partner=False, telegram_id=1, rays_balance=0, full_name="R")
+    buyer = SimpleNamespace(id=2, referred_by_id=1, rays_credited=False, full_name="B", telegram_id=2)
+
+    async def fake_get_user_by_id(db, user_id):
+        return referrer
+
+    added = []
+
+    async def fake_add_user_rays(db, user, rays, **kwargs):
+        added.append(rays)
+        return object()
+
+    monkeypatch.setattr(rays_service, "get_user_by_id", fake_get_user_by_id)
+    monkeypatch.setattr(rays_service, "add_user_rays", fake_add_user_rays)
+    monkeypatch.setattr(type(settings), "get_rays_for_period", lambda self, days: 3)
+
+    # Покупка проходит в витрине, но реферер из основного бота — лучи ему положены.
+    with brand_scope(COPYCAT_ID):
+        awarded = await rays_service.award_rays_for_referral_purchase(None, buyer, 360, 77, bot=None)
+    assert awarded is True and added == [3]

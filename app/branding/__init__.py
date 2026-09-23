@@ -5,7 +5,13 @@
 в хендлерах — через контекст апдейта, в фоновых отправках — по user.bot_id.
 """
 
-from app.branding.context import brand_scope, current_bot_id, current_brand, use_brand_for_user
+from app.branding.context import (
+    brand_for_interaction,
+    brand_scope,
+    current_bot_id,
+    current_brand,
+    use_brand_for_user,
+)
 from app.branding.profile import (
     DEFAULT_BRAND_NAME,
     BrandProfile,
@@ -17,6 +23,7 @@ from app.branding.profile import (
 __all__ = [
     "DEFAULT_BRAND_NAME",
     "BrandProfile",
+    "brand_for_interaction",
     "brand_scope",
     "current_bot_id",
     "current_brand",

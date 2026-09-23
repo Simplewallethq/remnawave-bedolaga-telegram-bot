@@ -39,3 +39,18 @@ def brand_scope(bot_id: Optional[int]) -> Iterator[None]:
 def use_brand_for_user(user: object):
     """Скоуп бренда получателя: бот, в котором он зарегистрирован."""
     return brand_scope(getattr(user, "bot_id", None))
+
+
+def brand_for_interaction(user: object) -> BrandProfile:
+    """Бренд, в котором пользователь сейчас видит сервис.
+
+    Внутри апдейта (или скоупа рассылки) решает бот, который отвечает: старый
+    пользователь основного бота, открывший витрину, должен увидеть витрину, а
+    не программу лучей основного бренда. Вне бота — кабинет, web API — контекста
+    нет, и бренд берётся по боту, где пользователь зарегистрирован.
+    """
+    if _current_bot_id.get() is not None:
+        return current_brand()
+    from app.utils.bot_registry import brand_for_user
+
+    return brand_for_user(user)

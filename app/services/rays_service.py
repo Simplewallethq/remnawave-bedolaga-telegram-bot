@@ -66,7 +66,11 @@ async def award_rays_for_referral_purchase(
             return False
 
         # Витрина реферера без программы лучей (копикет): начислять нечего.
-        if not is_rays_program_available_for(referrer):
+        # Проверка идёт внутри покупки реферала, то есть в его боте, а лучи
+        # принадлежат рефереру — решает бот, где зарегистрирован реферер.
+        with use_brand_for_user(referrer):
+            referrer_has_rays = is_rays_program_available_for(referrer)
+        if not referrer_has_rays:
             logger.info(
                 "☀️ Реферер %s — витрина без программы лучей, лучи не начисляются",
                 referrer.id,
