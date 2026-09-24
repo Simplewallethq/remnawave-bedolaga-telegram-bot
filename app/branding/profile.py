@@ -194,8 +194,16 @@ def mirror_profile_from_config(bot_id: int, config: Mapping[str, Any] | None) ->
         bot_id=bot_id,
         name=_clean(config.get("name")),
         is_copycat=True,
-        privacy_url=_clean(config.get("privacy_url")) or base.privacy_url,
-        terms_url=_clean(config.get("terms_url")) or base.terms_url,
+        privacy_url=(
+            _clean(config.get("privacy_url"))
+            or _clean(settings.COPYCAT_PRIVACY_POLICY_URL)
+            or base.privacy_url
+        ),
+        terms_url=(
+            _clean(config.get("terms_url"))
+            or _clean(settings.COPYCAT_TERMS_URL)
+            or base.terms_url
+        ),
         channel_link=_clean(config.get("channel_link")) or None,
         channel_id=_clean(config.get("channel_id")) or None,
         support=(

@@ -561,7 +561,7 @@ class Settings(BaseSettings):
     BRAND_CHANNEL_ENABLED: bool = True
     # Лучи и магазин наград: у копикэта остаётся голая рефка.
     BRAND_RAYS_ENABLED: bool = True
-    # Юридические страницы основного бренда. Копикеты задают свои в mirror_bots.yaml.
+    # Юридические страницы основного бренда. У копикетов — COPYCAT_* ниже или своё в mirror_bots.yaml.
     PRIVACY_POLICY_URL: str = "https://telegra.ph/Politika-konfidencialnosti-07-20-101"
     TERMS_URL: str = "https://telegra.ph/Polzovatelskoe-soglashenie-07-20-32"
     # Общие значения для всех копикетов: заполняются, когда в записи бота
@@ -569,6 +569,8 @@ class Settings(BaseSettings):
     # хост ключ-ссылки (прокси на ту же панель).
     COPYCAT_SUPPORT_USERNAME: str = "@vpnsupporthq_bot"
     COPYCAT_SUBSCRIPTION_DOMAIN: str = "sbs.newagetechnologies.live"
+    COPYCAT_PRIVACY_POLICY_URL: str = "https://telegra.ph/Politika-konfidencialnosti-09-24-106"
+    COPYCAT_TERMS_URL: str = "https://telegra.ph/Polzovatelskoe-soglashenie-09-24-52"
     # Страница-переход в Happ (Telegram не пускает happ:// в кнопку). У витрин
     # она живёт на их домене, иначе кнопка «Подключиться» показывала бы адрес
     # основного бренда.

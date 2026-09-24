@@ -37,7 +37,7 @@ bots:
 | `copycat: false` | Зеркало остаётся под основным брендом | запись — витрина |
 | `name` | Имя проекта: `{project_name}` в текстах, замена слова «Leto» | название бота в Telegram (`getMe`) |
 | `logo` | main_pic копикета (файл в `BOT_IMAGES_DIR`) | картинка основного бота |
-| `privacy_url`, `terms_url` | Юр-ссылки: `{privacy_url}`, `{terms_url}`, кнопки в «Инфо», правила при регистрации | из `PRIVACY_POLICY_URL` / `TERMS_URL` основного бота |
+| `privacy_url`, `terms_url` | Юр-ссылки: `{privacy_url}`, `{terms_url}`, кнопки в «Инфо», правила при регистрации | `COPYCAT_PRIVACY_POLICY_URL` / `COPYCAT_TERMS_URL`, затем `PRIVACY_POLICY_URL` / `TERMS_URL` основного бота |
 | `channel_link` | Блок «Подпишись на наш канал» (`{channel_link}`) | блок скрыт; канал основного бренда не наследуется |
 | `channel_id` | Обязательная подписка на канал копикета (бот должен быть админом канала) | проверка подписки для копикета выключена |
 | `support` | Саппорт (`@username`, `t.me/...`, URL): `{support_contact}`, кнопка поддержки | `COPYCAT_SUPPORT_USERNAME`, затем `SUPPORT_USERNAME` |

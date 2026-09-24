@@ -73,11 +73,11 @@ def test_copycat_profile_and_fallbacks(registry):
     sparse = mirror_profile_from_config(5, {"name": "Mini"})
     base = primary_profile()
     assert sparse.is_copycat is True
-    assert sparse.privacy_url == base.privacy_url
-    assert sparse.terms_url == base.terms_url
-    # Саппорт и домен ключа общие для всех витрин, а не от основного бота.
+    # Юр-ссылки, саппорт и домен ключа общие для всех витрин, а не от основного бота.
     assert sparse.support == settings.COPYCAT_SUPPORT_USERNAME
     assert sparse.subscription_domain == settings.COPYCAT_SUBSCRIPTION_DOMAIN
+    assert sparse.privacy_url == settings.COPYCAT_PRIVACY_POLICY_URL != base.privacy_url
+    assert sparse.terms_url == settings.COPYCAT_TERMS_URL != base.terms_url
     assert sparse.logo == base.logo
     # Канал основного бренда не наследуется.
     assert sparse.channel_link is None and sparse.channel_enabled is False
