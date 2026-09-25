@@ -98,24 +98,11 @@ def test_tariff_cards_describe_access_to_all_services():
             assert "all bypasses" not in card
 
 
-def test_youtube_perk_sits_above_traffic_on_plus_and_pro_only():
-    expected_line = {
-        "ru": "Youtube без рекламы",
-        "en": "YouTube without ads",
-        "ua": "Youtube без реклами",
-        "zh": "YouTube 无广告",
-    }
-
-    for language, line in expected_line.items():
+def test_tariff_cards_do_not_advertise_youtube():
+    for language in ("ru", "en", "ua", "zh"):
         texts = get_texts(language)
-
-        for tariff_key in ("TARIFF_CARD_PLUS", "TARIFF_CARD_PRO"):
-            card = texts.t(tariff_key)
-            assert line in card
-            assert card.index(line) < card.index(chr(9854))
-
-        for tariff_key in ("TARIFF_CARD_SOLO", "TARIFF_CARD_APP"):
-            assert line not in texts.t(tariff_key)
+        for tariff_key in ("TARIFF_CARD_SOLO", "TARIFF_CARD_PLUS", "TARIFF_CARD_PRO", "TARIFF_CARD_APP"):
+            assert "youtube" not in texts.t(tariff_key).lower()
 
 
 def test_main_menu_labels_are_localized_for_every_supported_language():
