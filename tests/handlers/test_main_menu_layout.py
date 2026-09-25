@@ -81,12 +81,12 @@ def test_non_paid_users_do_not_see_device_management():
         assert "subscription_manage_devices" not in callbacks
 
 
-def test_tariff_cards_describe_all_bypasses():
+def test_tariff_cards_describe_access_to_all_services():
     expected_wording = {
-        "ru": "полный VPN, все обходы",
-        "en": "full VPN, all bypasses",
-        "ua": "повний VPN, усі обходи",
-        "zh": "完整 VPN，解锁所有限制",
+        "ru": "полный VPN, доступ ко всем сервисам",
+        "en": "full VPN, access to all services",
+        "ua": "повний VPN, доступ до всіх сервісів",
+        "zh": "完整 VPN，可访问所有服务",
     }
 
     for language, wording in expected_wording.items():
@@ -94,8 +94,8 @@ def test_tariff_cards_describe_all_bypasses():
         for tariff_key in ("TARIFF_CARD_SOLO", "TARIFF_CARD_PLUS", "TARIFF_CARD_PRO"):
             card = texts.t(tariff_key)
             assert wording in card
-            assert "доступ ко всем сервисам" not in card
-            assert "access to all services" not in card
+            assert "все обходы" not in card
+            assert "all bypasses" not in card
 
 
 def test_youtube_perk_sits_above_traffic_on_plus_and_pro_only():
