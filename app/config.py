@@ -57,7 +57,9 @@ class Settings(BaseSettings):
     ADMIN_REPORTS_SEND_TIME: Optional[str] = None
 
     CHANNEL_SUB_ID: Optional[str] = None
-    CHANNEL_LINK: Optional[str] = None
+    # Новостной канал основного бренда (ссылка в главном меню). Копикеты его не
+    # наследуют — у них свой channel_link в mirror_bots.yaml.
+    CHANNEL_LINK: Optional[str] = "https://t.me/vpnleto"
     CHANNEL_IS_REQUIRED_SUB: bool = False
     CHANNEL_DISABLE_TRIAL_ON_UNSUBSCRIBE: bool = True
     

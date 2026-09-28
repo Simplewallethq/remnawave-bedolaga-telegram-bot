@@ -1236,7 +1236,8 @@ async def get_main_menu_text(
 
     # Копикэт без своего канала не показывает блок вовсе: чужая ссылка
     # выдала бы витрину с головой.
-    if settings.is_brand_channel_enabled():
+    channel_enabled = settings.is_brand_channel_enabled()
+    if channel_enabled and settings.is_rebranded():
         base_text += texts.t(
             "MAIN_MENU_CHANNEL_HINT",
             "\n\n<a href=\"{channel_link}\">➡️</a> "
@@ -1248,6 +1249,12 @@ async def get_main_menu_text(
         " | "
         "<a href=\"{terms_url}\">Пользовательское соглашение</a>",
     )
+    # У основного бота канал стоит в одной строке с юридическими ссылками.
+    if channel_enabled and not settings.is_rebranded():
+        base_text += texts.t(
+            "MAIN_MENU_CHANNEL_LINK",
+            " | <a href=\"{channel_link}\">Новостной канал</a>",
+        )
 
     return _decorate_main_menu_text(
         base_text,

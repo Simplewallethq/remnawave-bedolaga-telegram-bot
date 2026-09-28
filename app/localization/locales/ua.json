@@ -1676,6 +1676,7 @@
   "TARIFF_BUTTON_SELECT_FROM": "Обрати: {name} — від {price} / міс",
   "TARIFF_BUTTON_CURRENT": "✅ Поточний: {name} — {price} за {period}",
   "TARIFF_PERIODS_TITLE": "💳 <b>{name}</b>\n\nОберіть період:",
+  "TARIFF_PERIODS_TITLE_PROMO": "💳 <b>{name}</b>\n\nОберіть період. Чим довше — тим вигідніше 👇",
   "TARIFF_PERIOD_BUTTON_1M": "1 міс — {price}",
   "TARIFF_PERIOD_BUTTON_3M": "3 міс — {price}",
   "TARIFF_PERIOD_BUTTON_6M": "6 міс — {price}",

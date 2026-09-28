@@ -565,10 +565,17 @@ async def show_tariff_periods(
         f"TARIFF_CARD_{plan.code.upper()}",
         plan.description_md or plan.display_name,
     )
-    title = texts.t(
-        "TARIFF_PERIODS_TITLE",
-        "💳 <b>{name}</b>\n\nВыберите период:",
-    ).format(name=plan.display_name)
+    if settings.is_rebranded():
+        title = texts.t(
+            "TARIFF_PERIODS_TITLE",
+            "💳 <b>{name}</b>\n\nВыберите период:",
+        )
+    else:
+        title = texts.t(
+            "TARIFF_PERIODS_TITLE_PROMO",
+            "💳 <b>{name}</b>\n\nВыберите период. Чем дольше — тем выгоднее 👇",
+        )
+    title = title.format(name=plan.display_name)
     message_text = f"{description}\n\n{title}"
 
     keyboard = get_tariff_periods_keyboard(

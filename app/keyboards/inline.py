@@ -1170,6 +1170,51 @@ def _tariff_period_button_label(
     ).format(base=base, per_month=_format_kopeks_short(per_month))
 
 
+def _tariff_period_rows(
+    period_prices: dict,
+    texts,
+    callback_prefix: str,
+) -> List[List[InlineKeyboardButton]]:
+    """Period buttons in display order; the hit period is first and highlighted.
+
+    Хит и свой порядок — только у основного бота; витрины как было.
+    """
+    promo = not current_brand().is_copycat
+    rows: List[List[InlineKeyboardButton]] = []
+    for period_days in _TARIFF_PERIOD_ORDER if promo else _TARIFF_PERIOD_PLAIN_ORDER:
+        price_kopeks = period_prices.get(period_days)
+        if price_kopeks is None:
+            continue
+        label = _tariff_period_button_label(period_days, price_kopeks, texts)
+        is_hit = promo and period_days == _TARIFF_HIT_PERIOD_DAYS
+        if is_hit:
+            label = texts.t("TARIFF_PERIOD_HIT_SUFFIX", "{base} · ⭐️ хит").format(base=label)
+        rows.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"{callback_prefix}:{period_days}",
+                style=ButtonStyle.SUCCESS if is_hit else None,
+            )
+        ])
+    return rows
+
+
+# Порядок кнопок тарифов: хит первым, остальные — как в БД (по sort_order).
+_TARIFF_BUTTON_ORDER = ("plus", "pro", "solo")
+_TARIFF_HIT_CODE = "plus"
+# Хит среди периодов идёт первым и подсвечен; дальше — по возрастанию.
+_TARIFF_PERIOD_ORDER = (90, 30, 360, 720)
+_TARIFF_PERIOD_PLAIN_ORDER = (30, 90, 360, 720)
+_TARIFF_HIT_PERIOD_DAYS = 90
+
+
+def _tariff_button_rank(plan) -> int:
+    code = (getattr(plan, "code", "") or "").lower()
+    if code in _TARIFF_BUTTON_ORDER:
+        return _TARIFF_BUTTON_ORDER.index(code)
+    return len(_TARIFF_BUTTON_ORDER)
+
+
 def get_tariffs_keyboard(
     plans_with_lowest_monthly: List[tuple],
     language: str = DEFAULT_LANGUAGE,
@@ -1181,9 +1226,22 @@ def get_tariffs_keyboard(
     texts = get_texts(language)
     rows: List[List[InlineKeyboardButton]] = []
 
-    for plan, lowest_monthly in plans_with_lowest_monthly:
+    # Хит и свой порядок — только у основного бота; витрины как было.
+    promo = not current_brand().is_copycat
+    ordered = (
+        sorted(plans_with_lowest_monthly, key=lambda item: _tariff_button_rank(item[0]))
+        if promo
+        else plans_with_lowest_monthly
+    )
+    for plan, lowest_monthly in ordered:
+        is_hit = promo and (getattr(plan, "code", "") or "").lower() == _TARIFF_HIT_CODE
         if current_plan_id is not None and plan.id == current_plan_id and current_plan_label:
             label = current_plan_label
+        elif is_hit:
+            label = texts.t(
+                "TARIFF_BUTTON_SELECT_HIT",
+                "Выбрать {name} · ⭐️ хит",
+            ).format(name=plan.display_name)
         else:
             label = texts.t(
                 "TARIFF_BUTTON_SELECT",
@@ -1193,6 +1251,7 @@ def get_tariffs_keyboard(
             InlineKeyboardButton(
                 text=label,
                 callback_data=f"tariff_select:{plan.code}",
+                style=ButtonStyle.SUCCESS if is_hit else None,
             )
         ])
 
@@ -1212,19 +1271,7 @@ def get_tariff_periods_keyboard(
 ) -> InlineKeyboardMarkup:
     """`period_prices` is {period_days: price_kopeks}."""
     texts = get_texts(language)
-    rows: List[List[InlineKeyboardButton]] = []
-
-    for period_days in (30, 90, 360, 720):
-        price_kopeks = period_prices.get(period_days)
-        if price_kopeks is None:
-            continue
-        label = _tariff_period_button_label(period_days, price_kopeks, texts)
-        rows.append([
-            InlineKeyboardButton(
-                text=label,
-                callback_data=f"tariff_buy:{plan_code}:{period_days}",
-            )
-        ])
+    rows = _tariff_period_rows(period_prices, texts, f"tariff_buy:{plan_code}")
 
     rows.append([
         InlineKeyboardButton(
@@ -1278,19 +1325,7 @@ def get_renew_periods_keyboard(
 ) -> InlineKeyboardMarkup:
     """Renew at the current tier; one row per available period."""
     texts = get_texts(language)
-    rows: List[List[InlineKeyboardButton]] = []
-
-    for period_days in (30, 90, 360, 720):
-        price_kopeks = period_prices.get(period_days)
-        if price_kopeks is None:
-            continue
-        label = _tariff_period_button_label(period_days, price_kopeks, texts)
-        rows.append([
-            InlineKeyboardButton(
-                text=label,
-                callback_data=f"tariff_renew:{plan_id}:{period_days}",
-            )
-        ])
+    rows = _tariff_period_rows(period_prices, texts, f"tariff_renew:{plan_id}")
 
     rows.append([
         InlineKeyboardButton(
@@ -3401,7 +3436,18 @@ def get_new_main_menu_keyboard(
             ),
         )
     ])
-    
+
+    # Веб-кабинет — для оплаты в браузере. Он под брендом Leto, поэтому
+    # копикетам не показываем.
+    cabinet_url = (settings.CABINET_BASE_URL or "").strip()
+    if cabinet_url and not current_brand().is_copycat:
+        keyboard.append([
+            InlineKeyboardButton(
+                text=texts.t("MENU_WEB_CABINET_BUTTON", "Личный Кабинет (WEB)"),
+                url=cabinet_url,
+            )
+        ])
+
     if is_admin:
         keyboard.append([
             InlineKeyboardButton(

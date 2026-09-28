@@ -1674,6 +1674,7 @@
     "TARIFF_BUTTON_SELECT_FROM": "选择：{name} — 起价 {price} / 月",
     "TARIFF_BUTTON_CURRENT": "✅ 当前：{name} — {price} / {period}",
     "TARIFF_PERIODS_TITLE": "💳 <b>{name}</b>\n\n请选择时长：",
+    "TARIFF_PERIODS_TITLE_PROMO": "💳 <b>{name}</b>\n\n请选择时长。时间越长越划算 👇",
     "TARIFF_PERIOD_BUTTON_1M": "1 个月 — {price}",
     "TARIFF_PERIOD_BUTTON_3M": "3 个月 — {price}",
     "TARIFF_PERIOD_BUTTON_6M": "6 个月 — {price}",
