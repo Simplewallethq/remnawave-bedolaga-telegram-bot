@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timedelta
+
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +12,10 @@ from app.config import settings
 from app.database.models import User, UserStatus
 from app.services.cabinet_auth_service import cabinet_auth_service
 from app.webapi.dependencies import get_db_session
+
+logger = logging.getLogger(__name__)
+
+LAST_ACTIVITY_TOUCH_INTERVAL = timedelta(hours=1)
 
 
 def _extract_bearer_token(request: Request) -> str | None:
@@ -58,4 +65,19 @@ async def get_current_cabinet_user(
             detail="User is blocked",
         )
 
+    await _touch_last_activity(db, user)
+
     return user
+
+
+async def _touch_last_activity(db: AsyncSession, user: User) -> None:
+    """Активность в кабинете/приложении, иначе чистка неактивных считает юзера мёртвым."""
+    now = datetime.utcnow()
+    if user.last_activity and now - user.last_activity < LAST_ACTIVITY_TOUCH_INTERVAL:
+        return
+    try:
+        user.last_activity = now
+        await db.commit()
+    except Exception as error:  # активность не должна ломать запрос
+        logger.warning("Не удалось обновить last_activity юзера %s: %s", user.id, error)
+        await db.rollback()

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Security, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database.models import UserStatus
 from app.database.crud.device_link import create_device_link, get_device_link
 from app.database.crud.subscription import (
     create_trial_denied_subscription,
@@ -189,6 +190,12 @@ async def verify_otp(
     if not user.has_used_mobile_app:
         user.has_used_mobile_app = True
         changed = True
+    # Вход = активность; удалённого чисткой неактивных возвращаем, как /start в боте.
+    user.last_activity = datetime.utcnow()
+    changed = True
+    if user.status == UserStatus.DELETED.value:
+        logger.info("♻️ OTP: восстановлен удалённый пользователь %s", user.id)
+        user.status = UserStatus.ACTIVE.value
     if changed:
         await db.commit()
 

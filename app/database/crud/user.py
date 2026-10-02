@@ -1072,7 +1072,10 @@ async def get_inactive_users(db: AsyncSession, months: int = 3) -> List[User]:
         .where(
             and_(
                 User.last_activity < threshold_date,
-                User.status == UserStatus.ACTIVE.value
+                User.status == UserStatus.ACTIVE.value,
+                # Платившие не чистятся: у юзеров кабинета/приложения last_activity
+                # раньше не обновлялся, и их сносило при первой же просрочке подписки
+                User.has_had_paid_subscription.is_(False),
             )
         )
     )
