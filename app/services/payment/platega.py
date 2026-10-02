@@ -108,6 +108,22 @@ class PlategaPaymentMixin:
             return None
         return int(amount_rub) * 100
 
+    @staticmethod
+    async def _resolve_platega_user_email(
+        db: AsyncSession, user_id: int
+    ) -> Optional[str]:
+        try:
+            payment_module = import_module("app.services.payment_service")
+            user = await payment_module.get_user_by_id(db, user_id)
+        except Exception as error:  # pragma: no cover - email must not block payment
+            logger.warning(
+                "Не удалось получить пользователя %s для email Platega: %s",
+                user_id,
+                error,
+            )
+            return None
+        return PlategaService.build_user_email(user)
+
     async def create_platega_subscription(
         self,
         db: AsyncSession,
@@ -166,6 +182,7 @@ class PlategaPaymentMixin:
                 amount=amount_kopeks // 100,
                 currency=settings.PLATEGA_CURRENCY,
                 description=description,
+                user_email=await self._resolve_platega_user_email(db, user_id),
             )
         except Exception as error:  # pragma: no cover - network errors
             logger.exception("Ошибка создания регулярной подписки Platega: %s", error)
@@ -294,6 +311,7 @@ class PlategaPaymentMixin:
                 return_url=settings.get_platega_return_url(),
                 failed_url=settings.get_platega_failed_url(),
                 payload=payload_token,
+                user_email=await self._resolve_platega_user_email(db, user_id),
             )
         except Exception as error:  # pragma: no cover - network errors
             logger.exception("Ошибка Platega при создании платежа: %s", error)
@@ -403,6 +421,7 @@ class PlategaPaymentMixin:
                 return_url=settings.get_platega_return_url(),
                 failed_url=settings.get_platega_failed_url(),
                 payload=payload_token,
+                user_email=await self._resolve_platega_user_email(db, user_id),
             )
         except Exception as error:  # pragma: no cover - network errors
             logger.exception("Ошибка Platega при создании универсального платежа: %s", error)

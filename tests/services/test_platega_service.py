@@ -1,4 +1,5 @@
 import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -59,3 +60,32 @@ async def test_cancel_subscription_uses_provider_endpoint() -> None:
     await service.cancel_subscription("sub/1")
 
     request_mock.assert_awaited_once_with("POST", "/subscription/sub%2F1/cancel")
+
+
+@pytest.mark.parametrize(
+    ("user", "expected"),
+    [
+        (SimpleNamespace(email="ivan@example.com", email_verified=True, username="ivan", telegram_id=1), "ivan@example.com"),
+        (SimpleNamespace(email="ivan@example.com", email_verified=False, username="@ivan", telegram_id=1), "ivan@t.me"),
+        (SimpleNamespace(email=None, email_verified=False, username=None, telegram_id=463239844), "463239844@t.me"),
+        (SimpleNamespace(email="web@example.com", email_verified=False, username=None, telegram_id=None), "web@example.com"),
+        (SimpleNamespace(email=None, email_verified=False, username=None, telegram_id=None), None),
+        (None, None),
+    ],
+)
+def test_build_user_email_follows_provider_fallbacks(user, expected) -> None:
+    assert PlategaService.build_user_email(user) == expected
+
+
+@pytest.mark.anyio("asyncio")
+async def test_create_payment_sends_user_email_in_metadata() -> None:
+    service = PlategaService()
+    request_mock = AsyncMock(return_value={"transactionId": "trx-1"})
+    service._request = request_mock  # type: ignore[method-assign]
+
+    await service.create_payment_universal(
+        amount=150, currency="RUB", user_email="ivan@t.me"
+    )
+
+    body = request_mock.await_args.kwargs["json_data"]
+    assert body["metadata"] == {"user_email": "ivan@t.me"}

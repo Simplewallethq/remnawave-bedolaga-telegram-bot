@@ -43,6 +43,7 @@ class PlategaService:
         return_url: Optional[str] = None,
         failed_url: Optional[str] = None,
         payload: Optional[str] = None,
+        user_email: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         body: Dict[str, Any] = {
             "paymentMethod": payment_method,
@@ -63,6 +64,7 @@ class PlategaService:
             body["failedUrl"] = failed_url
         if payload:
             body["payload"] = payload
+        self._attach_user_email(body, user_email)
 
         return await self._request("POST", "/transaction/process", json_data=body)
 
@@ -75,6 +77,7 @@ class PlategaService:
         return_url: Optional[str] = None,
         failed_url: Optional[str] = None,
         payload: Optional[str] = None,
+        user_email: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Создаёт платёжную ссылку без указания метода (метод выбирается на стороне Platega)."""
 
@@ -96,6 +99,7 @@ class PlategaService:
             body["failedUrl"] = failed_url
         if payload:
             body["payload"] = payload
+        self._attach_user_email(body, user_email)
 
         return await self._request("POST", "/v2/transaction/process", json_data=body)
 
@@ -105,6 +109,7 @@ class PlategaService:
         amount: int,
         currency: str,
         description: str,
+        user_email: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Creates a monthly SBP subscription according to Platega's recurring API."""
 
@@ -119,6 +124,7 @@ class PlategaService:
                 description, self._description_max_length
             ),
         }
+        self._attach_user_email(body, user_email)
         return await self._request("POST", "/transaction/process", json_data=body)
 
     async def cancel_subscription(
@@ -243,6 +249,36 @@ class PlategaService:
                 return None, raw_text
 
         return None, raw_text
+
+    @staticmethod
+    def build_user_email(user: Any) -> Optional[str]:
+        """Email плательщика для Platega: обязателен провайдером для каждого платежа.
+
+        Реальная подтверждённая почта, иначе telegram-username@t.me, иначе
+        telegram_id@t.me — так попросил провайдер для мерчантов без сбора почты.
+        """
+
+        if user is None:
+            return None
+
+        email = str(getattr(user, "email", None) or "").strip()
+        if email and getattr(user, "email_verified", False):
+            return email
+
+        username = str(getattr(user, "username", None) or "").strip().lstrip("@")
+        if username:
+            return f"{username}@t.me"
+
+        telegram_id = getattr(user, "telegram_id", None)
+        if telegram_id:
+            return f"{telegram_id}@t.me"
+
+        return email or None
+
+    @staticmethod
+    def _attach_user_email(body: Dict[str, Any], user_email: Optional[str]) -> None:
+        if user_email:
+            body["metadata"] = {"user_email": user_email}
 
     @staticmethod
     def _sanitize_description(description: str, max_bytes: int) -> str:

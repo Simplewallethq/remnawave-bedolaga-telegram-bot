@@ -121,6 +121,16 @@ async def test_create_platega_payment_success(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(settings, "PLATEGA_RETURN_URL", "https://return", raising=False)
     monkeypatch.setattr(settings, "PLATEGA_FAILED_URL", "https://failed", raising=False)
 
+    monkeypatch.setattr(
+        payment_service_module,
+        "get_user_by_id",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                email=None, email_verified=False, username="ivan", telegram_id=1
+            )
+        ),
+    )
+
     result = await service.create_platega_payment(
         db=db,
         user_id=42,
@@ -138,6 +148,7 @@ async def test_create_platega_payment_success(monkeypatch: pytest.MonkeyPatch) -
     assert "correlation_id" in result and len(result["correlation_id"]) == 32
     assert captured_args["user_id"] == 42
     assert captured_args["amount_kopeks"] == 50_000
+    assert stub.calls[0]["user_email"] == "ivan@t.me"
     assert captured_args["payment_method_code"] == 10
     assert captured_args["metadata"]["selected_method"] == 10
     assert stub.calls and stub.calls[0]["payment_method"] == 10
@@ -295,6 +306,15 @@ async def test_create_platega_subscription_reserves_active_slot(
         fake_update,
         raising=False,
     )
+    monkeypatch.setattr(
+        payment_service_module,
+        "get_user_by_id",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                email=None, email_verified=False, username=None, telegram_id=463239844
+            )
+        ),
+    )
     monkeypatch.setattr(settings, "PLATEGA_MIN_AMOUNT_KOPEKS", 10_000, raising=False)
     monkeypatch.setattr(settings, "PLATEGA_MAX_AMOUNT_KOPEKS", 500_000, raising=False)
     monkeypatch.setattr(settings, "PLATEGA_CURRENCY", "RUB", raising=False)
@@ -314,6 +334,7 @@ async def test_create_platega_subscription_reserves_active_slot(
         "amount": 100,
         "currency": "RUB",
         "description": "Регулярное пополнение",
+        "user_email": "463239844@t.me",
     }
 
 
