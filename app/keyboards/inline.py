@@ -181,7 +181,11 @@ async def get_main_menu_keyboard_async(
             has_autopay=has_autopay,
         )
 
-        return await MenuLayoutService.build_keyboard(db, context)
+        keyboard = await MenuLayoutService.build_keyboard(db, context)
+        giveaway_row = get_giveaway_menu_row()
+        if giveaway_row:
+            keyboard.inline_keyboard.insert(0, giveaway_row)
+        return keyboard
 
     # Fallback на синхронную версию
     return get_main_menu_keyboard(
@@ -197,6 +201,29 @@ async def get_main_menu_keyboard_async(
         is_moderator=is_moderator,
         custom_buttons=custom_buttons,
     )
+
+
+def get_giveaway_menu_row() -> Optional[List[InlineKeyboardButton]]:
+    """Красная кнопка розыгрыша — пока он идёт, и только в основном бренде.
+
+    Строится на каждом показе главного меню, поэтому любая ошибка (например,
+    кривая дата в .env) прячет кнопку, а не ломает меню.
+    """
+    try:
+        from app.services.giveaway_service import giveaway_service
+
+        if current_brand().is_copycat or not giveaway_service.is_running():
+            return None
+    except Exception:
+        logger.exception("Розыгрыш: не удалось решить, показывать ли кнопку")
+        return None
+    return [
+        InlineKeyboardButton(
+            text="🎮 РОЗЫГРЫШ X2 GTA VI",
+            callback_data="giveaway_menu",
+            style=ButtonStyle.DANGER,
+        )
+    ]
 
 
 def _get_localized_value(values, language: str, default_language: str = "en") -> str:
@@ -427,6 +454,10 @@ def _build_text_main_menu_keyboard(
 
     keyboard_rows: List[List[InlineKeyboardButton]] = [[profile_button]]
 
+    giveaway_row = get_giveaway_menu_row()
+    if giveaway_row:
+        keyboard_rows.insert(0, giveaway_row)
+
     if settings.is_language_selection_enabled():
         keyboard_rows.append([
             InlineKeyboardButton(text=texts.MENU_LANGUAGE, callback_data="menu_language")
@@ -495,6 +526,10 @@ def get_main_menu_keyboard(
 
     keyboard: list[list[InlineKeyboardButton]] = []
     paired_buttons: list[InlineKeyboardButton] = []
+
+    giveaway_row = get_giveaway_menu_row()
+    if giveaway_row:
+        keyboard.append(giveaway_row)
 
     if has_active_subscription and subscription_is_active:
         connect_mode = settings.CONNECT_BUTTON_MODE

@@ -1807,6 +1807,35 @@ class ReferralContestEvent(Base):
         )
 
 
+class GiveawayEntry(Base):
+    """Участник розыгрыша: снимок условий на последнюю проверку.
+
+    Условия считаются заново при каждом открытии экрана или нажатии «Проверить»;
+    строка хранит последний результат — по ней составляется список участников
+    с билетами для итогов. Подписка на канал известна только через Telegram API,
+    поэтому без этой записи её на момент итогов не восстановить.
+    """
+    __tablename__ = "giveaway_entries"
+    __table_args__ = (
+        UniqueConstraint("giveaway_code", "user_id", name="uq_giveaway_entry_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    giveaway_code = Column(String(32), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    channel_subscribed = Column(Boolean, nullable=False, default=False)
+    invited_count = Column(Integer, nullable=False, default=0)
+    invited_paid_count = Column(Integer, nullable=False, default=0)
+    plan_code = Column(String(16), nullable=True)  # тариф активной платной подписки
+    tickets = Column(Integer, nullable=False, default=0)
+
+    checked_at = Column(DateTime, nullable=False, default=func.now())
+    created_at = Column(DateTime, default=func.now())
+
+    user = relationship("User", foreign_keys=[user_id])
+
+
 class ContestTemplate(Base):
     __tablename__ = "contest_templates"
 

@@ -8039,6 +8039,84 @@ async def create_ray_prize_claims_table() -> bool:
         return False
 
 
+async def create_giveaway_entries_table() -> bool:
+    """Создаёт таблицу участников розыгрыша giveaway_entries."""
+    table_exists = await check_table_exists('giveaway_entries')
+    if table_exists:
+        logger.info("Таблица giveaway_entries уже существует")
+        return True
+
+    try:
+        async with engine.begin() as conn:
+            db_type = await get_database_type()
+
+            if db_type == 'sqlite':
+                create_sql = """
+                CREATE TABLE giveaway_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    giveaway_code VARCHAR(32) NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    channel_subscribed BOOLEAN NOT NULL DEFAULT 0,
+                    invited_count INTEGER NOT NULL DEFAULT 0,
+                    invited_paid_count INTEGER NOT NULL DEFAULT 0,
+                    plan_code VARCHAR(16) NULL,
+                    tickets INTEGER NOT NULL DEFAULT 0,
+                    checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    CONSTRAINT uq_giveaway_entry_user UNIQUE (giveaway_code, user_id)
+                );
+                CREATE INDEX ix_giveaway_entries_giveaway_code ON giveaway_entries(giveaway_code);
+                """
+            elif db_type == 'postgresql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS giveaway_entries (
+                    id SERIAL PRIMARY KEY,
+                    giveaway_code VARCHAR(32) NOT NULL,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    channel_subscribed BOOLEAN NOT NULL DEFAULT FALSE,
+                    invited_count INTEGER NOT NULL DEFAULT 0,
+                    invited_paid_count INTEGER NOT NULL DEFAULT 0,
+                    plan_code VARCHAR(16) NULL,
+                    tickets INTEGER NOT NULL DEFAULT 0,
+                    checked_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    CONSTRAINT uq_giveaway_entry_user UNIQUE (giveaway_code, user_id)
+                );
+                CREATE INDEX IF NOT EXISTS ix_giveaway_entries_giveaway_code ON giveaway_entries(giveaway_code);
+                """
+            elif db_type == 'mysql':
+                create_sql = """
+                CREATE TABLE IF NOT EXISTS giveaway_entries (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    giveaway_code VARCHAR(32) NOT NULL,
+                    user_id INT NOT NULL,
+                    channel_subscribed BOOLEAN NOT NULL DEFAULT FALSE,
+                    invited_count INT NOT NULL DEFAULT 0,
+                    invited_paid_count INT NOT NULL DEFAULT 0,
+                    plan_code VARCHAR(16) NULL,
+                    tickets INT NOT NULL DEFAULT 0,
+                    checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    CONSTRAINT uq_giveaway_entry_user UNIQUE (giveaway_code, user_id),
+                    INDEX ix_giveaway_entries_giveaway_code (giveaway_code)
+                );
+                """
+            else:
+                raise ValueError(f"Unsupported database type: {db_type}")
+
+            for statement in [s.strip() for s in create_sql.split(';') if s.strip()]:
+                await conn.execute(text(statement))
+
+        logger.info("✅ Таблица giveaway_entries успешно создана")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка создания таблицы giveaway_entries: {e}")
+        return False
+
+
 async def add_ray_prize_claim_contact_column() -> bool:
     """Добавляет ray_prize_claims.contact — TG-контакт из формы кабинета сайта."""
     try:
@@ -8913,6 +8991,12 @@ async def run_universal_migration():
             logger.info("✅ Таблица ray_transactions готова")
         else:
             logger.warning("⚠️ Проблемы с таблицей ray_transactions")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ GIVEAWAY_ENTRIES ===")
+        if await create_giveaway_entries_table():
+            logger.info("✅ Таблица giveaway_entries готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей giveaway_entries")
 
         logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ RAY_PRIZE_CLAIMS ===")
         ray_prize_claims_ready = await create_ray_prize_claims_table()

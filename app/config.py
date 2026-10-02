@@ -222,6 +222,19 @@ class Settings(BaseSettings):
     # Для обратной совместимости со старыми конфигами
     REFERRAL_CONTESTS_ENABLED: bool = False
 
+    # Розыгрыш с билетами (красная кнопка в главном меню основного бренда).
+    # Кнопка видна с START_AT до END_AT; друзья и их оплаты считаются только внутри
+    # этого окна. Даты — ISO 8601 со смещением.
+    GIVEAWAY_ENABLED: bool = True
+    GIVEAWAY_CODE: str = "gta6_2026"
+    GIVEAWAY_START_AT: str = "2026-10-03T00:00:00+03:00"
+    GIVEAWAY_END_AT: str = "2026-10-20T23:59:59+03:00"
+    # Бот должен быть админом канала, иначе Telegram не отдаёт статус участника.
+    GIVEAWAY_CHANNEL: str = "@vpnleto"
+    GIVEAWAY_CHANNEL_URL: str = "https://t.me/vpnleto"
+    # Оплата друга засчитывается от этой суммы: отсекает «доступ за 1 ₽» и копеечные докупки.
+    GIVEAWAY_MIN_FRIEND_PAYMENT_KOPEKS: int = 10000
+
     BLACKLIST_CHECK_ENABLED: bool = False
     BLACKLIST_GITHUB_URL: Optional[str] = None
     BLACKLIST_UPDATE_INTERVAL_HOURS: int = 24

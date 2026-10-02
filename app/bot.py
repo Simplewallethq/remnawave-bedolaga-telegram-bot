@@ -29,6 +29,7 @@ from app.handlers import (
     rays_shop,
     referral,
     referral_withdrawals,
+    giveaway,
     support,
     server_status,
     common,
@@ -211,6 +212,7 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     rays_shop.register_handlers(dp)
     referral.register_handlers(dp)
     referral_withdrawals.register_handlers(dp)
+    giveaway.register_handlers(dp)
     support.register_handlers(dp)
     server_status.register_handlers(dp)
     tickets.register_handlers(dp)
