@@ -470,6 +470,22 @@ async def extend_subscription(
         subscription.traffic_used_gb = 0.0
         logger.info("🔄 Сбрасываем использованный трафик согласно настройке RESET_TRAFFIC_ON_PAYMENT")
 
+    # Заглушка отказа в триале (create_trial_denied_subscription) создаётся без серверов.
+    # Если её оплатили, без этого в панель уйдёт только платный сквад — пользователь
+    # увидит одни VIP-хосты. Даём серверы, как при обычной покупке.
+    if days > 0 and not subscription.is_trial and not subscription.connected_squads:
+        from app.database.crud.server_squad import get_active_server_squads
+
+        squads = await get_active_server_squads(db)
+        subscription.connected_squads = [
+            squad.squad_uuid for squad in squads if getattr(squad, "squad_uuid", None)
+        ]
+        logger.info(
+            "🧩 Подписка %s без серверов — подключены активные сквады: %s",
+            subscription.id,
+            subscription.connected_squads,
+        )
+
     subscription.updated_at = current_time
 
     await db.commit()
