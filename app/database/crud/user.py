@@ -1076,6 +1076,22 @@ async def get_inactive_users(db: AsyncSession, months: int = 3) -> List[User]:
                 # Платившие не чистятся: у юзеров кабинета/приложения last_activity
                 # раньше не обновлялся, и их сносило при первой же просрочке подписки
                 User.has_had_paid_subscription.is_(False),
+                # Флаг выше на проде врёт (сотни платящих с false), поэтому сверяемся
+                # с деньгами: оплата подписки, пополнение или остаток на балансе
+                User.balance_kopeks <= 0,
+                ~select(Transaction.id)
+                .where(
+                    Transaction.user_id == User.id,
+                    Transaction.is_completed.is_(True),
+                    Transaction.type.in_(
+                        [
+                            TransactionType.SUBSCRIPTION_PAYMENT.value,
+                            TransactionType.DEPOSIT.value,
+                        ]
+                    ),
+                    Transaction.amount_kopeks != 0,
+                )
+                .exists(),
             )
         )
     )
