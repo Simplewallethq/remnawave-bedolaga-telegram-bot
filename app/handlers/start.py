@@ -887,6 +887,25 @@ async def _send_cabinet_login_link(message: types.Message, user, texts) -> None:
         )
 
 
+async def _delete_subscription_for_reregistration(db: AsyncSession, user) -> None:
+    """Удаляет подписку удалённого юзера перед повторной регистрацией.
+
+    Не db.delete(): ORM обнуляет subscription_id в sent_notifications (NOT NULL), и вся
+    перерегистрация откатывается. Удаляем SQL-ом, хвосты чистят каскады БД; у
+    device_links каскада нет — их убираем сами.
+    """
+    from sqlalchemy import delete
+    from sqlalchemy.orm.attributes import set_committed_value
+
+    from app.database.models import DeviceLink, Subscription
+
+    subscription = user.subscription
+    await db.execute(delete(DeviceLink).where(DeviceLink.subscription_id == subscription.id))
+    await db.execute(delete(Subscription).where(Subscription.id == subscription.id))
+    db.expunge(subscription)
+    set_committed_value(user, "subscription", None)
+
+
 async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession, db_user=None):
     logger.info(f"🚀 START: Обработка /start от {message.from_user.id}")
 
@@ -1283,7 +1302,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
                 logger.info(f"🗑️ Удалены записи SubscriptionServer")
 
             if user.subscription:
-                await db.delete(user.subscription)
+                await _delete_subscription_for_reregistration(db, user)
                 logger.info(f"🗑️ Удалена подписка пользователя")
 
             await db.execute(
