@@ -181,3 +181,52 @@ async def test_plain_start_uses_paid_history_when_building_main_menu(monkeypatch
     assert events[0] == "state_cleared"
     assert start.get_new_main_menu_keyboard.call_args.kwargs["trial_used"] is True
     assert "menu_sent" in events
+
+
+async def test_start_restores_deleted_user_with_active_subscription(monkeypatch):
+    message = _message()
+    message.text = "/start"
+    message.from_user = SimpleNamespace(
+        id=42,
+        username="user",
+        first_name="First",
+        last_name="Last",
+    )
+    state = AsyncMock()
+    state.get_data.return_value = {}
+    db = AsyncMock()
+    db.delete = AsyncMock()
+    subscription = SimpleNamespace(
+        is_active=True,
+        is_trial=False,
+        actual_status="active",
+        status="active",
+    )
+    user = SimpleNamespace(
+        status="deleted",
+        telegram_id=42,
+        username="user",
+        first_name="First",
+        last_name="Last",
+        last_activity=None,
+        balance_kopeks=0,
+        subscription=subscription,
+        has_had_paid_subscription=False,
+        language="ru",
+    )
+
+    monkeypatch.setattr(start, "get_active_pinned_message", AsyncMock(return_value=None))
+    monkeypatch.setattr(start, "get_main_menu_text", AsyncMock(return_value="Main menu"))
+    monkeypatch.setattr(start, "get_new_main_menu_keyboard", MagicMock())
+    monkeypatch.setattr(
+        type(start.settings),
+        "is_text_main_menu_mode",
+        lambda self: True,
+    )
+
+    await start.cmd_start(message, state, db, user)
+
+    assert user.status == "active"
+    assert user.subscription is subscription
+    db.delete.assert_not_awaited()
+    start.get_main_menu_text.assert_awaited()

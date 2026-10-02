@@ -1025,6 +1025,22 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             logger.error("Ошибка записи ad visit: %s", _ad_err)
             await db.rollback()
 
+    # Повторная регистрация ниже стирает подписку и транзакции. Если удалённому уже
+    # выдали или продлили подписку (например, саппорт), просто возвращаем его.
+    if (
+        user
+        and user.status == UserStatus.DELETED.value
+        and user.subscription
+        and user.subscription.is_active
+    ):
+        logger.info(
+            "♻️ Удалённый пользователь %s с активной подпиской восстановлен без перерегистрации",
+            user.telegram_id,
+        )
+        user.status = UserStatus.ACTIVE.value
+        user.last_activity = datetime.utcnow()
+        await db.commit()
+
     if user and user.status != UserStatus.DELETED.value:
         logger.info(f"✅ Активный пользователь найден: {user.telegram_id}")
 
