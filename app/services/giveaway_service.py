@@ -93,6 +93,16 @@ class GiveawayProgress:
         )
 
 
+@dataclass(frozen=True)
+class GiveawaySummary:
+    participants: int
+    tickets: int
+    channel_subscribed: int
+    invited: int
+    invited_paid: int
+    plans: dict[str, int]
+
+
 def _parse_moment(value: str) -> datetime:
     """ISO-дата из конфига → naive UTC, как хранятся даты в базе."""
     moment = datetime.fromisoformat(value)
@@ -210,6 +220,51 @@ class GiveawayService:
             )
         )
         return result.scalar_one_or_none()
+
+    async def summary(self, db: AsyncSession) -> GiveawaySummary:
+        entry = GiveawayEntry
+        row = (
+            await db.execute(
+                select(
+                    func.count(entry.id),
+                    func.coalesce(func.sum(entry.tickets), 0),
+                    func.count(entry.id).filter(entry.channel_subscribed.is_(True)),
+                    func.coalesce(func.sum(entry.invited_count), 0),
+                    func.coalesce(func.sum(entry.invited_paid_count), 0),
+                ).where(entry.giveaway_code == self.code)
+            )
+        ).one()
+        plans = dict(
+            (
+                await db.execute(
+                    select(entry.plan_code, func.count(entry.id))
+                    .where(entry.giveaway_code == self.code, entry.plan_code.is_not(None))
+                    .group_by(entry.plan_code)
+                )
+            ).all()
+        )
+        return GiveawaySummary(
+            participants=int(row[0]),
+            tickets=int(row[1]),
+            channel_subscribed=int(row[2]),
+            invited=int(row[3]),
+            invited_paid=int(row[4]),
+            plans={code: int(plans.get(code, 0)) for code in PLAN_TICKETS},
+        )
+
+    async def ranked_entries(
+        self, db: AsyncSession, limit: Optional[int] = None
+    ) -> list[tuple[GiveawayEntry, User]]:
+        """Участники по убыванию билетов; при равенстве — кто раньше проверился."""
+        query = (
+            select(GiveawayEntry, User)
+            .join(User, User.id == GiveawayEntry.user_id)
+            .where(GiveawayEntry.giveaway_code == self.code)
+            .order_by(GiveawayEntry.tickets.desc(), GiveawayEntry.checked_at.asc())
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        return [(entry, user) for entry, user in (await db.execute(query)).all()]
 
     async def save_entry(
         self, db: AsyncSession, user_id: int, progress: GiveawayProgress

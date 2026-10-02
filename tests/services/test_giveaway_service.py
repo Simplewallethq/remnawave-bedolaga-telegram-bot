@@ -293,3 +293,35 @@ async def test_save_entry_keeps_one_row_per_user() -> None:
     assert (entry.invited_count, entry.invited_paid_count, entry.plan_code) == (3, 1, "pro")
     assert entry.tickets == 1 + 2 + 4 + 4
     await db.close()
+
+
+# ---------------------------------------------------------------- админка
+
+
+@pytest.mark.anyio
+@needs_db
+async def test_summary_and_ranking_for_admin() -> None:
+    db = await _make_session()
+    first = await _user(db, username="first")
+    second = await _user(db, username="second")
+    third = await _user(db, username="third")
+    await db.commit()
+
+    await giveaway_service.save_entry(db, first.id, GiveawayProgress(True, 3, 1, "pro"))
+    await giveaway_service.save_entry(db, second.id, GiveawayProgress(False, 0, 0, None))
+    await giveaway_service.save_entry(db, third.id, GiveawayProgress(True, 0, 0, "plus"))
+    # Запись другого розыгрыша в сводку не попадает.
+    db.add(GiveawayEntry(giveaway_code="other", user_id=second.id, tickets=100))
+    await db.commit()
+
+    summary = await giveaway_service.summary(db)
+    ranked = await giveaway_service.ranked_entries(db)
+
+    assert summary.participants == 3
+    assert summary.tickets == (1 + 2 + 4 + 4) + 0 + (1 + 3)
+    assert summary.channel_subscribed == 2
+    assert (summary.invited, summary.invited_paid) == (3, 1)
+    assert summary.plans == {"solo": 0, "plus": 1, "pro": 1}
+    assert [user.username for _, user in ranked] == ["first", "third", "second"]
+    assert len(await giveaway_service.ranked_entries(db, limit=1)) == 1
+    await db.close()

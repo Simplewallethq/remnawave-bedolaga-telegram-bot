@@ -61,6 +61,7 @@ from app.handlers.admin import (
     campaigns as admin_campaigns,
     contests as admin_contests,
     daily_contests as admin_daily_contests,
+    giveaway as admin_giveaway,
     promo_offers as admin_promo_offers,
     user_messages as admin_user_messages,
     updates as admin_updates,
@@ -234,6 +235,7 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     admin_campaigns.register_handlers(dp)
     admin_contests.register_handlers(dp)
     admin_daily_contests.register_handlers(dp)
+    admin_giveaway.register_handlers(dp)
     admin_promo_offers.register_handlers(dp)
     admin_maintenance.register_handlers(dp)
     admin_user_messages.register_handlers(dp)

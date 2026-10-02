@@ -234,6 +234,9 @@ class Settings(BaseSettings):
     GIVEAWAY_CHANNEL_URL: str = "https://t.me/vpnleto"
     # Оплата друга засчитывается от этой суммы: отсекает «доступ за 1 ₽» и копеечные докупки.
     GIVEAWAY_MIN_FRIEND_PAYMENT_KOPEKS: int = 10000
+    # Баннер rich-экрана: медиа rich-сообщений Bot API берёт только по HTTP(S).
+    # Пусто — miniapp/giveaway.jpg со статики бота ({WEBHOOK_URL}/miniapp/static/).
+    GIVEAWAY_BANNER_URL: Optional[str] = None
 
     BLACKLIST_CHECK_ENABLED: bool = False
     BLACKLIST_GITHUB_URL: Optional[str] = None

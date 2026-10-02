@@ -1,7 +1,9 @@
 """Экран розыгрыша: условия, билеты и кнопка «Проверить» под каждым условием.
 
-Любое нажатие пересчитывает все условия (см. giveaway_service), перерисовывает
-экран и показывает алерт по нажатому условию — что выполнено или чего не хватает.
+Экран — rich-сообщение (Bot API 10.1): баннер, заголовок, чек-лист условий,
+раскрывающиеся правила. Если Telegram его не принял — тот же экран фото с
+подписью. Любое нажатие пересчитывает все условия (см. giveaway_service),
+перерисовывает экран и показывает алерт: что выполнено или чего не хватает.
 """
 
 import html
@@ -18,11 +20,15 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
+    InputRichMessage,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database.models import User
+from app.keyboards.inline import MAIN_MENU_CUSTOM_EMOJI_IDS
+from app.utils.bot_registry import is_primary_bot
+from app.utils.premium_text import apply_premium_text_emojis
 from app.services.giveaway_service import (
     CHANNEL_TICKETS,
     FRIEND_PAID_TICKETS,
@@ -81,7 +87,7 @@ def _channel_name() -> str:
 
 
 def _mark(done: bool) -> str:
-    return "✅" if done else "▫️"
+    return "✅" if done else "❌"
 
 
 def _referral_link(bot_username: Optional[str], user: User) -> Optional[str]:
@@ -90,10 +96,90 @@ def _referral_link(bot_username: Optional[str], user: User) -> Optional[str]:
     return f"https://t.me/{bot_username}?start={user.referral_code}"
 
 
-def build_giveaway_text(progress: GiveawayProgress, referral_link: Optional[str]) -> str:
-    channel_url = html.escape(settings.GIVEAWAY_CHANNEL_URL, quote=True)
-    channel_name = html.escape(_channel_name())
+RULES = (
+    "Подписка засчитывается на момент проверки: её можно оформить или продлить "
+    "до конца розыгрыша. Пробный период не считается.",
+    "Друзья — только новые, пришедшие по вашей ссылке с начала розыгрыша. "
+    "Их оплаты тоже учитываются с начала розыгрыша.",
+    "Нажмите «Проверить» под условием, чтобы обновить результат.",
+)
+TROPHY = "🏆"
 
+
+def _conditions(progress: GiveawayProgress) -> list[tuple[bool, str]]:
+    """(выполнено, подпись в HTML) — общий список для rich-экрана и фото-фолбэка."""
+    channel_url = html.escape(settings.GIVEAWAY_CHANNEL_URL, quote=True)
+    rows = [(
+        bool(progress.channel_subscribed),
+        f'Подписка на канал <a href="{channel_url}">{html.escape(_channel_name())}</a>'
+        f" — <b>+{CHANNEL_TICKETS}</b>",
+    )]
+    for threshold, tickets in INVITE_TIERS:
+        rows.append((
+            progress.invite_tier_reached(threshold),
+            f"Пригласить {threshold} {_friends_word(threshold)} — <b>+{tickets}</b>",
+        ))
+    for code, tickets in PLAN_TICKETS.items():
+        rows.append((
+            progress.plan_code == code,
+            f"Активная подписка {PLAN_TITLES[code]} — <b>+{tickets}</b>",
+        ))
+    rows.append((
+        progress.invited_paid_count > 0,
+        f"Друг оплатил любую подписку — <b>+{FRIEND_PAID_TICKETS}</b> за каждого",
+    ))
+    return rows
+
+
+def build_giveaway_rich_html(
+    progress: GiveawayProgress,
+    referral_link: Optional[str],
+    *,
+    banner_url: Optional[str],
+    trophy_emoji_id: Optional[str] = None,
+) -> str:
+    """Экран розыгрыша в rich HTML (sendRichMessage, Bot API 10.1)."""
+    trophy = (
+        f'<tg-emoji emoji-id="{trophy_emoji_id}">{TROPHY}</tg-emoji>'
+        if trophy_emoji_id
+        else TROPHY
+    )
+    tickets = progress.total_tickets
+    parts = []
+    if banner_url:
+        parts.append(f'<img src="{html.escape(banner_url, quote=True)}"/>')
+    parts += [
+        f"<h2>{trophy} Розыгрыш 2 × GTA VI</h2>",
+        "<p>Разыгрываем <b>2 лицензии GTA VI</b> среди пользователей Leto VPN. "
+        f"Итоги — <b>{_end_date_label()}</b>.</p>",
+        f"<aside>🎫 Ваши билеты: <b>{tickets}</b>"
+        f"<cite>каждый билет — ещё один шанс на победу</cite></aside>",
+        "<hr/>",
+        "<h3>🎟 Условия</h3>",
+        "<ul>"
+        + "".join(
+            f'<li><input type="checkbox"{" checked" if done else ""}>{label}</li>'
+            for done, label in _conditions(progress)
+        )
+        + "</ul>",
+        "<p>Билеты за все выполненные условия складываются.</p>",
+        "<h3>👥 Ваши друзья</h3>",
+        f"<p>Новых друзей: <b>{progress.invited_count}</b> · "
+        f"оплатили подписку: <b>{progress.invited_paid_count}</b></p>",
+    ]
+    if referral_link:
+        parts.append(f"<p>Ваша ссылка: <code>{html.escape(referral_link)}</code></p>")
+    parts += [
+        "<details><summary>ℹ️ Правила</summary><ul>"
+        + "".join(f"<li>{rule}</li>" for rule in RULES)
+        + "</ul></details>",
+        "<footer>Нажмите «Проверить» под условием, чтобы обновить результат.</footer>",
+    ]
+    return "".join(parts)
+
+
+def build_giveaway_text(progress: GiveawayProgress, referral_link: Optional[str]) -> str:
+    """Тот же экран подписью к фото — фолбэк, если rich-сообщение не прошло."""
     lines = [
         "🔴 <b>РОЗЫГРЫШ 2 × GTA VI</b>",
         "",
@@ -105,23 +191,8 @@ def build_giveaway_text(progress: GiveawayProgress, referral_link: Optional[str]
         "",
         "<b>🎟 Условия</b>",
         "",
-        f"{_mark(bool(progress.channel_subscribed))} Подписка на канал "
-        f'<a href="{channel_url}">{channel_name}</a> — <b>+{CHANNEL_TICKETS}</b>',
     ]
-    for threshold, tickets in INVITE_TIERS:
-        lines.append(
-            f"{_mark(progress.invite_tier_reached(threshold))} Пригласить "
-            f"{threshold} {_friends_word(threshold)} — <b>+{tickets}</b>"
-        )
-    for code, tickets in PLAN_TICKETS.items():
-        lines.append(
-            f"{_mark(progress.plan_code == code)} Активная подписка "
-            f"{PLAN_TITLES[code]} — <b>+{tickets}</b>"
-        )
-    lines.append(
-        f"{_mark(progress.invited_paid_count > 0)} Друг оплатил любую подписку — "
-        f"<b>+{FRIEND_PAID_TICKETS}</b> за каждого"
-    )
+    lines += [f"{_mark(done)} {label}" for done, label in _conditions(progress)]
 
     lines += [
         "",
@@ -134,11 +205,8 @@ def build_giveaway_text(progress: GiveawayProgress, referral_link: Optional[str]
     lines += [
         "",
         "<blockquote expandable>ℹ️ <b>Правила</b>\n"
-        "• Подписка засчитывается на момент проверки: её можно оформить или "
-        "продлить до конца розыгрыша. Пробный период не считается.\n"
-        "• Друзья — только новые, пришедшие по вашей ссылке с начала розыгрыша. "
-        "Их оплаты тоже учитываются с начала розыгрыша.\n"
-        "• Нажмите «Проверить» под условием, чтобы обновить результат.</blockquote>",
+        + "\n".join(f"• {rule}" for rule in RULES)
+        + "</blockquote>",
         "",
         f"🎫 <b>Ваши билеты: {progress.total_tickets}</b>",
     ]
@@ -149,7 +217,7 @@ def _check_button(done: bool, done_text: str, todo_text: str, key: str) -> Inlin
     return InlineKeyboardButton(
         text=done_text if done else todo_text,
         callback_data=f"{CHECK_PREFIX}{key}",
-        style=ButtonStyle.SUCCESS if done else None,
+        style=ButtonStyle.SUCCESS if done else ButtonStyle.DANGER,
     )
 
 
@@ -296,6 +364,65 @@ def _is_not_modified(error: TelegramBadRequest) -> bool:
     return "message is not modified" in str(error)
 
 
+def _with_premium_emoji(bot, rich_html: str) -> str:
+    """Анимированные эмодзи основного бота.
+
+    PremiumEmojiBot подменяет эмодзи только в text/caption, rich_message он не
+    видит — применяем ту же замену к rich HTML сами.
+    """
+    emoji_map = getattr(bot, "_text_emoji_map", None)
+    if not emoji_map:
+        return rich_html
+    return apply_premium_text_emojis(
+        rich_html, emoji_map, getattr(bot, "_text_emoji_pattern", None)
+    )
+
+
+def _banner_url() -> Optional[str]:
+    if settings.GIVEAWAY_BANNER_URL:
+        return settings.GIVEAWAY_BANNER_URL
+    if settings.WEBHOOK_URL:
+        return f"{settings.WEBHOOK_URL.rstrip('/')}/miniapp/static/giveaway.jpg"
+    return None
+
+
+async def _render_rich(
+    callback: types.CallbackQuery, rich_html: str, keyboard: InlineKeyboardMarkup
+) -> bool:
+    """Показывает rich-экран; False — Telegram его не принял, нужен фолбэк."""
+    message = callback.message
+    rich = InputRichMessage(html=_with_premium_emoji(callback.bot, rich_html))
+
+    if message is not None and not message.photo:
+        try:
+            await callback.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                rich_message=rich,
+                reply_markup=keyboard,
+            )
+            return True
+        except TelegramBadRequest as error:
+            if _is_not_modified(error):
+                return True
+            logger.debug("Розыгрыш: rich-редактирование не удалось: %s", error)
+
+    try:
+        await callback.bot.send_rich_message(
+            chat_id=callback.from_user.id, rich_message=rich, reply_markup=keyboard
+        )
+    except Exception as error:  # noqa: BLE001 — любой отказ rich = показываем фото
+        logger.warning("Розыгрыш: rich-сообщение не отправлено, показываем фото: %s", error)
+        return False
+
+    if message is not None:
+        try:
+            await message.delete()
+        except TelegramBadRequest:
+            pass
+    return True
+
+
 async def _render(
     callback: types.CallbackQuery,
     text: str,
@@ -303,7 +430,7 @@ async def _render(
     *,
     on_screen: bool,
 ) -> None:
-    """Экран — фото с подписью.
+    """Фото с подписью — финальный экран и фолбэк, если rich не прошёл.
 
     Свой рендер вместо edit_or_answer_photo: тот меряет лимит подписи вместе с
     HTML-тегами и при длинной разметке уходит в текст без картинки. on_screen —
@@ -376,12 +503,22 @@ async def _show(
     await giveaway_service.save_entry(db, db_user.id, progress)
 
     bot_username = (await callback.bot.get_me()).username
-    await _render(
-        callback,
-        build_giveaway_text(progress, _referral_link(bot_username, db_user)),
-        build_giveaway_keyboard(progress),
-        on_screen=on_screen,
+    referral_link = _referral_link(bot_username, db_user)
+    keyboard = build_giveaway_keyboard(progress)
+    is_primary = is_primary_bot(callback.bot.id if callback.bot else None)
+    rich_html = build_giveaway_rich_html(
+        progress,
+        referral_link,
+        banner_url=_banner_url(),
+        trophy_emoji_id=MAIN_MENU_CUSTOM_EMOJI_IDS["giveaway"] if is_primary else None,
     )
+    if not await _render_rich(callback, rich_html, keyboard):
+        await _render(
+            callback,
+            build_giveaway_text(progress, referral_link),
+            keyboard,
+            on_screen=on_screen,
+        )
 
     if check_key:
         await callback.answer(check_result_text(check_key, progress), show_alert=True)

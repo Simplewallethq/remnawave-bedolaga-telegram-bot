@@ -95,6 +95,7 @@ def get_admin_main_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
                 callback_data="admin_payments",
             )
         ],
+        [InlineKeyboardButton(text="🏆 Розыгрыш", callback_data="admin_giveaway")],
         [InlineKeyboardButton(text=texts.BACK, callback_data="admin_panel")]
     ])
 

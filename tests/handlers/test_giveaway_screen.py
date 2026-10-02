@@ -18,8 +18,12 @@ from app.handlers.giveaway import (
     CHECK_KEYS,
     CHECK_PREFIX,
     GIVEAWAY_IMAGE,
+    _banner_url,
     _render,
+    _render_rich,
+    _with_premium_emoji,
     build_giveaway_keyboard,
+    build_giveaway_rich_html,
     build_giveaway_text,
     check_result_text,
 )
@@ -52,11 +56,13 @@ def test_every_condition_has_check_button() -> None:
     assert set(_buttons(EMPTY)) == CHECK_KEYS
 
 
-def test_done_conditions_are_green() -> None:
+def test_done_conditions_are_green_and_open_ones_red() -> None:
     buttons = _buttons(FULL)
     green = {key for key, button in buttons.items() if button.style == ButtonStyle.SUCCESS}
+    red = {key for key, button in buttons.items() if button.style == ButtonStyle.DANGER}
     assert green == CHECK_KEYS - {"plan_solo", "plan_plus"}
-    assert all(button.style is None for button in _buttons(EMPTY).values())
+    assert red == {"plan_solo", "plan_plus"}
+    assert all(button.style == ButtonStyle.DANGER for button in _buttons(EMPTY).values())
 
 
 def test_channel_row_offers_subscribe_link_until_done() -> None:
@@ -184,6 +190,103 @@ async def test_unchanged_screen_is_not_resent() -> None:
 
     callback.message.delete.assert_not_awaited()
     callback.bot.send_photo.assert_not_awaited()
+
+
+# ---------------------------------------------------------------- rich-экран
+
+
+def test_rich_screen_checks_done_conditions() -> None:
+    rich = build_giveaway_rich_html(
+        FULL, "https://t.me/bot?start=abc", banner_url="https://x.test/g.jpg",
+        trophy_emoji_id="5999157327746309135",
+    )
+
+    assert rich.startswith('<img src="https://x.test/g.jpg"/>')
+    assert '<tg-emoji emoji-id="5999157327746309135">🏆</tg-emoji>' in rich
+    assert rich.count('<input type="checkbox" checked>') == 6
+    assert rich.count('<input type="checkbox">') == 2  # Solo и Plus при тарифе Pro
+    assert f"Ваши билеты: <b>{FULL.total_tickets}</b>" in rich
+    assert "<details><summary>" in rich
+
+
+def test_rich_screen_without_banner_and_premium() -> None:
+    rich = build_giveaway_rich_html(EMPTY, None, banner_url=None)
+
+    assert "<img" not in rich
+    assert "tg-emoji" not in rich
+    assert "checked" not in rich
+    assert "Ваша ссылка" not in rich
+
+
+def _rich_callback(*, photo: bool = False, edit_error=None, send_error=None):
+    message = SimpleNamespace(
+        photo=[object()] if photo else None,
+        chat=SimpleNamespace(id=7),
+        message_id=99,
+        delete=AsyncMock(),
+    )
+    bot = SimpleNamespace(
+        edit_message_text=AsyncMock(side_effect=edit_error),
+        send_rich_message=AsyncMock(side_effect=send_error),
+    )
+    return SimpleNamespace(message=message, bot=bot, from_user=SimpleNamespace(id=7))
+
+
+@pytest.mark.anyio
+async def test_rich_edits_text_message_in_place() -> None:
+    callback = _rich_callback()
+
+    assert await _render_rich(callback, "<p>x</p>", build_giveaway_keyboard(EMPTY))
+
+    kwargs = callback.bot.edit_message_text.await_args.kwargs
+    assert kwargs["rich_message"].html == "<p>x</p>"
+    callback.bot.send_rich_message.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_rich_replaces_photo_message() -> None:
+    callback = _rich_callback(photo=True)
+
+    assert await _render_rich(callback, "<p>x</p>", build_giveaway_keyboard(EMPTY))
+
+    callback.bot.edit_message_text.assert_not_awaited()
+    callback.bot.send_rich_message.assert_awaited_once()
+    callback.message.delete.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_rich_unchanged_screen_is_left_alone() -> None:
+    error = TelegramBadRequest(method=None, message="Bad Request: message is not modified")
+    callback = _rich_callback(edit_error=error)
+
+    assert await _render_rich(callback, "<p>x</p>", build_giveaway_keyboard(EMPTY))
+    callback.bot.send_rich_message.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_rich_failure_keeps_old_message_for_fallback() -> None:
+    edit_error = TelegramBadRequest(method=None, message="Bad Request: can't parse rich message")
+    callback = _rich_callback(edit_error=edit_error, send_error=RuntimeError("rich unsupported"))
+
+    assert not await _render_rich(callback, "<p>x</p>", build_giveaway_keyboard(EMPTY))
+    callback.message.delete.assert_not_awaited()
+
+
+def test_rich_html_gets_animated_emoji_on_primary_bot() -> None:
+    bot = SimpleNamespace(_text_emoji_map={"🎟": "111"}, _text_emoji_pattern=None)
+
+    assert _with_premium_emoji(bot, "<h3>🎟 Условия</h3>") == (
+        '<h3><tg-emoji emoji-id="111">🎟</tg-emoji> Условия</h3>'
+    )
+    assert _with_premium_emoji(SimpleNamespace(), "<p>🎟</p>") == "<p>🎟</p>"
+
+
+def test_banner_url_defaults_to_bot_static(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "GIVEAWAY_BANNER_URL", None)
+    monkeypatch.setattr(settings, "WEBHOOK_URL", "https://hooks.example.com/")
+
+    assert _banner_url() == "https://hooks.example.com/miniapp/static/giveaway.jpg"
+    assert Path(ROOT_DIR, "miniapp", "giveaway.jpg").is_file()
 
 
 def test_menu_row_is_red_while_running(monkeypatch) -> None:
