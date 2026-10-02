@@ -23,7 +23,7 @@ from app.handlers.giveaway import (
     build_giveaway_text,
     check_result_text,
 )
-from app.keyboards.inline import get_giveaway_menu_row
+from app.keyboards.inline import get_giveaway_menu_row, get_new_main_menu_keyboard
 from app.services.giveaway_service import GiveawayProgress, giveaway_service
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -194,6 +194,32 @@ def test_menu_row_is_red_while_running(monkeypatch) -> None:
     assert row is not None
     assert row[0].style == ButtonStyle.DANGER
     assert row[0].callback_data == "giveaway_menu"
+
+
+@pytest.mark.parametrize("has_active_subscription", [False, True])
+@pytest.mark.parametrize("is_admin", [False, True])
+def test_new_main_menu_ends_with_giveaway(monkeypatch, has_active_subscription, is_admin) -> None:
+    monkeypatch.setattr(giveaway_service.__class__, "is_running", lambda self, now_utc=None: True)
+
+    rows = get_new_main_menu_keyboard(
+        balance_rub=0, has_active_subscription=has_active_subscription, is_admin=is_admin
+    ).inline_keyboard
+
+    assert rows[-1][0].callback_data == "giveaway_menu"
+    assert rows[-1][0].style == ButtonStyle.DANGER
+    assert all(button.callback_data != "giveaway_menu" for row in rows[:-1] for button in row)
+
+
+def test_new_main_menu_giveaway_uses_premium_trophy(monkeypatch) -> None:
+    monkeypatch.setattr(giveaway_service.__class__, "is_running", lambda self, now_utc=None: True)
+
+    premium = get_new_main_menu_keyboard(balance_rub=0, use_premium_emoji=True).inline_keyboard[-1][0]
+    plain = get_new_main_menu_keyboard(balance_rub=0).inline_keyboard[-1][0]
+
+    assert premium.icon_custom_emoji_id == "5999157327746309135"
+    assert premium.text == "РОЗЫГРЫШ X2 GTA VI"
+    assert plain.icon_custom_emoji_id is None
+    assert plain.text == "🏆 РОЗЫГРЫШ X2 GTA VI"
 
 
 def test_menu_row_hidden_outside_window(monkeypatch) -> None:

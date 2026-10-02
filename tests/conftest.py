@@ -217,3 +217,16 @@ def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> bool | None:
         loop.close()
 
     return True
+
+
+@pytest.fixture(autouse=True)
+def _giveaway_hidden_by_default(monkeypatch):
+    """Кнопка розыгрыша зависит от текущей даты — прячем её, чтобы раскладки меню не плыли.
+
+    Тесты розыгрыша включают его сами.
+    """
+    try:
+        from app.config import settings
+    except Exception:
+        return
+    monkeypatch.setattr(settings, "GIVEAWAY_ENABLED", False)

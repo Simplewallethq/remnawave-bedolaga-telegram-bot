@@ -45,6 +45,7 @@ MAIN_MENU_CUSTOM_EMOJI_IDS = {
     "support": "6023911174188308145",
     "profile": "6021659919835469581",
     "admin": "6024048192234985393",
+    "giveaway": "5999157327746309135",
 }
 
 
@@ -184,7 +185,7 @@ async def get_main_menu_keyboard_async(
         keyboard = await MenuLayoutService.build_keyboard(db, context)
         giveaway_row = get_giveaway_menu_row()
         if giveaway_row:
-            keyboard.inline_keyboard.insert(0, giveaway_row)
+            keyboard.inline_keyboard.append(giveaway_row)
         return keyboard
 
     # Fallback на синхронную версию
@@ -203,7 +204,7 @@ async def get_main_menu_keyboard_async(
     )
 
 
-def get_giveaway_menu_row() -> Optional[List[InlineKeyboardButton]]:
+def get_giveaway_menu_row(use_premium_emoji: bool = False) -> Optional[List[InlineKeyboardButton]]:
     """Красная кнопка розыгрыша — пока он идёт, и только в основном бренде.
 
     Строится на каждом показе главного меню, поэтому любая ошибка (например,
@@ -219,9 +220,12 @@ def get_giveaway_menu_row() -> Optional[List[InlineKeyboardButton]]:
         return None
     return [
         InlineKeyboardButton(
-            text="🎮 РОЗЫГРЫШ X2 GTA VI",
+            text=_premium_button_label("🏆 РОЗЫГРЫШ X2 GTA VI", use_premium_emoji, "🏆"),
             callback_data="giveaway_menu",
             style=ButtonStyle.DANGER,
+            icon_custom_emoji_id=(
+                MAIN_MENU_CUSTOM_EMOJI_IDS["giveaway"] if use_premium_emoji else None
+            ),
         )
     ]
 
@@ -454,10 +458,6 @@ def _build_text_main_menu_keyboard(
 
     keyboard_rows: List[List[InlineKeyboardButton]] = [[profile_button]]
 
-    giveaway_row = get_giveaway_menu_row()
-    if giveaway_row:
-        keyboard_rows.insert(0, giveaway_row)
-
     if settings.is_language_selection_enabled():
         keyboard_rows.append([
             InlineKeyboardButton(text=texts.MENU_LANGUAGE, callback_data="menu_language")
@@ -484,6 +484,10 @@ def _build_text_main_menu_keyboard(
         keyboard_rows.append([
             InlineKeyboardButton(text="🧑‍⚖️ Модерация", callback_data="moderator_panel")
         ])
+
+    giveaway_row = get_giveaway_menu_row()
+    if giveaway_row:
+        keyboard_rows.append(giveaway_row)
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
 
@@ -526,10 +530,6 @@ def get_main_menu_keyboard(
 
     keyboard: list[list[InlineKeyboardButton]] = []
     paired_buttons: list[InlineKeyboardButton] = []
-
-    giveaway_row = get_giveaway_menu_row()
-    if giveaway_row:
-        keyboard.append(giveaway_row)
 
     if has_active_subscription and subscription_is_active:
         connect_mode = settings.CONNECT_BUTTON_MODE
@@ -736,7 +736,11 @@ def get_main_menu_keyboard(
         keyboard.append([
             InlineKeyboardButton(text="🧑‍⚖️ Модерация", callback_data="moderator_panel")
         ])
-    
+
+    giveaway_row = get_giveaway_menu_row()
+    if giveaway_row:
+        keyboard.append(giveaway_row)
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -3497,7 +3501,11 @@ def get_new_main_menu_keyboard(
                 ),
             )
         ])
-    
+
+    giveaway_row = get_giveaway_menu_row(use_premium_emoji)
+    if giveaway_row:
+        keyboard.append(giveaway_row)
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_activation_keyboard(happ_link_shown: bool = False, language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
