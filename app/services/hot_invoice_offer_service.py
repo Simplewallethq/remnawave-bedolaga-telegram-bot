@@ -67,8 +67,12 @@ class HotInvoiceOfferService:
     }
 
     MSK_TZ = ZoneInfo("Europe/Moscow")
-    FIRST_TOUCH_MIN_AGE = timedelta(minutes=30)
+    # Platega invoices live 30 minutes, so the first touch has to land while
+    # the invoice is still payable: from 20 minutes of age until 5 minutes
+    # before it expires.
+    FIRST_TOUCH_MIN_AGE = timedelta(minutes=20)
     FIRST_TOUCH_MAX_AGE = timedelta(minutes=45)
+    FIRST_TOUCH_MIN_TIME_LEFT = timedelta(minutes=5)
 
     def is_debug_enabled(self) -> bool:
         return IS_ARTEM_DEBUG
@@ -157,7 +161,12 @@ class HotInvoiceOfferService:
         now = self._to_utc_naive(now_utc)
         if slot_key == self.FIRST_SLOT_KEY:
             age = now - payment.created_at
-            return self.FIRST_TOUCH_MIN_AGE <= age < self.FIRST_TOUCH_MAX_AGE
+            if not self.FIRST_TOUCH_MIN_AGE <= age < self.FIRST_TOUCH_MAX_AGE:
+                return False
+            return payment.expires_at is None or (
+                self._to_utc_naive(payment.expires_at)
+                > now + self.FIRST_TOUCH_MIN_TIME_LEFT
+            )
 
         days_after = self.TOUCH_DAY_OFFSETS.get(slot_key)
         if days_after is None:
@@ -211,7 +220,10 @@ class HotInvoiceOfferService:
                 PlategaPayment.redirect_url.isnot(None),
                 (
                     PlategaPayment.expires_at.is_(None)
-                    | (PlategaPayment.expires_at > self._to_utc_naive(now_utc))
+                    | (
+                        PlategaPayment.expires_at
+                        > self._to_utc_naive(now_utc) + self.FIRST_TOUCH_MIN_TIME_LEFT
+                    )
                 ),
                 User.telegram_id.isnot(None),
                 User.status == UserStatus.ACTIVE.value,

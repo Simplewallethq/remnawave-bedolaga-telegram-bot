@@ -40,11 +40,11 @@ class _AsyncSessionContext:
         return None
 
 
-def test_first_touch_window_is_30_to_45_minutes() -> None:
+def test_first_touch_window_is_20_to_45_minutes() -> None:
     now = datetime(2026, 7, 13, 9, 0)
 
     assert hot_invoice_offer_service.is_touch_due(
-        _payment(now - timedelta(minutes=30)),
+        _payment(now - timedelta(minutes=20)),
         hot_invoice_offer_service.FIRST_SLOT_KEY,
         now,
     )
@@ -54,7 +54,7 @@ def test_first_touch_window_is_30_to_45_minutes() -> None:
         now,
     )
     assert not hot_invoice_offer_service.is_touch_due(
-        _payment(now - timedelta(minutes=29, seconds=59)),
+        _payment(now - timedelta(minutes=19, seconds=59)),
         hot_invoice_offer_service.FIRST_SLOT_KEY,
         now,
     )
@@ -63,6 +63,25 @@ def test_first_touch_window_is_30_to_45_minutes() -> None:
         hot_invoice_offer_service.FIRST_SLOT_KEY,
         now,
     )
+
+
+def test_first_touch_lands_before_30_minute_invoice_expires() -> None:
+    created_at = datetime(2026, 7, 13, 9, 0)
+
+    def due_at(age: timedelta) -> bool:
+        payment = _payment(created_at)
+        payment.expires_at = created_at + timedelta(minutes=30)
+        return hot_invoice_offer_service.is_touch_due(
+            payment,
+            hot_invoice_offer_service.FIRST_SLOT_KEY,
+            created_at + age,
+        )
+
+    assert not due_at(timedelta(minutes=19))
+    assert due_at(timedelta(minutes=20))
+    assert due_at(timedelta(minutes=24, seconds=59))
+    assert not due_at(timedelta(minutes=25))
+    assert not due_at(timedelta(minutes=30))
 
 
 def test_later_touch_does_not_depend_on_first_touch() -> None:
