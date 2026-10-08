@@ -1999,7 +1999,7 @@ class MonitoringService:
                 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="📲 Подключиться", callback_data="subscription_connect")],
+                    [InlineKeyboardButton(text="📲 Подключиться", callback_data="howto")],
                     [InlineKeyboardButton(text="🆘 Поддержка", callback_data="menu_support")],
                 ])
 

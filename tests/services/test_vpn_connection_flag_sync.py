@@ -473,7 +473,7 @@ async def test_trial_inactive_sender_uses_hardcoded_1h_message_and_buttons():
     )
     assert len(keyboard.inline_keyboard) == 2
     assert [(button.text, button.callback_data) for button in buttons] == [
-        ("📲 Подключиться", "subscription_connect"),
+        ("📲 Подключиться", "howto"),
         ("🆘 Поддержка", "menu_support"),
     ]
     assert all(button.text != "📱 Моя подписка" for button in buttons)
@@ -499,7 +499,7 @@ async def test_trial_inactive_sender_uses_hardcoded_24h_message_and_buttons():
     )
     assert len(keyboard.inline_keyboard) == 2
     assert [(button.text, button.callback_data) for button in buttons] == [
-        ("📲 Подключиться", "subscription_connect"),
+        ("📲 Подключиться", "howto"),
         ("🆘 Поддержка", "menu_support"),
     ]
     assert all(button.text != "📱 Моя подписка" for button in buttons)
