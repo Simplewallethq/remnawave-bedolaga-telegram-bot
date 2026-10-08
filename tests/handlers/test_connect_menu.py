@@ -86,7 +86,7 @@ def test_connect_apple_and_windows_keyboards_omit_transfers_without_urls(monkeyp
         ("🍎 Скачать Happ", None),
         ("⬅️ Назад", "howto"),
     ]
-    assert apple_rows[1][0].url == "https://apps.apple.com/ru/app/happ-lite/id6799917773"
+    assert apple_rows[1][0].url == "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"
     assert [(row[0].text, row[0].callback_data) for row in windows_rows] == [
         ("❓ Проблемы с Leto App", None),
         ("💻 Скачать Happ", None),
@@ -128,7 +128,7 @@ def test_connect_platform_keyboards_include_transfer_buttons(monkeypatch):
     assert [[(button.text, button.url) for button in row] for row in apple_rows] == [
         [("🍏 Скачать Incy", inline.settings.get_incy_download_link())],
         [("➡️ Ключ в Incy", incy_url)],
-        [("🍎 Скачать Happ", "https://apps.apple.com/ru/app/happ-lite/id6799917773")],
+        [("🍎 Скачать Happ", "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215")],
         [("➡️ Ключ в Happ", happ_url)],
         [("⬅️ Назад", None)],
     ]

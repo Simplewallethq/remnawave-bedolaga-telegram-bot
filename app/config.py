@@ -25,6 +25,9 @@ USER_TAG_PATTERN = re.compile(r"^[A-Z0-9_]{1,16}$")
 
 # Наше приложение для Apple-платформ (используется вместо Happ в iOS-флоу)
 DEFAULT_INCY_APP_DOWNLOAD_LINK_IOS = "https://apps.apple.com/ru/app/incy/id6756943388"
+# Happ для iPhone/Mac. В российском App Store Happ сейчас нет (Happ Lite id6799917773
+# удалён), поэтому ведём на международную карточку для всех.
+HAPP_APP_DOWNLOAD_LINK_IOS = "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"
 
 
 logger = logging.getLogger(__name__)
@@ -1909,11 +1912,11 @@ class Settings(BaseSettings):
             value = (value or "").strip()
             return value or None
 
-        # Happ Lite replaces the old RU/International split: it is one listing for
-        # everyone, so a second entry here would just point at the same app twice.
+        # Happ has no RU App Store listing at the moment, so both Apple platforms
+        # get the single international one.
         happ_defaults = {
             "ios": [
-                {"kind": "app_store", "url": "https://apps.apple.com/ru/app/happ-lite/id6799917773"},
+                {"kind": "app_store", "url": HAPP_APP_DOWNLOAD_LINK_IOS},
             ],
             "android": [
                 {"kind": "google_play", "url": "https://play.google.com/store/apps/details?id=com.happproxy&hl=ru"},
@@ -1922,7 +1925,7 @@ class Settings(BaseSettings):
                 {"kind": "direct", "url": "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"},
             ],
             "macos": [
-                {"kind": "app_store", "url": "https://apps.apple.com/ru/app/happ-lite/id6799917773"},
+                {"kind": "app_store", "url": HAPP_APP_DOWNLOAD_LINK_IOS},
             ],
         }
         leto_links = {

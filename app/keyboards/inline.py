@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from app.database.models import User
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings, PERIOD_PRICES, TRAFFIC_PRICES
+from app.config import settings, PERIOD_PRICES, TRAFFIC_PRICES, HAPP_APP_DOWNLOAD_LINK_IOS
 from app.utils.formatters import format_days_declension
 from app.localization.loader import DEFAULT_LANGUAGE
 from app.localization.texts import get_texts
@@ -2073,45 +2073,6 @@ def get_subscription_expiring_keyboard(subscription_id: int, language: str = DEF
         ]
     ])
 
-def get_referral_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
-    texts = get_texts(language)
-    
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                text=texts.t("CREATE_INVITE_BUTTON", "📝 Создать приглашение"),
-                callback_data="referral_create_invite"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text=texts.t("SHOW_QR_BUTTON", "📱 Показать QR код"),
-                callback_data="referral_show_qr"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text=texts.t("REFERRAL_LIST_BUTTON", "👥 Список рефералов"),
-                callback_data="referral_list"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text=texts.t("REFERRAL_ANALYTICS_BUTTON", "📊 Аналитика"),
-                callback_data="referral_analytics"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text=texts.BACK,
-                callback_data="back_to_menu" 
-            )
-        ]
-    ]
-    
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
 def get_support_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
     texts = get_texts(language)
     try:
@@ -3621,12 +3582,12 @@ def get_connect_apple_keyboard(
 
     # Happ leads on this screen: it's the app most people install here, so
     # download + key-transfer come first, ahead of Incy.
-    # One Happ button, no store split: Happ Lite is served from the same listing to
-    # everyone, so labelling it RU or International would only be noise.
+    # One Happ button: the RU App Store has no Happ right now, so the international
+    # listing is the only one to offer.
     buttons.append(
         [InlineKeyboardButton(
             text=texts.t("CONNECT_DOWNLOAD_HAPP_IOS_BUTTON", "🍎 Скачать Happ"),
-            url="https://apps.apple.com/ru/app/happ-lite/id6799917773",
+            url=HAPP_APP_DOWNLOAD_LINK_IOS,
         )]
     )
     if happ_transfer_url:
