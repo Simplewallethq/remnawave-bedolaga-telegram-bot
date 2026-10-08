@@ -270,7 +270,7 @@ def build_giveaway_keyboard(progress: GiveawayProgress) -> InlineKeyboardMarkup:
         )
     ])
 
-    rows.append([InlineKeyboardButton(text="👥 Пригласить друзей", callback_data="menu_referrals")])
+    rows.append([InlineKeyboardButton(text="👥 Пригласить друзей", callback_data="referral")])
     rows.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

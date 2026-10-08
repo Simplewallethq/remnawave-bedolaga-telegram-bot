@@ -2180,9 +2180,11 @@ def register_handlers(dp: Dispatcher):
         F.data == "profile"
     )
 
+    # menu_referrals — старый callback (кнопка из меню-конструктора, старые сообщения):
+    # ведём на тот же экран «Пригласить друзей».
     dp.callback_query.register(
         handle_referral,
-        F.data == "referral"
+        F.data.in_({"referral", "menu_referrals"})
     )
 
     dp.callback_query.register(

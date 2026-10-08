@@ -1,5 +1,4 @@
 import logging
-import os
 from pathlib import Path
 
 import qrcode
@@ -9,54 +8,14 @@ from aiogram.types import FSInputFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import User
-from app.keyboards.inline import get_referral_keyboard
 from app.localization.texts import get_texts
 from app.utils.photo_message import edit_or_answer_photo
 from app.utils.user_utils import (
     get_detailed_referral_list,
     get_referral_analytics,
-    get_user_referral_summary,
 )
 
 logger = logging.getLogger(__name__)
-
-
-async def show_referral_info(
-    callback: types.CallbackQuery,
-    db_user: User,
-    db: AsyncSession
-):
-    texts = get_texts(db_user.language)
-
-    summary = await get_user_referral_summary(db, db_user.id)
-
-    bot_username = (await callback.bot.get_me()).username
-    referral_link = f"https://t.me/{bot_username}?start={db_user.referral_code}"
-
-    earned_rub = int(summary['total_earned_kopeks'] / 100)
-
-    referral_text = (
-        texts.t("REFERRAL_TITLE", "Реферальная программа\n\n")
-        + texts.t("REFERRAL_INVITED", "Приглашено друзей: {count}").format(count=summary['invited_count'])
-        + "\n"
-        + texts.t("REFERRAL_EARNED", "Заработано: {amount}₽").format(amount=earned_rub)
-        + "\n"
-        + texts.t("REFERRAL_YOUR_LINK", "\nВаша реферальная ссылка:")
-        + f"\n<code>{referral_link}</code>\n"
-        + texts.t("REFERRAL_REWARD", "\nПолучайте 50% со всех платежей приглашённых друзей!")
-    )
-
-    await edit_or_answer_photo(
-        callback,
-        referral_text,
-        get_referral_keyboard(db_user.language),
-        photo_path=(
-            os.path.join("images", "ref.webp")
-            if os.path.exists(os.path.join("images", "ref.webp"))
-            else None
-        ),
-    )
-    await callback.answer()
 
 
 async def show_referral_qr(
@@ -320,11 +279,6 @@ async def create_invite_message(
 
 
 def register_handlers(dp: Dispatcher):
-    
-    dp.callback_query.register(
-        show_referral_info,
-        F.data == "menu_referrals"
-    )
     
     dp.callback_query.register(
         create_invite_message,
