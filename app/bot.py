@@ -5,7 +5,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import redis.asyncio as redis
 
 from app.config import settings
-from app.branding.profile import clean_brand_name
 from app.middlewares.brand_context import BrandContextMiddleware
 from app.middlewares.global_error import GlobalErrorMiddleware
 from app.middlewares.private_chat_only import PrivateChatOnlyMiddleware
@@ -125,28 +124,13 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     bot_registry.register_bot(primary_bot_id, Path(settings.LOGO_FILE), primary_bot)
     logger.info("Primary bot registered: id=%s", primary_bot_id)
 
-    all_bots: list[Bot] = [primary_bot]
-    for mirror_cfg in settings.get_mirror_bots():
-        try:
-            m_bot = Bot(token=mirror_cfg["token"], default=_default)
-            m_me = await m_bot.get_me()
-            # Имя витрины — как бот назван в Telegram: руками 100+ названий не ведём.
-            mirror_cfg = {**mirror_cfg}
-            mirror_cfg.setdefault("name", clean_brand_name(m_me.full_name))
-            bot_registry.register_bot(
-                m_me.id, Path(mirror_cfg["logo"]), m_bot, brand_config=mirror_cfg,
-            )
-            all_bots.append(m_bot)
-            logger.info(
-                "Mirror bot registered: @%s id=%s logo=%s copycat=%s",
-                m_me.username, m_me.id, mirror_cfg["logo"],
-                bot_registry.get_brand_for_bot(m_me.id).is_copycat,
-            )
-        except Exception as exc:
-            logger.error(
-                "Failed to init mirror bot (token %s...): %s",
-                mirror_cfg["token"][:10], exc,
-            )
+    # Витрины живут в БД (copycat_bots): при первом старте туда переносится
+    # mirror_bots.yaml, дальше бот сам подхватывает правки таблиц.
+    from app.services.copycat_service import copycat_runtime
+
+    mirror_bots = await copycat_runtime.start(_default, primary_bot_id=primary_bot_id)
+    all_bots: list[Bot] = [primary_bot, *mirror_bots]
+    logger.info("Mirror bots live: %s", len(mirror_bots))
 
     maintenance_service.set_bot(primary_bot)
     logger.info("Бот установлен в maintenance_service")

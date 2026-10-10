@@ -8,6 +8,11 @@ WATA / YooKassa / 1Payment) выбирается здесь в момент фо
 (ONEPAYMENT_ROUTER_SOURCES): каждый его счёт привязывает пользователя к
 автосписанию за продление, поэтому на пополнение баланса он не выпадает.
 
+Веса — по боту, через который идёт оплата: у витрины или её группы могут быть
+свои (copycat_bots / copycat_groups, см. app/services/copycat_service.py),
+иначе глобальные PAYMENT_ROUTER_WEIGHT_*. Бот берётся из контекста апдейта, вне
+бота (кабинет, миниапп) — бот, где пользователь зарегистрирован.
+
 Модуль намеренно не является миксином PaymentService: это кросс-провайдерная
 политика, её вызывают и хендлеры, и FastAPI-роуты, и админка, а тесты должны
 уметь подсунуть детерминированный RNG.
@@ -96,8 +101,29 @@ class PaymentGatewayRouter:
     def is_enabled(self, source: str) -> bool:
         return settings.is_payment_router_surface_enabled(source)
 
-    def current_weights(self) -> Dict[str, int]:
-        return settings.get_payment_router_weights()
+    @staticmethod
+    def routing_bot_id(user: Optional[User] = None) -> Optional[int]:
+        """Бот, чьи правила роутинга действуют: отвечающий, иначе бот пользователя."""
+        from app.branding.context import current_bot_id
+
+        bot_id = current_bot_id()
+        if bot_id is None and user is not None:
+            bot_id = getattr(user, "bot_id", None)
+        return bot_id
+
+    def weights_with_source(self, bot_id: Optional[int] = None) -> tuple:
+        """(веса, откуда): "global" | "bot" | "group:<имя>"."""
+        from app.utils.bot_registry import get_payment_weights
+
+        override = get_payment_weights(bot_id)
+        if override is not None:
+            return override
+        return settings.get_payment_router_weights(), "global"
+
+    def current_weights(self, bot_id: Optional[int] = None) -> Dict[str, int]:
+        if bot_id is None:
+            bot_id = self.routing_bot_id()
+        return self.weights_with_source(bot_id)[0]
 
     def gateway_limits(self, gateway: str) -> GatewayLimits:
         if gateway == GATEWAY_PLATEGA:
@@ -144,10 +170,10 @@ class PaymentGatewayRouter:
             return False
         return source in allowed
 
-    def _gateway_usable(self, gateway: str) -> bool:
+    def _gateway_usable(self, gateway: str, bot_id: Optional[int] = None) -> bool:
         """Шлюз в принципе может выставить счёт (без учёта суммы)."""
 
-        if self.current_weights().get(gateway, 0) <= 0:
+        if self.current_weights(bot_id).get(gateway, 0) <= 0:
             return False
 
         if gateway == GATEWAY_PLATEGA:
@@ -166,11 +192,15 @@ class PaymentGatewayRouter:
             return settings.is_onepayment_enabled()
         return False
 
-    def enabled_gateways(self, source: Optional[str] = None) -> List[str]:
+    def enabled_gateways(
+        self, source: Optional[str] = None, *, bot_id: Optional[int] = None
+    ) -> List[str]:
+        if bot_id is None:
+            bot_id = self.routing_bot_id()
         return [
             g
             for g in ROUTED_GATEWAYS
-            if self._gateway_usable(g) and self._gateway_allowed_for_source(g, source)
+            if self._gateway_usable(g, bot_id) and self._gateway_allowed_for_source(g, source)
         ]
 
     def eligible_gateways(
@@ -179,10 +209,11 @@ class PaymentGatewayRouter:
         *,
         bypass_minimum: bool = False,
         source: Optional[str] = None,
+        bot_id: Optional[int] = None,
     ) -> List[str]:
         amount = int(amount_kopeks)
         result = []
-        for gateway in self.enabled_gateways(source):
+        for gateway in self.enabled_gateways(source, bot_id=bot_id):
             limits = self.gateway_limits(gateway)
             if not bypass_minimum and amount < limits.min_kopeks:
                 continue
@@ -191,21 +222,25 @@ class PaymentGatewayRouter:
             result.append(gateway)
         return result
 
-    def combined_min_kopeks(self, source: Optional[str] = None) -> int:
+    def combined_min_kopeks(
+        self, source: Optional[str] = None, *, bot_id: Optional[int] = None
+    ) -> int:
         """Минимум для метода `auto`.
 
         Именно МАКСИМУМ из минимумов: счёт должен быть оплатим любым шлюзом,
         который может выпасть. Если взять минимум, пользователь, которому
         выпала WATA, получит отказ.
         """
-        gateways = self.enabled_gateways(source)
+        gateways = self.enabled_gateways(source, bot_id=bot_id)
         if not gateways:
             return 0
         return max(self.gateway_limits(g).min_kopeks for g in gateways)
 
-    def combined_max_kopeks(self, source: Optional[str] = None) -> int:
+    def combined_max_kopeks(
+        self, source: Optional[str] = None, *, bot_id: Optional[int] = None
+    ) -> int:
         """Максимум для `auto` — симметрично, минимум из максимумов."""
-        gateways = self.enabled_gateways(source)
+        gateways = self.enabled_gateways(source, bot_id=bot_id)
         if not gateways:
             return 0
         return min(self.gateway_limits(g).max_kopeks for g in gateways)
@@ -219,19 +254,22 @@ class PaymentGatewayRouter:
         bypass_minimum: bool = False,
         rng: Optional[random.Random] = None,
         source: Optional[str] = None,
+        bot_id: Optional[int] = None,
     ) -> List[str]:
         """Взвешенная выборка БЕЗ возвращения.
 
         Возвращает [выпавший, фолбэк1, фолбэк2]: первый элемент — назначение
         для аналитики, остальные — цепочка фолбэка.
         """
+        if bot_id is None:
+            bot_id = self.routing_bot_id()
         candidates = self.eligible_gateways(
-            amount_kopeks, bypass_minimum=bypass_minimum, source=source
+            amount_kopeks, bypass_minimum=bypass_minimum, source=source, bot_id=bot_id
         )
         if not candidates:
             return []
 
-        weights = self.current_weights()
+        weights = self.current_weights(bot_id)
         chooser = rng or random
         remaining = list(candidates)
         order: List[str] = []
@@ -376,19 +414,27 @@ class PaymentGatewayRouter:
         )
         language = language or getattr(user, "language", None) or settings.DEFAULT_LANGUAGE
 
+        bot_id = self.routing_bot_id(user)
+        weights, weights_source = self.weights_with_source(bot_id)
         order = self.pick_order(
-            amount_kopeks, bypass_minimum=bypass_minimum, rng=rng, source=source
+            amount_kopeks,
+            bypass_minimum=bypass_minimum,
+            rng=rng,
+            source=source,
+            bot_id=bot_id,
         )
         if not order:
             logger.warning(
-                "payment_router: нет доступных шлюзов (сумма=%s, source=%s, user=%s)",
+                "payment_router: нет доступных шлюзов (сумма=%s, source=%s, user=%s, "
+                "bot=%s, веса=%s)",
                 amount_kopeks,
                 source,
                 user.id,
+                bot_id,
+                weights_source,
             )
             return None
 
-        weights = self.current_weights()
         log_id = await self._open_log(
             db,
             user_id=user.id,
@@ -409,6 +455,8 @@ class PaymentGatewayRouter:
                 "requested_gateway": order[0],
                 "gateway": gateway,
                 "attempt": index,
+                "bot_id": bot_id,
+                "weights_source": weights_source,
             }
 
             started = time.monotonic()

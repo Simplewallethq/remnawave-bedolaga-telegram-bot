@@ -130,37 +130,37 @@ def create_unified_app(
     }
 
     if enable_telegram_webhook:
-        processors: list[telegram.TelegramWebhookProcessor] = []
-        primary_path = settings.get_telegram_webhook_path()
-        for idx, b in enumerate(all_bots):
-            path = primary_path if idx == 0 else f"{primary_path}/mirror/{idx}"
-            proc = telegram.TelegramWebhookProcessor(
-                bot=b,
-                dispatcher=dispatcher,
-                queue_maxsize=settings.get_webhook_queue_maxsize(),
-                worker_count=settings.get_webhook_worker_count(),
-                enqueue_timeout=settings.get_webhook_enqueue_timeout(),
-                shutdown_timeout=settings.get_webhook_shutdown_timeout(),
-            )
-            processors.append(proc)
-            app.include_router(
-                telegram.create_telegram_router(b, dispatcher, processor=proc, webhook_path=path)
-            )
-
-        telegram_processor = processors[0] if processors else None
+        telegram_processor = telegram.TelegramWebhookProcessor(
+            bot=bot,
+            dispatcher=dispatcher,
+            queue_maxsize=settings.get_webhook_queue_maxsize(),
+            worker_count=settings.get_webhook_worker_count(),
+            enqueue_timeout=settings.get_webhook_enqueue_timeout(),
+            shutdown_timeout=settings.get_webhook_shutdown_timeout(),
+        )
+        app.include_router(
+            telegram.create_telegram_router(bot, dispatcher, processor=telegram_processor)
+        )
         app.state.telegram_webhook_processor = telegram_processor
+
+        # Витрины подключаются к хабу из CopycatRuntime (app/services/copycat_service.py)
+        # и могут появляться без рестарта.
+        mirror_hub = telegram.MirrorWebhookHub(dispatcher)
+        app.include_router(mirror_hub.create_router())
+        app.state.mirror_webhook_hub = mirror_hub
 
         @app.on_event("startup")
         async def start_telegram_webhook_processors() -> None:  # pragma: no cover - event hook
-            for proc in processors:
-                await proc.start()
+            await telegram_processor.start()
+            await mirror_hub.start()
 
         @app.on_event("shutdown")
         async def stop_telegram_webhook_processors() -> None:  # pragma: no cover - event hook
-            for proc in processors:
-                await proc.stop()
+            await telegram_processor.stop()
+            await mirror_hub.stop()
     else:
         telegram_processor = None
+        app.state.mirror_webhook_hub = None
 
     miniapp_mounted, miniapp_path = _mount_miniapp_static(app)
 

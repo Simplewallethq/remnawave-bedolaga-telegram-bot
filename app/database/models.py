@@ -2810,3 +2810,96 @@ class AdCampaignVisit(Base):
     campaign_id = Column(String(8), nullable=False, index=True)
     is_new_user = Column(Boolean, nullable=False, default=False)
     visited_at = Column(DateTime, nullable=False, default=func.now())
+
+
+class CopycatGroup(Base):
+    """Группа копикетов: общие настройки бренда и платежей для своих ботов.
+
+    Поля бренда — значения по умолчанию для ботов группы; бот может перебить
+    любое своим полем, а пустое у группы добирается из COPYCAT_* настроек.
+    """
+
+    __tablename__ = "copycat_groups"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+
+    support = Column(String(255), nullable=True)
+    subscription_domain = Column(String(255), nullable=True)
+    happ_redirect_template = Column(String(512), nullable=True)
+    privacy_url = Column(String(512), nullable=True)
+    terms_url = Column(String(512), nullable=True)
+    referral_terms_url = Column(String(512), nullable=True)
+
+    # Веса платёжного роутера {"platega": 10, "wata": 1}. Заменяют глобальные
+    # целиком: шлюза нет в словаре — он группе не выпадает. NULL — глобальные.
+    payment_gateway_weights = Column(JSON, nullable=True)
+    # Доля владельца витрины в выручке, %. Остальное — наше. NULL — не задана.
+    owner_share_percent = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+    bots = relationship("CopycatBot", back_populates="group")
+
+    def __repr__(self) -> str:
+        return f"<CopycatGroup id={self.id} name={self.name!r}>"
+
+
+class CopycatBot(Base):
+    """Бот-витрина. Источник правды вместо mirror_bots.yaml.
+
+    `telegram_bot_id`, `username` и `title` бот заполняет сам при первой
+    регистрации (get_me). Пустое поле бренда берётся у группы.
+    """
+
+    __tablename__ = "copycat_bots"
+
+    id = Column(Integer, primary_key=True)
+    token = Column(String(128), nullable=False, unique=True)
+    telegram_bot_id = Column(BigInteger, nullable=True, unique=True)
+    username = Column(String(64), nullable=True, index=True)
+    title = Column(String(255), nullable=True)
+
+    group_id = Column(
+        Integer,
+        ForeignKey("copycat_groups.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    enabled = Column(Boolean, nullable=False, default=True)
+    # False — зеркало под основным брендом (бывшее `copycat: false` в yaml).
+    is_copycat = Column(Boolean, nullable=False, default=True)
+
+    name = Column(String(255), nullable=True)
+    logo = Column(String(255), nullable=True)
+    image_url = Column(String(1024), nullable=True)
+    privacy_url = Column(String(512), nullable=True)
+    terms_url = Column(String(512), nullable=True)
+    channel_link = Column(String(512), nullable=True)
+    channel_id = Column(String(128), nullable=True)
+    support = Column(String(255), nullable=True)
+    subscription_domain = Column(String(255), nullable=True)
+    happ_redirect_template = Column(String(512), nullable=True)
+    referral_terms_url = Column(String(512), nullable=True)
+    has_own_app = Column(Boolean, nullable=True)
+    rays_enabled = Column(Boolean, nullable=True)
+
+    payment_gateway_weights = Column(JSON, nullable=True)
+    # Кто завёл витрину (бот для владельцев) и его доля, если не как у группы.
+    owner_user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    owner_share_percent = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+    group = relationship("CopycatGroup", back_populates="bots")
+
+    def __repr__(self) -> str:
+        return f"<CopycatBot id={self.id} @{self.username} tg={self.telegram_bot_id}>"

@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 
 from app.bot import setup_bot
+from app.services.copycat_service import copycat_runtime
 from app.config import settings
 from app.database.database import init_db
 from app.services.monitoring_service import monitoring_service
@@ -460,20 +461,10 @@ async def main():
                     )
                     stage.log(f"Webhook установлен: {webhook_url}")
                     stage.log(f"Allowed updates: {', '.join(sorted(allowed_updates)) if allowed_updates else 'all'}")
-                    primary_path = settings.get_telegram_webhook_path()
-                    for idx, mirror_bot in enumerate(all_bots[1:], start=1):
-                        mirror_path = f"{primary_path}/mirror/{idx}"
-                        mirror_webhook_url = f"{settings.WEBHOOK_URL.rstrip('/')}{mirror_path}"
-                        try:
-                            await mirror_bot.set_webhook(
-                                url=mirror_webhook_url,
-                                secret_token=settings.WEBHOOK_SECRET_TOKEN,
-                                drop_pending_updates=settings.WEBHOOK_DROP_PENDING_UPDATES,
-                                allowed_updates=allowed_updates,
-                            )
-                            stage.log(f"Mirror webhook установлен: {mirror_webhook_url}")
-                        except Exception as mirror_exc:
-                            logger.error("Ошибка установки webhook для mirror бота %s: %s", mirror_bot.id, mirror_exc)
+                    mirror_hub = getattr(web_app.state, "mirror_webhook_hub", None) if web_app else None
+                    if mirror_hub is not None:
+                        await copycat_runtime.attach_webhooks(mirror_hub, allowed_updates)
+                        stage.log(f"Витрин на вебхуках: {len(copycat_runtime.live_bots())}")
                     stage.success("Telegram webhook активен")
             else:
                 stage.skip("Режим webhook отключен")
@@ -529,6 +520,8 @@ async def main():
             else:
                 polling_task = None
                 stage.skip("Polling отключен режимом работы")
+
+        copycat_runtime.start_sync_loop()
 
         webhook_lines: list[str] = []
         base_url = settings.WEBHOOK_URL or f"http://{settings.WEB_API_HOST}:{settings.WEB_API_PORT}"
@@ -729,6 +722,14 @@ async def main():
             except asyncio.CancelledError:
                 pass
         
+        try:
+            await copycat_runtime.stop()
+        except Exception as e:
+            logger.error(f"Ошибка остановки синхронизации копикетов: {e}")
+        if all_bots:
+            # Витрины могли подняться и погаснуть на ходу — берём текущий набор.
+            all_bots = [all_bots[0], *copycat_runtime.live_bots()]
+
         if telegram_webhook_enabled and all_bots:
             logger.info("ℹ️ Снятие Telegram webhook...")
             for _b in all_bots:

@@ -3,11 +3,11 @@
 Основной бот строит профиль из `settings` при каждом обращении: значения
 приходят из .env и из БД (админка правит их на лету), кешировать нельзя.
 
-Каждый бот из mirror_bots.yaml — витрина со своим брендом: имя берётся из
+Каждый бот из copycat_bots — витрина со своим брендом: имя берётся из
 названия бота в Telegram, саппорт и домен ключ-ссылки — общие для витрин
 (`COPYCAT_SUPPORT_*`), картинка своя. Пропущенные поля добираются из
 основного бота, кроме канала: чужой канал выдал бы витрину с головой.
-Зеркалу, которое должно остаться под основным брендом, ставят `copycat: false`.
+Зеркалу, которое должно остаться под основным брендом, ставят `is_copycat = false`.
 """
 
 from __future__ import annotations
@@ -161,7 +161,7 @@ def primary_profile() -> BrandProfile:
 def is_copycat_config(config: Mapping[str, Any] | None) -> bool:
     """Запись зеркала описывает копикет.
 
-    По умолчанию да: боты из mirror_bots.yaml — это витрины под своими
+    По умолчанию да: боты из copycat_bots — это витрины под своими
     названиями. `copycat: false` оставляет зеркало под основным брендом.
     Без имени бренда подставлять нечего — такая запись тоже остаётся зеркалом
     (имя приходит из Telegram при регистрации бота, см. app/bot.py).
@@ -180,7 +180,7 @@ def is_copycat_config(config: Mapping[str, Any] | None) -> bool:
 
 
 def mirror_profile_from_config(bot_id: int, config: Mapping[str, Any] | None) -> BrandProfile:
-    """Профиль зеркала по его записи из mirror_bots.yaml."""
+    """Профиль зеркала по его записи (copycat_bots + группа)."""
     from app.config import settings
 
     base = primary_profile()

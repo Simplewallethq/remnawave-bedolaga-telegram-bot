@@ -12,10 +12,13 @@ _registry: dict[int, Path] = {}
 # Живые экземпляры aiogram.Bot по id — чтобы фоновые сервисы могли писать
 # пользователю из того бота, в котором он зарегистрирован (user.bot_id).
 _instances: dict[int, object] = {}
-# Запись зеркала из mirror_bots.yaml. Профиль бренда строится из неё при
+# Запись витрины из БД (copycat_bots + группа). Профиль бренда строится из неё при
 # каждом обращении: фолбэки берутся из настроек основного бота, а те
 # правятся админкой на лету.
 _brand_configs: dict[int, Mapping[str, Any]] = {}
+# Веса платёжного роутера витрины (своё или от группы) и откуда они взяты:
+# "bot" | "group:<name>". Нет записи — глобальные веса.
+_payment_weights: dict[int, tuple[dict[str, int], str]] = {}
 
 
 def register_bot(
@@ -32,6 +35,42 @@ def register_bot(
         _brand_configs[bot_id] = dict(brand_config)
     else:
         _brand_configs.pop(bot_id, None)
+
+
+def unregister_instance(bot_id: int) -> object | None:
+    """Убирает живой экземпляр бота; бренд остаётся.
+
+    Выключенная витрина больше не отвечает, но её пользователи по-прежнему
+    считаются её аудиторией: рассылки основного бренда их не должны задеть.
+    """
+    return _instances.pop(bot_id, None)
+
+
+def forget_bot(bot_id: int) -> None:
+    """Витрина удалена из БД: бот забывается целиком."""
+    _registry.pop(bot_id, None)
+    _instances.pop(bot_id, None)
+    _brand_configs.pop(bot_id, None)
+    _payment_weights.pop(bot_id, None)
+
+
+def set_payment_weights(
+    bot_id: int, weights: Mapping[str, int] | None, source: str = "bot"
+) -> None:
+    if weights is None:
+        _payment_weights.pop(bot_id, None)
+    else:
+        _payment_weights[bot_id] = (dict(weights), source)
+
+
+def get_payment_weights(bot_id: int | None) -> tuple[dict[str, int], str] | None:
+    """Свои веса роутера для бота или None — тогда глобальные."""
+    if bot_id is None:
+        return None
+    entry = _payment_weights.get(bot_id)
+    if entry is None:
+        return None
+    return dict(entry[0]), entry[1]
 
 
 def get_brand_for_bot(bot_id: int | None) -> "BrandProfile":
@@ -126,6 +165,7 @@ def clear() -> None:
     _registry.clear()
     _instances.clear()
     _brand_configs.clear()
+    _payment_weights.clear()
 
 
 def _same_file(first: Path, second: Path) -> bool:

@@ -197,6 +197,30 @@ async def _dispatch_update(
     await dispatcher.feed_update(bot, update)
 
 
+async def _read_update(request: Request, secret_token: str | None) -> Update:
+    if secret_token:
+        header_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if header_token != secret_token:
+            logger.warning("Получен Telegram webhook с неверным секретом")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_secret_token")
+
+    content_type = request.headers.get("content-type", "")
+    if content_type and "application/json" not in content_type.lower():
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="invalid_content_type")
+
+    try:
+        payload: Any = await request.json()
+    except Exception as error:  # pragma: no cover - defensive logging
+        logger.error("Ошибка чтения Telegram webhook: %s", error)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_payload") from error
+
+    try:
+        return Update.model_validate(payload)
+    except Exception as error:  # pragma: no cover - defensive logging
+        logger.error("Ошибка валидации Telegram update: %s", error)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_update") from error
+
+
 def create_telegram_router(
     bot: Bot,
     dispatcher: Dispatcher,
@@ -210,28 +234,7 @@ def create_telegram_router(
 
     @router.post(effective_path)
     async def telegram_webhook(request: Request) -> JSONResponse:
-        if secret_token:
-            header_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-            if header_token != secret_token:
-                logger.warning("Получен Telegram webhook с неверным секретом")
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_secret_token")
-
-        content_type = request.headers.get("content-type", "")
-        if content_type and "application/json" not in content_type.lower():
-            raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="invalid_content_type")
-
-        try:
-            payload: Any = await request.json()
-        except Exception as error:  # pragma: no cover - defensive logging
-            logger.error("Ошибка чтения Telegram webhook: %s", error)
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_payload") from error
-
-        try:
-            update = Update.model_validate(payload)
-        except Exception as error:  # pragma: no cover - defensive logging
-            logger.error("Ошибка валидации Telegram update: %s", error)
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_update") from error
-
+        update = await _read_update(request, secret_token)
         await _dispatch_update(update, dispatcher=dispatcher, bot=bot, processor=processor)
         return JSONResponse({"status": "ok"})
 
@@ -249,3 +252,78 @@ def create_telegram_router(
         )
 
     return router
+
+
+class MirrorWebhookHub:
+    """Вебхуки витрин: один маршрут `<path>/mirror/{bot_id}` на всех.
+
+    Витрины живут в БД и появляются/исчезают без рестарта, поэтому маршрут не
+    регистрируется на каждого бота: хаб держит очередь на бот и находит её по
+    Telegram id из пути.
+    """
+
+    def __init__(self, dispatcher: Dispatcher, *, base_path: str | None = None) -> None:
+        self._dispatcher = dispatcher
+        self._base_path = (base_path or settings.get_telegram_webhook_path()).rstrip("/")
+        self._processors: dict[int, TelegramWebhookProcessor] = {}
+        self._bots: dict[int, Bot] = {}
+        self._running = False
+
+    @property
+    def bot_ids(self) -> list[int]:
+        return list(self._bots)
+
+    def _new_processor(self, bot: Bot) -> TelegramWebhookProcessor:
+        return TelegramWebhookProcessor(
+            bot=bot,
+            dispatcher=self._dispatcher,
+            queue_maxsize=settings.get_webhook_queue_maxsize(),
+            worker_count=settings.get_webhook_worker_count(),
+            enqueue_timeout=settings.get_webhook_enqueue_timeout(),
+            shutdown_timeout=settings.get_webhook_shutdown_timeout(),
+        )
+
+    async def add(self, bot: Bot) -> None:
+        existing = self._bots.get(bot.id)
+        if existing is bot:
+            return
+        if existing is not None:
+            await self.remove(bot.id)
+        processor = self._new_processor(bot)
+        self._bots[bot.id] = bot
+        self._processors[bot.id] = processor
+        if self._running:
+            await processor.start()
+
+    async def remove(self, bot_id: int) -> None:
+        self._bots.pop(bot_id, None)
+        processor = self._processors.pop(bot_id, None)
+        if processor is not None:
+            await processor.stop()
+
+    async def start(self) -> None:
+        self._running = True
+        for processor in list(self._processors.values()):
+            await processor.start()
+
+    async def stop(self) -> None:
+        self._running = False
+        for processor in list(self._processors.values()):
+            await processor.stop()
+
+    def create_router(self) -> APIRouter:
+        router = APIRouter()
+        secret_token = settings.WEBHOOK_SECRET_TOKEN
+
+        @router.post(self._base_path + "/mirror/{bot_id}")
+        async def mirror_telegram_webhook(bot_id: int, request: Request) -> JSONResponse:
+            update = await _read_update(request, secret_token)
+            bot = self._bots.get(bot_id)
+            processor = self._processors.get(bot_id)
+            if bot is None or processor is None:
+                # Витрина выключена или ещё не поднялась: Telegram повторит позже.
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown_bot")
+            await _dispatch_update(update, dispatcher=self._dispatcher, bot=bot, processor=processor)
+            return JSONResponse({"status": "ok"})
+
+        return router

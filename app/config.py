@@ -624,8 +624,13 @@ class Settings(BaseSettings):
     HIDE_SUBSCRIPTION_LINK: bool = False
     ENABLE_LOGO_MODE: bool = True
     LOGO_FILE: str = "vpn_logo.png"
+    # Копикеты живут в БД (copycat_bots/copycat_groups). Эти два источника
+    # читаются только для первичного импорта в пустую таблицу.
     MIRROR_BOTS: str = "[]"
     MIRROR_BOTS_FILE: str = "mirror_bots.yaml"
+    # Как часто бот перечитывает копикетов из БД: новые поднимаются, выключенные
+    # гасятся, правки бренда и весов роутера подхватываются без рестарта.
+    COPYCAT_SYNC_INTERVAL_SECONDS: int = 60
     BOT_IMAGES_DIR: str = "bot_images"
     SKIP_RULES_ACCEPT: bool = False
     SKIP_REFERRAL_CODE: bool = False
@@ -2472,7 +2477,12 @@ class Settings(BaseSettings):
             return []
         return items
 
-    def get_mirror_bots(self) -> list[dict]:
+    def get_legacy_mirror_items(self) -> list[dict]:
+        """Записи mirror_bots.yaml (или MIRROR_BOTS) как есть.
+
+        Копикеты живут в БД (copycat_bots); файл читается только для
+        первичного импорта, см. app/services/copycat_service.py.
+        """
         import json
         log = logging.getLogger(__name__)
 
@@ -2488,6 +2498,10 @@ class Settings(BaseSettings):
                 return []
             if not isinstance(items, list):
                 return []
+        return [item for item in items if isinstance(item, dict)]
+
+    def get_mirror_bots(self) -> list[dict]:
+        items = self.get_legacy_mirror_items()
 
         from app.branding.profile import COPYCAT_CONFIG_KEYS
 
