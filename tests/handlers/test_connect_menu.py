@@ -64,7 +64,7 @@ def test_connect_android_keyboard_omits_transfer_without_url(monkeypatch):
     monkeypatch.setattr(
         inline,
         "build_personal_play_link",
-        lambda _url, _telegram_id: "https://play.google.com/store/apps/details?id=leto",
+        lambda *_args, **_kwargs: "https://play.google.com/store/apps/details?id=leto",
     )
 
     keyboard = inline.get_connect_android_keyboard("ru", telegram_id=42)
@@ -101,7 +101,7 @@ def test_connect_platform_keyboards_include_transfer_buttons(monkeypatch):
     monkeypatch.setattr(
         inline,
         "build_personal_play_link",
-        lambda _url, _telegram_id: "https://play.google.com/store/apps/details?id=leto",
+        lambda *_args, **_kwargs: "https://play.google.com/store/apps/details?id=leto",
     )
     happ_url = "https://redirect.example/happ"
     incy_url = "https://redirect.example/incy"
@@ -176,7 +176,7 @@ async def test_connect_platform_handler_shows_raw_subscription_link(monkeypatch)
     monkeypatch.setattr(
         inline,
         "build_personal_play_link",
-        lambda _url, _telegram_id: "https://play.google.com/store/apps/details?id=leto",
+        lambda *_args, **_kwargs: "https://play.google.com/store/apps/details?id=leto",
     )
 
     await menu.handle_connect_platform_android(callback, AsyncMock())
@@ -232,7 +232,7 @@ async def test_connect_platform_submenus_use_connection_image(monkeypatch):
     monkeypatch.setattr(
         inline,
         "build_personal_play_link",
-        lambda _url, _telegram_id: "https://play.google.com/store/apps/details?id=leto",
+        lambda *_args, **_kwargs: "https://play.google.com/store/apps/details?id=leto",
     )
     monkeypatch.setattr(menu, "get_happ_cryptolink_redirect_link", lambda _link: "https://redirect.example/happ")
     monkeypatch.setattr(menu, "get_incy_button_url", lambda _link: "https://redirect.example/incy")

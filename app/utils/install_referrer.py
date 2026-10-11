@@ -39,10 +39,20 @@ def parse_install_referrer(raw: Optional[str]) -> tuple[Optional[str], Optional[
     return utm_source, tg_user_id
 
 
-def build_personal_play_link(base_url: Optional[str], telegram_id: Optional[int]) -> Optional[str]:
+def build_personal_play_link(
+    base_url: Optional[str],
+    telegram_id: Optional[int],
+    bind_code: Optional[str] = None,
+) -> Optional[str]:
     """Персонализирует ссылку на Google Play, добавляя параметр
     referrer=utm_source%3Dtelegram%26tg_user_id%3D<telegram_id>, который
     приложение получит через Install Referrer API после установки.
+
+    bind_code — личный одноразовый код привязки (device_binding_codes). С ним
+    приложение при первом запуске входит в аккаунт без экрана авторизации:
+    обменивает код на токен через тот же bind-by-code, что и ручной ввод кода.
+    Входом служит именно код, а не tg_user_id: tg_user_id не секрет, и вход
+    по нему отдал бы чужой аккаунт любому, кто подставит чужой id в ссылку.
 
     Не-Play ссылки (например, прямой APK) возвращаются без изменений —
     referrer имеет смысл только для установки из Google Play.
@@ -62,9 +72,10 @@ def build_personal_play_link(base_url: Optional[str], telegram_id: Optional[int]
         for key, value in parse_qsl(parts.query, keep_blank_values=True)
         if key != "referrer"
     ]
-    query.append(
-        ("referrer", urlencode({"utm_source": "telegram", "tg_user_id": telegram_id}))
-    )
+    referrer = {"utm_source": "telegram", "tg_user_id": telegram_id}
+    if bind_code:
+        referrer["bind_code"] = bind_code
+    query.append(("referrer", urlencode(referrer)))
     return urlunsplit(
         (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
     )

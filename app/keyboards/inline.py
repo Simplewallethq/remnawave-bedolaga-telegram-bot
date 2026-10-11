@@ -3534,12 +3534,17 @@ def get_connect_android_keyboard(
     language: str = DEFAULT_LANGUAGE,
     telegram_id: Optional[int] = None,
     happ_transfer_url: Optional[str] = None,
+    bind_code: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
-    """Android-specific Connect menu actions."""
+    """Android-specific Connect menu actions.
+
+    bind_code, when given, rides in the Play link so the app signs in on first
+    launch without the sign-in screen (see build_personal_play_link).
+    """
     texts = get_texts(language)
     buttons: List[List[InlineKeyboardButton]] = []
     leto_url = (
-        build_personal_play_link(settings.LETO_APP_DOWNLOAD_LINK_ANDROID, telegram_id)
+        build_personal_play_link(settings.LETO_APP_DOWNLOAD_LINK_ANDROID, telegram_id, bind_code)
         if current_brand().has_own_app
         else None
     )
@@ -3736,11 +3741,13 @@ def get_onboarding_connection_keyboard(
     subscription_link: Optional[str] = None,
     telegram_id: Optional[int] = None,
     raw_subscription_link: Optional[str] = None,
+    bind_code: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """
     Onboarding Screen 3: Device-specific connection instructions.
     device_type: 'iphone', 'android', 'windows', or 'macos'
-    telegram_id personalizes the Google Play link (Install Referrer attribution).
+    telegram_id personalizes the Google Play link (Install Referrer attribution);
+    bind_code adds first-launch sign-in to it (see build_personal_play_link).
     На Apple-платформах подключение идёт через наше приложение Incy —
     обычной ссылкой подписки (incy://add/{link}), без криптоссылки.
     """
@@ -3756,7 +3763,7 @@ def get_onboarding_connection_keyboard(
         ])
     elif device_type == "android":
         leto_android_url = (
-            build_personal_play_link(settings.LETO_APP_DOWNLOAD_LINK_ANDROID, telegram_id)
+            build_personal_play_link(settings.LETO_APP_DOWNLOAD_LINK_ANDROID, telegram_id, bind_code)
             if current_brand().has_own_app
             else None
         )

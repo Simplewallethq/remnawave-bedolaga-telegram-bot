@@ -12,6 +12,7 @@ import os
 
 from app.config import settings
 from app.database.crud.user import get_user_by_telegram_id, update_user
+from app.database.crud.device_binding_code import get_or_create_binding_code
 from app.database.crud.promo_group import (
     get_auto_assign_promo_groups,
     has_auto_assign_promo_groups,
@@ -1416,6 +1417,34 @@ async def _detect_vpn_connection(db: AsyncSession, user: User) -> None:
         )
 
 
+async def _play_link_bind_code(db: AsyncSession, user) -> str | None:
+    """Личный код привязки для Play-ссылки, или None.
+
+    С кодом в install referrer приложение при первом запуске входит в аккаунт
+    само, без экрана авторизации. Код тот же, что выдаёт кабинет: одноразовый,
+    с ограниченным сроком, активный код переиспользуется. Без подписки привязывать
+    нечего — тогда ссылка остаётся только атрибуционной, и приложение покажет
+    обычный вход.
+
+    Меню не должно ломаться из-за этого: любая ошибка — просто ссылка без кода.
+    """
+    if not current_brand().has_own_app:
+        return None
+    subscription_id = getattr(getattr(user, "subscription", None), "id", None)
+    if not isinstance(subscription_id, int):
+        return None
+    try:
+        record = await get_or_create_binding_code(db, subscription_id)
+        return record.code
+    except Exception:
+        logger.exception("Не удалось выдать код привязки для Play-ссылки user=%s", getattr(user, "id", None))
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return None
+
+
 async def _get_connect_menu_user(
     callback: types.CallbackQuery,
     db: AsyncSession,
@@ -1507,6 +1536,7 @@ async def handle_connect_platform_android(
             user.language,
             user.telegram_id,
             happ_transfer_url=_get_happ_transfer_url(user),
+            bind_code=await _play_link_bind_code(db, user),
         ),
         parse_mode="HTML",
         photo_path=os.path.join("images", "connection.webp"),
@@ -1722,6 +1752,7 @@ async def handle_onboarding_device_selection(
         subscription_link=subscription_link,
         telegram_id=user.telegram_id,
         raw_subscription_link=raw_subscription_link,
+        bind_code=await _play_link_bind_code(db, user) if device_type == "android" else None,
     )
 
     image_path = os.path.join("images", "connection.webp")
