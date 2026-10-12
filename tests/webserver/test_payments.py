@@ -678,3 +678,71 @@ async def test_onepayment_webhook_accepts_form_urlencoded(monkeypatch: pytest.Mo
 
     assert response.status_code == 200
     process_mock.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------- AuraPay
+
+
+def _aurapay_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "AURAPAY_ENABLED", True, raising=False)
+    monkeypatch.setattr(settings, "AURAPAY_SHOP_ID", "shop", raising=False)
+    monkeypatch.setattr(settings, "AURAPAY_API_KEY", "api", raising=False)
+    monkeypatch.setattr(settings, "AURAPAY_SECRET_KEY", "secret2", raising=False)
+    monkeypatch.setattr(settings, "AURAPAY_WEBHOOK_PATH", "/aurapay", raising=False)
+
+
+def _aurapay_signature(fields: dict) -> str:
+    import hashlib
+    import hmac
+
+    concatenated = "".join("" if fields[k] is None else str(fields[k]) for k in sorted(fields))
+    return hmac.new(b"secret2", concatenated.encode(), hashlib.sha256).hexdigest()
+
+
+@pytest.mark.anyio
+async def test_aurapay_webhook_rejects_bad_signature(monkeypatch: pytest.MonkeyPatch) -> None:
+    _aurapay_settings(monkeypatch)
+    process_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.webserver.payments._process_payment_service_callback", process_mock)
+
+    router = create_payment_router(DummyBot(), SimpleNamespace())
+    route = _get_route(router, "/aurapay")
+    body = json.dumps({"order_id": "aurapay_1_a", "status": "PAID", "amount": "10.00"}).encode()
+    response = await route.endpoint(
+        _build_request(
+            "/aurapay", body=body, headers={"content-type": "application/json", "X-SIGNATURE": "0" * 64}
+        )
+    )
+
+    assert response.status_code == 401
+    process_mock.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_aurapay_webhook_accepts_signed_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    _aurapay_settings(monkeypatch)
+    process_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.webserver.payments._process_payment_service_callback", process_mock)
+
+    fields = {
+        "id": "inv-1",
+        "amount": "10.00",
+        "status": "PAID",
+        "shop_id": "shop",
+        "order_id": "aurapay_1_a",
+        "custom_fields": None,
+    }
+    router = create_payment_router(DummyBot(), SimpleNamespace())
+    route = _get_route(router, "/aurapay")
+    response = await route.endpoint(
+        _build_request(
+            "/aurapay",
+            body=json.dumps(fields).encode(),
+            headers={"content-type": "application/json", "X-SIGNATURE": _aurapay_signature(fields)},
+        )
+    )
+
+    assert response.status_code == 200
+    _, payload, method_name = process_mock.await_args.args
+    assert method_name == "process_aurapay_webhook"
+    assert payload["order_id"] == "aurapay_1_a"

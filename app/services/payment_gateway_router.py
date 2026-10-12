@@ -1,7 +1,7 @@
 """Взвешенная маршрутизация счетов между универсальными шлюзами.
 
 Пользователь видит одну кнопку «Оплатить N ₽»; конкретный шлюз (Platega /
-WATA / YooKassa / 1Payment) выбирается здесь в момент формирования счёта по
+WATA / YooKassa / 1Payment / AuraPay) выбирается здесь в момент формирования счёта по
 настраиваемым весам. Platega, WATA и YooKassa универсальны — карты и СБП
 показываются на их собственной странице, поэтому подмена шлюза для пользователя
 прозрачна. 1Payment — только СБП и только на поверхностях оплаты тарифа
@@ -38,12 +38,14 @@ GATEWAY_PLATEGA = "platega"
 GATEWAY_WATA = "wata"
 GATEWAY_YOOKASSA = "yookassa"
 GATEWAY_ONEPAYMENT = "onepayment"
+GATEWAY_AURAPAY = "aurapay"
 
 ROUTED_GATEWAYS: tuple = (
     GATEWAY_PLATEGA,
     GATEWAY_WATA,
     GATEWAY_YOOKASSA,
     GATEWAY_ONEPAYMENT,
+    GATEWAY_AURAPAY,
 )
 
 # Поверхности — используются и для поэтапного выката, и для сегментации статистики.
@@ -94,6 +96,7 @@ class PaymentGatewayRouter:
             "check_yookassa_",
         ),
         GATEWAY_ONEPAYMENT: ("payment_url", "order_id", "check_onepayment_"),
+        GATEWAY_AURAPAY: ("payment_url", "invoice_id", "check_aurapay_"),
     }
 
     # ------------------------------------------------------------------ состояние
@@ -150,6 +153,12 @@ class PaymentGatewayRouter:
                 int(settings.ONEPAYMENT_MIN_AMOUNT_KOPEKS),
                 int(settings.ONEPAYMENT_MAX_AMOUNT_KOPEKS),
             )
+        if gateway == GATEWAY_AURAPAY:
+            return GatewayLimits(
+                gateway,
+                int(settings.AURAPAY_MIN_AMOUNT_KOPEKS),
+                int(settings.AURAPAY_MAX_AMOUNT_KOPEKS),
+            )
         raise ValueError(f"Неизвестный шлюз: {gateway}")
 
     def gateway_sources(self, gateway: str) -> Optional[set]:
@@ -190,6 +199,8 @@ class PaymentGatewayRouter:
             )
         if gateway == GATEWAY_ONEPAYMENT:
             return settings.is_onepayment_enabled()
+        if gateway == GATEWAY_AURAPAY:
+            return settings.is_aurapay_enabled()
         return False
 
     def enabled_gateways(
@@ -365,6 +376,18 @@ class PaymentGatewayRouter:
             metadata=metadata,
         )
 
+    async def _create_aurapay(
+        self, payment_service, db, user, amount_kopeks, description, language, metadata
+    ):
+        return await payment_service.create_aurapay_payment(
+            db,
+            user_id=user.id,
+            amount_kopeks=amount_kopeks,
+            description=description,
+            language=language,
+            metadata=metadata,
+        )
+
     async def _create_yookassa(
         self, payment_service, db, user, amount_kopeks, description, language, metadata
     ):
@@ -390,6 +413,7 @@ class PaymentGatewayRouter:
             GATEWAY_WATA: self._create_wata,
             GATEWAY_YOOKASSA: self._create_yookassa,
             GATEWAY_ONEPAYMENT: self._create_onepayment,
+            GATEWAY_AURAPAY: self._create_aurapay,
         }[gateway]
 
     # ------------------------------------------------------------ создание счёта
@@ -678,6 +702,7 @@ class PaymentGatewayRouter:
         from sqlalchemy import update as sa_update
 
         from app.database.models import (
+            AurapayPayment,
             OnePaymentPayment,
             PlategaPayment,
             WataPayment,
@@ -689,6 +714,7 @@ class PaymentGatewayRouter:
             GATEWAY_WATA: WataPayment,
             GATEWAY_YOOKASSA: YooKassaPayment,
             GATEWAY_ONEPAYMENT: OnePaymentPayment,
+            GATEWAY_AURAPAY: AurapayPayment,
         }.get(routed.gateway)
 
         if model is None or routed.local_payment_id is None:

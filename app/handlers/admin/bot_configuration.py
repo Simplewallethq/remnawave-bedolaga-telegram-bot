@@ -63,7 +63,7 @@ CATEGORY_GROUP_METADATA: Dict[str, Dict[str, object]] = {
     },
     "payments": {
         "title": "💳 Платежные системы",
-        "description": "YooKassa, CryptoBot, Heleket, CloudPayments, MulenPay, PAL24, Wata, Platega, 1Payment, Tribute и Telegram Stars.",
+        "description": "YooKassa, CryptoBot, Heleket, CloudPayments, MulenPay, PAL24, Wata, Platega, 1Payment, AuraPay, Tribute и Telegram Stars.",
         "icon": "💳",
         "categories": (
             "PAYMENT_ROUTER",
@@ -78,6 +78,7 @@ CATEGORY_GROUP_METADATA: Dict[str, Dict[str, object]] = {
             "WATA",
             "PLATEGA",
             "ONEPAYMENT",
+            "AURAPAY",
             "TRIBUTE",
             "TELEGRAM",
         ),
@@ -264,6 +265,7 @@ def _get_group_status(group_key: str) -> Tuple[str, str]:
             "PAL24": settings.is_pal24_enabled(),
             "WATA": settings.is_wata_enabled(),
             "1Payment": settings.is_onepayment_enabled(),
+            "AuraPay": settings.is_aurapay_enabled(),
             "Heleket": settings.is_heleket_service_enabled(),
             "Tribute": settings.TRIBUTE_ENABLED,
             "Stars": settings.TELEGRAM_STARS_ENABLED,

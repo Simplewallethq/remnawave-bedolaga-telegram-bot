@@ -1168,6 +1168,13 @@ def register_balance_handlers(dp: Dispatcher):
         check_onepayment_payment_status,
         F.data.startswith("check_onepayment_"),
     )
+
+    from .aurapay import check_aurapay_payment_status
+
+    dp.callback_query.register(
+        check_aurapay_payment_status,
+        F.data.startswith("check_aurapay_"),
+    )
     dp.callback_query.register(
         request_onepayment_card_alternative,
         F.data.startswith("onepay_card_"),

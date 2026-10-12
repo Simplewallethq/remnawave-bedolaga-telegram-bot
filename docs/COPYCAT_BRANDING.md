@@ -87,6 +87,11 @@ python -m scripts.copycats weights @shuka_bot --clear    # снова как у 
 общие: шлюз должен быть настроен и включён, 1Payment — только на поверхностях
 `ONEPAYMENT_ROUTER_SOURCES`, рубильник и поверхности — `PAYMENT_ROUTER_*`.
 
+Отдельная касса витрины — AuraPay (`AURAPAY_*` в `.env`, вебхук
+`{WEBHOOK_URL}/aurapay-webhook`). Её глобальный вес 0, поэтому она выпадает только
+там, где задана весами: `weights @quattra_vpn_bot aurapay=1`. Сообщение об успехе и
+удаление счёта идут через бота пользователя.
+
 Чьи веса: бота, который отвечает пользователю (контекст апдейта); вне бота
 (кабинет, миниапп) — бота, где пользователь зарегистрирован. В
 `metadata_json.payment_router` платежа пишутся `bot_id` и `weights_source`

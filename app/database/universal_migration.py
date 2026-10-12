@@ -4452,6 +4452,128 @@ async def create_onepayment_payments_table() -> bool:
         return False
 
 
+async def create_aurapay_payments_table() -> bool:
+    """Счета AuraPay. ORM обычно создаёт таблицу через create_all раньше —
+    здесь идемпотентный фолбэк вместе с индексами."""
+    if not await check_table_exists("aurapay_payments"):
+        try:
+            async with engine.begin() as conn:
+                db_type = await get_database_type()
+
+                if db_type == "sqlite":
+                    create_sql = """
+                    CREATE TABLE aurapay_payments (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        order_id VARCHAR(255) NOT NULL,
+                        invoice_id VARCHAR(64) NULL,
+                        amount_kopeks INTEGER NOT NULL,
+                        currency VARCHAR(10) NOT NULL DEFAULT 'RUB',
+                        description TEXT NULL,
+                        status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+                        is_paid BOOLEAN NOT NULL DEFAULT 0,
+                        paid_at DATETIME NULL,
+                        url TEXT NULL,
+                        metadata_json JSON NULL,
+                        callback_payload JSON NULL,
+                        expires_at DATETIME NULL,
+                        transaction_id INTEGER NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users(id),
+                        FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+                    )
+                    """
+                elif db_type == "postgresql":
+                    create_sql = """
+                    CREATE TABLE aurapay_payments (
+                        id SERIAL PRIMARY KEY,
+                        user_id INTEGER NOT NULL REFERENCES users(id),
+                        order_id VARCHAR(255) NOT NULL,
+                        invoice_id VARCHAR(64) NULL,
+                        amount_kopeks INTEGER NOT NULL,
+                        currency VARCHAR(10) NOT NULL DEFAULT 'RUB',
+                        description TEXT NULL,
+                        status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+                        is_paid BOOLEAN NOT NULL DEFAULT FALSE,
+                        paid_at TIMESTAMP NULL,
+                        url TEXT NULL,
+                        metadata_json JSON NULL,
+                        callback_payload JSON NULL,
+                        expires_at TIMESTAMP NULL,
+                        transaction_id INTEGER NULL REFERENCES transactions(id),
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                elif db_type == "mysql":
+                    create_sql = """
+                    CREATE TABLE aurapay_payments (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        user_id INT NOT NULL,
+                        order_id VARCHAR(255) NOT NULL,
+                        invoice_id VARCHAR(64) NULL,
+                        amount_kopeks INT NOT NULL,
+                        currency VARCHAR(10) NOT NULL DEFAULT 'RUB',
+                        description TEXT NULL,
+                        status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+                        is_paid TINYINT(1) NOT NULL DEFAULT 0,
+                        paid_at DATETIME NULL,
+                        url TEXT NULL,
+                        metadata_json JSON NULL,
+                        callback_payload JSON NULL,
+                        expires_at DATETIME NULL,
+                        transaction_id INT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users(id),
+                        FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+                    )
+                    """
+                else:
+                    logger.error(
+                        "Неподдерживаемый тип БД для создания aurapay_payments: %s", db_type
+                    )
+                    return False
+
+                await conn.execute(text(create_sql))
+            logger.info("✅ Таблица aurapay_payments успешно создана")
+        except Exception as error:
+            logger.error("Ошибка создания таблицы aurapay_payments: %s", error)
+            return False
+
+    indexes = (
+        (
+            "ix_aurapay_payments_order_id",
+            "CREATE UNIQUE INDEX ix_aurapay_payments_order_id ON aurapay_payments(order_id)",
+        ),
+        (
+            "ix_aurapay_payments_invoice_id",
+            "CREATE UNIQUE INDEX ix_aurapay_payments_invoice_id ON aurapay_payments(invoice_id)",
+        ),
+        (
+            "ix_aurapay_payments_unpaid_created",
+            "CREATE INDEX ix_aurapay_payments_unpaid_created "
+            "ON aurapay_payments(is_paid, created_at)",
+        ),
+    )
+    try:
+        missing = [
+            (name, sql)
+            for name, sql in indexes
+            if not await check_index_exists("aurapay_payments", name)
+        ]
+        if missing:
+            async with engine.begin() as conn:
+                for name, sql in missing:
+                    await conn.execute(text(sql))
+                    logger.info("✅ Создан индекс %s", name)
+        return True
+    except Exception as error:
+        logger.error("Ошибка создания индексов aurapay_payments: %s", error)
+        return False
+
+
 async def ensure_onepayment_indexes() -> bool:
     indexes = (
         (
@@ -8772,6 +8894,12 @@ async def run_universal_migration():
 
         if not await ensure_onepayment_indexes():
             logger.warning("⚠️ Проблемы с индексами 1Payment")
+
+        logger.info("=== СОЗДАНИЕ ТАБЛИЦЫ AURAPAY_PAYMENTS ===")
+        if await create_aurapay_payments_table():
+            logger.info("✅ Таблица aurapay_payments готова")
+        else:
+            logger.warning("⚠️ Проблемы с таблицей aurapay_payments")
 
         if not await create_subscription_short_uuid_index():
             logger.warning("⚠️ Проблемы с индексом subscriptions.remnawave_short_uuid")

@@ -695,6 +695,64 @@ def create_payment_router(bot: Bot, payment_service: PaymentService) -> APIRoute
 
         routes_registered = True
 
+    if settings.is_aurapay_configured():
+        from app.services.aurapay_service import AurapayService
+
+        aurapay_service = AurapayService()
+
+        @router.options(settings.AURAPAY_WEBHOOK_PATH)
+        async def aurapay_options() -> Response:
+            return _create_cors_response()
+
+        @router.get(settings.AURAPAY_WEBHOOK_PATH)
+        async def aurapay_health() -> JSONResponse:
+            return JSONResponse(
+                {
+                    "status": "ok",
+                    "service": "aurapay_webhook",
+                    "enabled": settings.is_aurapay_enabled(),
+                }
+            )
+
+        @router.post(settings.AURAPAY_WEBHOOK_PATH)
+        async def aurapay_webhook(request: Request) -> JSONResponse:
+            raw_body = await request.body()
+            try:
+                payload = json.loads(raw_body) if raw_body else None
+            except json.JSONDecodeError:
+                payload = None
+            if not isinstance(payload, dict):
+                return JSONResponse(
+                    {"status": "error", "reason": "invalid_payload"},
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if not aurapay_service.verify_signature(
+                raw_body, request.headers.get("X-SIGNATURE")
+            ):
+                logger.error(
+                    "AuraPay webhook: неверная подпись (order_id=%s)", payload.get("order_id")
+                )
+                return JSONResponse(
+                    {"status": "error", "reason": "invalid_signature"},
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                )
+
+            success = await _process_payment_service_callback(
+                payment_service,
+                payload,
+                "process_aurapay_webhook",
+            )
+            if success:
+                return JSONResponse({"status": "ok"})
+
+            return JSONResponse(
+                {"status": "error", "reason": "not_processed"},
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        routes_registered = True
+
     if settings.is_platega_configured():
 
         @router.get(settings.PLATEGA_WEBHOOK_PATH)

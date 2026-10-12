@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.database.database import AsyncSessionLocal
 from app.database.models import (
+    AurapayPayment,
     CloudPaymentsPayment,
     CryptoBotPayment,
     HeleketPayment,
@@ -68,6 +69,7 @@ SUPPORTED_MANUAL_CHECK_METHODS: frozenset[PaymentMethod] = frozenset(
         PaymentMethod.PLATEGA,
         PaymentMethod.CLOUDPAYMENTS,
         PaymentMethod.ONEPAYMENT,
+        PaymentMethod.AURAPAY,
     }
 )
 
@@ -82,6 +84,7 @@ SUPPORTED_AUTO_CHECK_METHODS: frozenset[PaymentMethod] = frozenset(
         PaymentMethod.PLATEGA,
         PaymentMethod.CLOUDPAYMENTS,
         PaymentMethod.ONEPAYMENT,
+        PaymentMethod.AURAPAY,
     }
 )
 
@@ -99,6 +102,8 @@ def method_display_name(method: PaymentMethod) -> str:
         return settings.get_platega_display_name()
     if method == PaymentMethod.ONEPAYMENT:
         return settings.get_onepayment_display_name()
+    if method == PaymentMethod.AURAPAY:
+        return settings.get_aurapay_display_name()
     if method == PaymentMethod.CRYPTOBOT:
         return "CryptoBot"
     if method == PaymentMethod.HELEKET:
@@ -123,6 +128,8 @@ def _method_is_enabled(method: PaymentMethod) -> bool:
         return settings.is_platega_enabled()
     if method == PaymentMethod.ONEPAYMENT:
         return settings.is_onepayment_enabled()
+    if method == PaymentMethod.AURAPAY:
+        return settings.is_aurapay_enabled()
     if method == PaymentMethod.CRYPTOBOT:
         return settings.is_cryptobot_enabled()
     if method == PaymentMethod.HELEKET:
@@ -350,6 +357,12 @@ def _is_onepayment_pending(payment: OnePaymentPayment) -> bool:
     return status in {"INIT", "PENDING"}
 
 
+def _is_aurapay_pending(payment: AurapayPayment) -> bool:
+    if payment.is_paid:
+        return False
+    return (payment.status or "").upper() == AurapayPayment.STATUS_PENDING
+
+
 def _is_heleket_pending(payment: HeleketPayment) -> bool:
     if payment.is_paid:
         return False
@@ -491,6 +504,32 @@ async def _fetch_wata_payments(db: AsyncSession, cutoff: datetime) -> List[Pendi
             PaymentMethod.WATA,
             payment,
             identifier=payment.payment_link_id,
+            amount_kopeks=payment.amount_kopeks,
+            status=payment.status or "",
+            is_paid=bool(payment.is_paid),
+            expires_at=getattr(payment, "expires_at", None),
+        )
+        if record:
+            records.append(record)
+    return records
+
+
+async def _fetch_aurapay_payments(db: AsyncSession, cutoff: datetime) -> List[PendingPayment]:
+    stmt = (
+        select(AurapayPayment)
+        .options(selectinload(AurapayPayment.user))
+        .where(AurapayPayment.created_at >= cutoff)
+        .order_by(desc(AurapayPayment.created_at))
+    )
+    result = await db.execute(stmt)
+    records: List[PendingPayment] = []
+    for payment in result.scalars().all():
+        if not _is_aurapay_pending(payment):
+            continue
+        record = _build_record(
+            PaymentMethod.AURAPAY,
+            payment,
+            identifier=payment.order_id,
             amount_kopeks=payment.amount_kopeks,
             status=payment.status or "",
             is_paid=bool(payment.is_paid),
@@ -704,6 +743,7 @@ async def list_recent_pending_payments(
         await _fetch_wata_payments(db, cutoff),
         await _fetch_platega_payments(db, cutoff),
         await _fetch_onepayment_payments(db, cutoff),
+        await _fetch_aurapay_payments(db, cutoff),
         await _fetch_heleket_payments(db, cutoff),
         await _fetch_cryptobot_payments(db, cutoff),
         await _fetch_cloudpayments_payments(db, cutoff),
@@ -754,6 +794,21 @@ async def get_payment_record(
             amount_kopeks=payment.amount_kopeks,
             status=payment.status or "",
             is_paid=bool(payment.is_paid),
+        )
+
+    if method == PaymentMethod.AURAPAY:
+        payment = await db.get(AurapayPayment, local_payment_id)
+        if not payment:
+            return None
+        await db.refresh(payment, attribute_names=["user"])
+        return _build_record(
+            method,
+            payment,
+            identifier=payment.order_id,
+            amount_kopeks=payment.amount_kopeks,
+            status=payment.status or "",
+            is_paid=bool(payment.is_paid),
+            expires_at=getattr(payment, "expires_at", None),
         )
 
     if method == PaymentMethod.ONEPAYMENT:
@@ -905,6 +960,9 @@ async def run_manual_check(
             payment = result.get("payment") if result else None
         elif method == PaymentMethod.ONEPAYMENT:
             result = await payment_service.get_onepayment_payment_status(db, local_payment_id)
+            payment = result.get("payment") if result else None
+        elif method == PaymentMethod.AURAPAY:
+            result = await payment_service.get_aurapay_payment_status(db, local_payment_id)
             payment = result.get("payment") if result else None
         elif method == PaymentMethod.HELEKET:
             payment = await payment_service.sync_heleket_payment_status(

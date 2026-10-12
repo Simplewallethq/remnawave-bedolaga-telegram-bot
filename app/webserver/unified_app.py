@@ -127,6 +127,7 @@ def create_unified_app(
         "heleket": settings.is_heleket_service_enabled(),
         "platega": settings.is_platega_enabled(),
         "onepayment": settings.is_onepayment_enabled(),
+        "aurapay": settings.is_aurapay_enabled(),
     }
 
     if enable_telegram_webhook:

@@ -17,6 +17,7 @@ from app.services.mulenpay_service import MulenPayService
 from app.services.pal24_service import Pal24Service
 from app.services.platega_service import PlategaService
 from app.services.onepayment_service import OnePaymentService
+from app.services.aurapay_service import AurapayService
 from app.services.payment import (
     CryptoBotPaymentMixin,
     HeleketPaymentMixin,
@@ -29,6 +30,7 @@ from app.services.payment import (
     YooKassaPaymentMixin,
     WataPaymentMixin,
     OnePaymentPaymentMixin,
+    AurapayPaymentMixin,
 )
 from app.services.payment.cloudpayments import CloudPaymentsPaymentMixin
 from app.services.yookassa_service import YooKassaService
@@ -190,6 +192,41 @@ async def link_wata_payment_to_transaction(*args, **kwargs):
 async def create_platega_payment(*args, **kwargs):
     platega_crud = import_module("app.database.crud.platega")
     return await platega_crud.create_platega_payment(*args, **kwargs)
+async def create_aurapay_payment(*args, **kwargs):
+    aurapay_crud = import_module("app.database.crud.aurapay")
+    return await aurapay_crud.create_aurapay_payment(*args, **kwargs)
+
+
+async def get_aurapay_payment_by_id(*args, **kwargs):
+    aurapay_crud = import_module("app.database.crud.aurapay")
+    return await aurapay_crud.get_aurapay_payment_by_id(*args, **kwargs)
+
+
+async def get_aurapay_payment_by_order_id(*args, **kwargs):
+    aurapay_crud = import_module("app.database.crud.aurapay")
+    return await aurapay_crud.get_aurapay_payment_by_order_id(*args, **kwargs)
+
+
+async def get_aurapay_payment_by_invoice_id(*args, **kwargs):
+    aurapay_crud = import_module("app.database.crud.aurapay")
+    return await aurapay_crud.get_aurapay_payment_by_invoice_id(*args, **kwargs)
+
+
+async def mark_aurapay_payment_paid_cas(*args, **kwargs):
+    aurapay_crud = import_module("app.database.crud.aurapay")
+    return await aurapay_crud.mark_aurapay_payment_paid_cas(*args, **kwargs)
+
+
+async def update_aurapay_payment(*args, **kwargs):
+    aurapay_crud = import_module("app.database.crud.aurapay")
+    return await aurapay_crud.update_aurapay_payment(*args, **kwargs)
+
+
+async def link_aurapay_payment_to_transaction(*args, **kwargs):
+    aurapay_crud = import_module("app.database.crud.aurapay")
+    return await aurapay_crud.link_aurapay_payment_to_transaction(*args, **kwargs)
+
+
 async def create_onepayment_payment(*args, **kwargs):
     onepayment_crud = import_module("app.database.crud.onepayment")
     return await onepayment_crud.create_onepayment_payment(*args, **kwargs)
@@ -423,6 +460,7 @@ class PaymentService(
     PlategaPaymentMixin,
     WataPaymentMixin,
     OnePaymentPaymentMixin,
+    AurapayPaymentMixin,
     CloudPaymentsPaymentMixin,
 ):
     """Основной интерфейс платежей, делегирующий работу специализированным mixin-ам."""
@@ -453,6 +491,9 @@ class PaymentService(
         self.wata_service = WataService() if settings.is_wata_enabled() else None
         self.onepayment_service = (
             OnePaymentService() if settings.is_onepayment_enabled() else None
+        )
+        self.aurapay_service = (
+            AurapayService() if settings.is_aurapay_enabled() else None
         )
         self.cloudpayments_service = (
             CloudPaymentsService() if settings.is_cloudpayments_enabled() else None

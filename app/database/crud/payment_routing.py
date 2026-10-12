@@ -10,6 +10,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import (
+    AurapayPayment,
     OnePaymentPayment,
     PaymentRoutingLog,
     PlategaPayment,
@@ -30,6 +31,7 @@ _PROVIDER_MODELS = {
     "wata": (WataPayment, "is_paid", "paid_at"),
     "yookassa": (YooKassaPayment, "is_paid", "captured_at"),
     "onepayment": (OnePaymentPayment, "is_paid", "paid_at"),
+    "aurapay": (AurapayPayment, "is_paid", "paid_at"),
 }
 
 

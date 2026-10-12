@@ -503,6 +503,23 @@ class Settings(BaseSettings):
     # универсальную страницу Platega.
     ONEPAYMENT_CARD_BUTTON_ENABLED: bool = True
 
+    # --- AuraPay (карта / СБП на странице кассы) ---
+    # Подключается только через роутер платежей. Глобальный вес 0: шлюз
+    # выпадает лишь там, где его вес задан у витрины или её группы
+    # (scripts.copycats weights BOT aurapay=1).
+    AURAPAY_ENABLED: bool = False
+    AURAPAY_SHOP_ID: Optional[str] = None
+    AURAPAY_API_KEY: Optional[str] = None
+    # Секретный ключ #2 из настроек кассы — им подписаны вебхуки
+    AURAPAY_SECRET_KEY: Optional[str] = None
+    AURAPAY_BASE_URL: str = "https://app.aurapay.tech"
+    AURAPAY_DISPLAY_NAME: str = "AuraPay"
+    AURAPAY_MIN_AMOUNT_KOPEKS: int = 1000
+    AURAPAY_MAX_AMOUNT_KOPEKS: int = 10000000
+    AURAPAY_INVOICE_LIFETIME_MINUTES: int = 60
+    AURAPAY_REQUEST_TIMEOUT: int = 30
+    AURAPAY_WEBHOOK_PATH: str = "/aurapay-webhook"
+
     # --- Роутер платежей: единая кнопка «Оплатить» со взвешенным выбором шлюза ---
     # ВАЖНО: эти ключи НЕ должны попадать в .env — иначе BotConfigurationService
     # перестанет их применять (ENV_OVERRIDE_KEYS) и рубильник «замёрзнет».
@@ -514,6 +531,7 @@ class Settings(BaseSettings):
     PAYMENT_ROUTER_WEIGHT_WATA: int = 0
     PAYMENT_ROUTER_WEIGHT_YOOKASSA: int = 0
     PAYMENT_ROUTER_WEIGHT_ONEPAYMENT: int = 0
+    PAYMENT_ROUTER_WEIGHT_AURAPAY: int = 0
     PAYMENT_ROUTER_FALLBACK_ENABLED: bool = True
     PAYMENT_ROUTER_LOG_ENABLED: bool = True
 
@@ -1629,6 +1647,25 @@ class Settings(BaseSettings):
             and self.YOOKASSA_SECRET_KEY is not None
         )
 
+    # --- AuraPay ---
+
+    def is_aurapay_configured(self) -> bool:
+        return bool(
+            self.AURAPAY_SHOP_ID and self.AURAPAY_API_KEY and self.AURAPAY_SECRET_KEY
+        )
+
+    def is_aurapay_enabled(self) -> bool:
+        return bool(self.AURAPAY_ENABLED) and self.is_aurapay_configured()
+
+    def get_aurapay_display_name(self) -> str:
+        name = (self.AURAPAY_DISPLAY_NAME or "").strip()
+        return name or "AuraPay"
+
+    def get_aurapay_webhook_url(self) -> Optional[str]:
+        if self.WEBHOOK_URL:
+            return f"{self.WEBHOOK_URL.rstrip('/')}{self.AURAPAY_WEBHOOK_PATH}"
+        return None
+
     # --- 1Payment ---
 
     def is_onepayment_configured(self) -> bool:
@@ -1734,6 +1771,7 @@ class Settings(BaseSettings):
             "wata": self.PAYMENT_ROUTER_WEIGHT_WATA,
             "yookassa": self.PAYMENT_ROUTER_WEIGHT_YOOKASSA,
             "onepayment": self.PAYMENT_ROUTER_WEIGHT_ONEPAYMENT,
+            "aurapay": self.PAYMENT_ROUTER_WEIGHT_AURAPAY,
         }
         weights = {}
         for gateway, value in raw.items():

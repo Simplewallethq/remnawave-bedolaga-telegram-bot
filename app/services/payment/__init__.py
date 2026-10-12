@@ -15,6 +15,7 @@ from .pal24 import Pal24PaymentMixin
 from .platega import PlategaPaymentMixin
 from .wata import WataPaymentMixin
 from .onepayment import OnePaymentPaymentMixin
+from .aurapay import AurapayPaymentMixin
 
 __all__ = [
     "PaymentCommonMixin",
@@ -28,4 +29,5 @@ __all__ = [
     "PlategaPaymentMixin",
     "WataPaymentMixin",
     "OnePaymentPaymentMixin",
+    "AurapayPaymentMixin",
 ]

@@ -41,6 +41,8 @@ def _method_display(method: PaymentMethod) -> str:
         return settings.get_platega_display_name()
     if method == PaymentMethod.ONEPAYMENT:
         return settings.get_onepayment_display_name()
+    if method == PaymentMethod.AURAPAY:
+        return settings.get_aurapay_display_name()
     if method == PaymentMethod.CRYPTOBOT:
         return "CryptoBot"
     if method == PaymentMethod.TELEGRAM_STARS:

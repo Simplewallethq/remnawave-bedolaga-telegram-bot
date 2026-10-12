@@ -395,6 +395,7 @@ async def main():
                 settings.is_wata_configured(),
                 settings.is_heleket_service_enabled(),
                 settings.is_platega_configured(),
+                settings.is_aurapay_configured(),
                 settings.is_cloudpayments_enabled(),
             ]
         )

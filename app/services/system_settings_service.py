@@ -92,6 +92,7 @@ class BotConfigurationService:
         "PAL24": "🏦 PAL24 / PayPalych",
         "WATA": "💠 Wata",
         "ONEPAYMENT": "🏦 1Payment (СБП)",
+        "AURAPAY": "🌀 AuraPay",
         "EXTERNAL_ADMIN": "🛡️ Внешняя админка",
         "SUBSCRIPTIONS_CORE": "📅 Подписки и лимиты",
         "SIMPLE_SUBSCRIPTION": "⚡ Простая покупка",
@@ -160,6 +161,11 @@ class BotConfigurationService:
             "1Payment (СБП с рекуррентами): ключи проекта, поверхности роутера и "
             "рубильник автосписаний ONEPAYMENT_RECURRING_ENABLED. Как и веса роутера, "
             "рубильник НЕ кладите в .env — иначе админка перестанет его переключать."
+        ),
+        "AURAPAY": (
+            "AuraPay (карта / СБП): касса, ключи и пределы сумм. Глобальный вес "
+            "роутера 0 — шлюз выпадает только у витрин со своими весами "
+            "(scripts.copycats weights BOT aurapay=1)."
         ),
         "EXTERNAL_ADMIN": "Токен внешней админки для проверки запросов.",
         "SUBSCRIPTIONS_CORE": "Лимиты устройств, трафика и базовые цены подписок.",
@@ -351,6 +357,7 @@ class BotConfigurationService:
         "PAYMENT_VERIFICATION_": "PAYMENT_VERIFICATION",
         "WATA_": "WATA",
         "ONEPAYMENT_": "ONEPAYMENT",
+        "AURAPAY_": "AURAPAY",
         "EXTERNAL_ADMIN_": "EXTERNAL_ADMIN",
         "SIMPLE_SUBSCRIPTION_": "SIMPLE_SUBSCRIPTION",
         "CONNECT_BUTTON_HAPP": "HAPP",
