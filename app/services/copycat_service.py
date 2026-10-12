@@ -246,7 +246,10 @@ class CopycatRuntime:
             await self._import_legacy_if_empty()
         except Exception as error:
             logger.error("Импорт mirror_bots.yaml в БД не удался: %s", error)
-        await self.sync()
+        try:
+            await self.sync()
+        except Exception as error:
+            logger.exception("Витрины не поднялись на старте: %s", error)
         self._initialized = True
         return self.live_bots()
 
@@ -319,6 +322,10 @@ class CopycatRuntime:
         async with self._lock:
             async with AsyncSessionLocal() as db:
                 rows = await list_copycat_bots(db)
+                # Дальше идут запросы в Telegram, а прод рвёт соединения,
+                # простаивающие в транзакции дольше секунды: закрываем её
+                # сразу (expire_on_commit=False — записи остаются загруженными).
+                await db.commit()
                 rows_by_id = {row.id: row for row in rows}
 
                 # Удалённые из таблицы.
