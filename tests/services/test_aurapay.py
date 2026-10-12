@@ -317,6 +317,29 @@ async def test_paid_webhook_credits_once_and_talks_through_users_bot(monkeypatch
 
 
 @pytest.mark.anyio
+async def test_primary_bot_user_paying_in_storefront_hears_back_in_storefront(monkeypatch):
+    payment = DummyPayment(
+        metadata_json={
+            "invoice_message": {"chat_id": 100, "message_id": 5},
+            "payment_router": {"bot_id": 777},
+        }
+    )
+    user = DummyUser()
+    user.bot_id = None  # зарегистрирован в основном боте
+    _patch_finalize(monkeypatch, payment, user)
+    primary, storefront = RecordingBot("primary"), RecordingBot("storefront")
+    bot_registry.register_bot(777, Path("logo.png"), storefront)
+    service = _make_service(StubAurapayService(), bot=primary)
+    body = dict(DOC_BODY, order_id=payment.order_id, amount="290.00")
+
+    assert await service.process_aurapay_webhook(DummySession(), body) is True
+
+    assert storefront.deleted == [(100, 5)]
+    assert len(storefront.sent) == 1
+    assert primary.sent == [] and primary.deleted == []
+
+
+@pytest.mark.anyio
 async def test_webhook_from_other_shop_or_underpaid_is_not_credited(monkeypatch):
     payment = DummyPayment()
     user = DummyUser()

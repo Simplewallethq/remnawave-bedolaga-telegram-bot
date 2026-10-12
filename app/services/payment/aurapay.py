@@ -3,7 +3,8 @@
 Шлюз живёт только в роутере платежей: глобальный вес 0, выпадает у витрин с
 собственными весами (`scripts.copycats weights BOT aurapay=1`). Поэтому всё,
 что уходит пользователю (удаление счёта, сообщение об успехе), идёт через бот,
-в котором он зарегистрирован, — основной бот пользователю витрины писать не может.
+выставивший счёт (`payment_router.bot_id`), — пользователь основного бота мог
+оплатить в витрине, и ответ должен прийти туда же.
 
 Защита от повторного зачёта — атомарный CAS: AuraPay ретраит вебхук до 5 раз,
 параллельно могут прийти «Проверить оплату» и автосверка.
@@ -19,7 +20,7 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.branding.context import use_brand_for_user
+from app.branding.context import brand_scope
 from app.config import settings
 from app.database.models import AurapayPayment, PaymentMethod, TransactionType
 from app.services.aurapay_service import AurapayAPIError
@@ -32,7 +33,7 @@ from app.services.tariff_partial_payment_service import (
     build_invoice_checkout_snapshot,
     extract_checkout_snapshot,
 )
-from app.utils.bot_registry import bot_for_user
+from app.utils.bot_registry import bot_for_user, get_bot_instance
 from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
 
@@ -52,6 +53,19 @@ def parse_amount_to_kopeks(raw: Any) -> Optional[int]:
 
 class AurapayPaymentMixin:
     """Создание счетов AuraPay, вебхук, проверка статуса и зачисление."""
+
+    def _aurapay_payment_bot(self, payment: Any, user: Any) -> tuple:
+        """(бот, bot_id бренда) для сообщений по счёту: бот, где выставлен счёт,
+        иначе бот регистрации пользователя, иначе основной."""
+        base = getattr(self, "bot", None)
+        if base is None:
+            return None, None
+        router_meta = (getattr(payment, "metadata_json", None) or {}).get("payment_router") or {}
+        bot_id = router_meta.get("bot_id")
+        invoice_bot = get_bot_instance(bot_id)
+        if invoice_bot is not None:
+            return invoice_bot, bot_id
+        return bot_for_user(user, base), getattr(user, "bot_id", None)
 
     async def create_aurapay_payment(
         self,
@@ -282,7 +296,7 @@ class AurapayPaymentMixin:
             logger.error("Пользователь %s не найден при обработке AuraPay", payment.user_id)
             return payment
 
-        user_bot = bot_for_user(user, getattr(self, "bot", None)) if getattr(self, "bot", None) else None
+        user_bot, brand_bot_id = self._aurapay_payment_bot(payment, user)
 
         existing_metadata = dict(getattr(payment, "metadata_json", {}) or {})
         invoice_message = existing_metadata.get("invoice_message") or {}
@@ -385,7 +399,7 @@ class AurapayPaymentMixin:
                     auto_purchase_success = await auto_purchase_saved_cart_after_topup(
                         db,
                         user,
-                        bot=getattr(self, "bot", None),
+                        bot=user_bot,
                         checkout_snapshot=checkout_snapshot,
                     )
                 except Exception as auto_error:
@@ -399,16 +413,16 @@ class AurapayPaymentMixin:
             logger.debug("Не удалось проверить корзину после AuraPay: %s", error)
 
         if not auto_purchase_success:
-            await self._notify_aurapay_topup(user, credit_amount_kopeks)
+            await self._notify_aurapay_topup(user, credit_amount_kopeks, user_bot, brand_bot_id)
 
         return payment
 
-    async def _notify_aurapay_topup(self, user: Any, amount_kopeks: int) -> None:
-        bot = getattr(self, "bot", None)
+    async def _notify_aurapay_topup(
+        self, user: Any, amount_kopeks: int, bot: Any, brand_bot_id: Optional[int]
+    ) -> None:
         if not bot or not getattr(user, "telegram_id", None):
             return
-        bot = bot_for_user(user, bot)
-        with use_brand_for_user(user):
+        with brand_scope(brand_bot_id):
             try:
                 keyboard = await self.build_topup_success_keyboard(user)
                 await bot.send_message(
