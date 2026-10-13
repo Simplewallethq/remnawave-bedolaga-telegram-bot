@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.utils.panel_identity import panel_description_for_user, resolve_panel_username
 from app.states import AdminStates
 from app.database.models import User, UserStatus, Subscription, SubscriptionStatus, TransactionType 
 from app.database.crud.user import (
@@ -3794,11 +3795,7 @@ async def toggle_user_server(
                     await api.update_user(
                         uuid=user.remnawave_uuid,
                         active_internal_squads=build_panel_squads(subscription, current_squads),
-                        description=settings.format_remnawave_user_description(
-                            full_name=user.full_name,
-                            username=user.username,
-                            telegram_id=user.telegram_id
-                        )
+                        description=panel_description_for_user(user)
                     )
                 logger.info(f"✅ Обновлены серверы в RemnaWave для пользователя {user.telegram_id}")
             except Exception as rw_error:
@@ -4183,11 +4180,7 @@ async def _update_user_devices(db: AsyncSession, user_id: int, devices: int, adm
                     await api.update_user(
                         uuid=user.remnawave_uuid,
                         hwid_device_limit=devices,
-                        description=settings.format_remnawave_user_description(
-                            full_name=user.full_name,
-                            username=user.username,
-                            telegram_id=user.telegram_id
-                        )
+                        description=panel_description_for_user(user)
                     )
                 logger.info(f"✅ Обновлен лимит устройств в RemnaWave для пользователя {user.telegram_id}")
             except Exception as rw_error:
@@ -4226,11 +4219,7 @@ async def _update_user_traffic(db: AsyncSession, user_id: int, traffic_gb: int, 
                         uuid=user.remnawave_uuid,
                         traffic_limit_bytes=traffic_gb * (1024**3) if traffic_gb > 0 else 0,
                         traffic_limit_strategy=TrafficLimitStrategy.MONTH,
-                        description=settings.format_remnawave_user_description(
-                            full_name=user.full_name,
-                            username=user.username,
-                            telegram_id=user.telegram_id
-                        )
+                        description=panel_description_for_user(user)
                     )
                 logger.info(f"✅ Обновлен лимит трафика в RemnaWave для пользователя {user.telegram_id}")
             except Exception as rw_error:
@@ -5060,11 +5049,7 @@ async def admin_buy_subscription_execute(
                             expire_at=subscription.end_date,
                             traffic_limit_bytes=subscription.traffic_limit_gb * (1024**3) if subscription.traffic_limit_gb > 0 else 0,
                             traffic_limit_strategy=TrafficLimitStrategy.MONTH,
-                            description=settings.format_remnawave_user_description(
-                                full_name=target_user.full_name,
-                                username=target_user.username,
-                                telegram_id=target_user.telegram_id
-                            ),
+                            description=panel_description_for_user(target_user),
                             active_internal_squads=build_panel_squads(subscription),
                         )
 
@@ -5073,24 +5058,15 @@ async def admin_buy_subscription_execute(
 
                         remnawave_user = await api.update_user(**update_kwargs)
                 else:
-                    username = settings.format_remnawave_username(
-                        full_name=target_user.full_name,
-                        username=target_user.username,
-                        telegram_id=target_user.telegram_id,
-                    )
                     async with remnawave_service.get_api_client() as api:
                         create_kwargs = dict(
-                            username=username,
+                            username=await resolve_panel_username(api, target_user),
                             expire_at=subscription.end_date,
                             status=UserStatus.ACTIVE if subscription.is_active else UserStatus.EXPIRED,
                             traffic_limit_bytes=subscription.traffic_limit_gb * (1024**3) if subscription.traffic_limit_gb > 0 else 0,
                             traffic_limit_strategy=TrafficLimitStrategy.MONTH,
                             telegram_id=target_user.telegram_id,
-                            description=settings.format_remnawave_user_description(
-                                full_name=target_user.full_name,
-                                username=target_user.username,
-                                telegram_id=target_user.telegram_id
-                            ),
+                            description=panel_description_for_user(target_user),
                             active_internal_squads=build_panel_squads(subscription),
                         )
 

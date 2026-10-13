@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.utils.panel_identity import panel_description_for_user
 from app.database.database import get_db
 from app.database.crud.discount_offer import (
     deactivate_expired_offers,
@@ -493,11 +494,7 @@ class MonitoringService:
                     expire_at=subscription.end_date,
                     traffic_limit_bytes=self._gb_to_bytes(subscription.traffic_limit_gb),
                     traffic_limit_strategy=TrafficLimitStrategy.MONTH,
-                    description=settings.format_remnawave_user_description(
-                        full_name=user.full_name,
-                        username=user.username,
-                        telegram_id=user.telegram_id
-                    ),
+                    description=panel_description_for_user(user),
                     active_internal_squads=build_panel_squads(subscription),
                 )
 
@@ -535,7 +532,7 @@ class MonitoringService:
                     if not user:
                         continue
 
-                    user_key = f"user_{user.telegram_id}_today"
+                    user_key = f"user_{user.id}_today"
 
                     if (await notification_sent(db, user.id, subscription.id, "expiring", days) or
                         user_key in all_processed_users):

@@ -9,6 +9,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from app.config import settings
+from app.utils.panel_identity import (
+    is_scoped_account,
+    panel_description_for_user,
+    resolve_panel_username,
+)
 from app.external.remnawave_api import (
     RemnaWaveAPI, RemnaWaveUser, RemnaWaveInternalSquad,
     RemnaWaveNode, UserStatus, TrafficLimitStrategy, RemnaWaveAPIError
@@ -1444,11 +1449,28 @@ class RemnaWaveService:
                 .options(selectinload(User.subscription))
             )
             bot_users = bot_users_result.scalars().all()
-            bot_users_by_telegram_id = {user.telegram_id: user for user in bot_users}
+            # По telegram_id сопоставляем только старые общие аккаунты: у нового
+            # пользователя аккаунт на каждый бот, и под одним telegramId в панели
+            # лежит несколько юзеров — их сопоставляем только по UUID.
+            bot_users_by_telegram_id = {
+                user.telegram_id: user
+                for user in bot_users
+                if not is_scoped_account(user)
+            }
+            scoped_telegram_ids = {
+                user.telegram_id
+                for user in bot_users
+                if is_scoped_account(user) and user.telegram_id is not None
+            }
             bot_users_by_uuid = {
                 user.remnawave_uuid: user
                 for user in bot_users
                 if getattr(user, "remnawave_uuid", None)
+            }
+            scoped_uuids = {
+                str(user.remnawave_uuid)
+                for user in bot_users
+                if is_scoped_account(user) and getattr(user, "remnawave_uuid", None)
             }
 
             logger.info(f"📊 Пользователей в боте: {len(bot_users)}")
@@ -1460,9 +1482,17 @@ class RemnaWaveService:
 
             logger.info(f"📊 Пользователей в панели с Telegram ID: {len(panel_users_with_tg)}")
 
-            unique_panel_users_map = self._deduplicate_panel_users_by_telegram_id(panel_users_with_tg)
+            # Панельные юзеры аккаунтов ботов не схлопываем по telegramId.
+            scoped_panel_users = [
+                user for user in panel_users_with_tg
+                if str(user.get('uuid')) in scoped_uuids
+            ]
+            unique_panel_users_map = self._deduplicate_panel_users_by_telegram_id(
+                [user for user in panel_users_with_tg if str(user.get('uuid')) not in scoped_uuids]
+            )
             unique_panel_users = list(unique_panel_users_map.values())
-            duplicates_count = len(panel_users_with_tg) - len(unique_panel_users)
+            duplicates_count = len(panel_users_with_tg) - len(scoped_panel_users) - len(unique_panel_users)
+            unique_panel_users.extend(scoped_panel_users)
 
             if duplicates_count:
                 logger.info(
@@ -1507,8 +1537,23 @@ class RemnaWaveService:
                     if (i + 1) % 10 == 0:
                         logger.info(f"🔄 Обрабатываем пользователя {i+1}/{len(unique_panel_users)}: {telegram_id}")
                     
-                    db_user = bot_users_by_telegram_id.get(telegram_id)
-                    
+                    panel_uuid = str(panel_user.get('uuid'))
+                    if panel_uuid in scoped_uuids:
+                        db_user = bot_users_by_uuid.get(panel_user.get('uuid'))
+                    else:
+                        db_user = bot_users_by_telegram_id.get(telegram_id)
+
+                    if not db_user and telegram_id in scoped_telegram_ids:
+                        # У этого Telegram ID аккаунты по ботам, а панельный юзер ни
+                        # к одному не привязан по UUID — не угадываем, чей он.
+                        logger.warning(
+                            "⏭️ Пропуск панельного юзера %s (telegram_id %s): не привязан ни к одному аккаунту бота",
+                            panel_uuid,
+                            telegram_id,
+                        )
+                        stats["skipped"] += 1
+                        continue
+
                     if not db_user:
                         if sync_type in ["new_only", "all"]:
                             logger.info(f"🆕 Создание пользователя для telegram_id {telegram_id}")
@@ -2163,24 +2208,13 @@ class RemnaWaveService:
                                 )
                                 status = UserStatus.ACTIVE if is_subscription_active else UserStatus.DISABLED
 
-                                username = settings.format_remnawave_username(
-                                    full_name=user.full_name,
-                                    username=user.username,
-                                    telegram_id=user.telegram_id,
-                                )
-
                                 create_kwargs = dict(
-                                    username=username,
                                     expire_at=expire_at,
                                     status=status,
                                     traffic_limit_bytes=sub.traffic_limit_gb * (1024**3) if sub.traffic_limit_gb > 0 else 0,
                                     traffic_limit_strategy=TrafficLimitStrategy.MONTH,
                                     telegram_id=user.telegram_id,
-                                    description=settings.format_remnawave_user_description(
-                                        full_name=user.full_name,
-                                        username=user.username,
-                                        telegram_id=user.telegram_id
-                                    ),
+                                    description=panel_description_for_user(user),
                                     active_internal_squads=build_panel_squads(sub),
                                 )
 
@@ -2190,8 +2224,9 @@ class RemnaWaveService:
                                 # Определяем UUID для обновления
                                 panel_uuid = user.remnawave_uuid
 
-                                # Если нет UUID в базе, ищем пользователя по telegram_id в панели
-                                if not panel_uuid:
+                                # Если нет UUID в базе, ищем пользователя по telegram_id в панели.
+                                # Аккаунт бота так не ищем: под этим telegram_id лежит другой аккаунт.
+                                if not panel_uuid and not is_scoped_account(user):
                                     existing_users = await api.get_user_by_telegram_id(user.telegram_id)
                                     if existing_users:
                                         panel_uuid = existing_users[0].uuid
@@ -2219,12 +2254,18 @@ class RemnaWaveService:
                                         return ("updated", sub, None)
                                     except RemnaWaveAPIError as api_error:
                                         if api_error.status_code == 404:
-                                            new_user = await api.create_user(**create_kwargs)
+                                            new_user = await api.create_user(
+                                                username=await resolve_panel_username(api, user),
+                                                **create_kwargs,
+                                            )
                                             return ("created", sub, new_user)
                                         else:
                                             raise
                                 else:
-                                    new_user = await api.create_user(**create_kwargs)
+                                    new_user = await api.create_user(
+                                        username=await resolve_panel_username(api, user),
+                                        **create_kwargs,
+                                    )
                                     return ("created", sub, new_user)
 
                             except Exception as e:

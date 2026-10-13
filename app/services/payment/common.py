@@ -12,11 +12,12 @@ from types import SimpleNamespace
 from typing import Any
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import MissingGreenlet
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database.crud.user import get_user_by_telegram_id
+from app.database.crud.user import get_user_by_id, get_user_by_telegram_id
 from app.database.database import get_db
 from app.localization.texts import get_texts
 from app.services.subscription_checkout_service import (
@@ -120,11 +121,26 @@ class PaymentCommonMixin:
         if snapshot is not None:
             return snapshot
 
+        # У одного telegram_id может быть несколько аккаунтов (по боту) —
+        # перечитываем по первичному ключу, если он известен.
+        user_id = None
+        if user is not None:
+            try:
+                identity = sa_inspect(user).identity
+                user_id = identity[0] if identity else None
+            except Exception:
+                user_id = None
+
+        async def _fetch(session: AsyncSession) -> Any | None:
+            if user_id is not None:
+                return await get_user_by_id(session, user_id)
+            return await get_user_by_telegram_id(session, telegram_id)
+
         fetch_session = db
 
         if fetch_session is not None:
             try:
-                fetched_user = await get_user_by_telegram_id(fetch_session, telegram_id)
+                fetched_user = await _fetch(fetch_session)
                 return _build_snapshot(fetched_user)
             except Exception as fetch_error:
                 logger.warning(
@@ -135,7 +151,7 @@ class PaymentCommonMixin:
 
         try:
             async for db_session in get_db():
-                fetched_user = await get_user_by_telegram_id(db_session, telegram_id)
+                fetched_user = await _fetch(db_session)
                 return _build_snapshot(fetched_user)
         except Exception as fetch_error:
             logger.warning(

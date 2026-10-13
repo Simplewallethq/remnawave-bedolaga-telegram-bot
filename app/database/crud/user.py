@@ -54,7 +54,36 @@ async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[User]:
     return user
 
 
-async def get_user_by_telegram_id(db: AsyncSession, telegram_id: int) -> Optional[User]:
+def _scope_for(bot_id: Optional[int]) -> Optional[int]:
+    from app.branding.context import current_bot_id
+    from app.utils.bot_registry import account_scope_for_bot
+
+    return account_scope_for_bot(bot_id if bot_id is not None else current_bot_id())
+
+
+def telegram_account_clause(telegram_id: int, bot_id: Optional[int] = None):
+    """Аккаунты telegram_id, видимые из бота: старый общий или аккаунт скоупа бота.
+
+    bot_id по умолчанию — бот текущего апдейта; вне апдейта — основной.
+    """
+    scope = _scope_for(bot_id)
+    scope_condition = User.account_scope_bot_id.is_(None)
+    if scope is not None:
+        scope_condition = or_(scope_condition, User.account_scope_bot_id == scope)
+    return and_(User.telegram_id == telegram_id, scope_condition)
+
+
+async def get_user_by_telegram_id(
+    db: AsyncSession,
+    telegram_id: int,
+    *,
+    bot_id: Optional[int] = None,
+) -> Optional[User]:
+    """Аккаунт пользователя Telegram в боте `bot_id` (по умолчанию — бот апдейта).
+
+    Старый общий аккаунт (заведён до разделения) находится в любом боте и
+    имеет приоритет; новые пользователи получают отдельный аккаунт на скоуп.
+    """
     result = await db.execute(
         select(User)
         .options(
@@ -63,15 +92,27 @@ async def get_user_by_telegram_id(db: AsyncSession, telegram_id: int) -> Optiona
             selectinload(User.referrer),
             selectinload(User.promo_group),
         )
-        .where(User.telegram_id == telegram_id)
+        .where(telegram_account_clause(telegram_id, bot_id))
+        .order_by(User.account_scope_bot_id.is_not(None), User.id)
+        .limit(1)
     )
-    user = result.scalar_one_or_none()
+    user = result.scalars().first()
 
     if user and user.subscription:
         # Загружаем дополнительные зависимости для subscription
         _ = user.subscription.is_active
 
     return user
+
+
+async def get_users_by_telegram_id(db: AsyncSession, telegram_id: int) -> List[User]:
+    """Все аккаунты telegram_id во всех ботах (для админских операций над человеком)."""
+    result = await db.execute(
+        select(User)
+        .where(User.telegram_id == telegram_id)
+        .order_by(User.id)
+    )
+    return list(result.scalars().all())
 
 
 async def get_user_by_username(db: AsyncSession, username: str) -> Optional[User]:
@@ -306,6 +347,7 @@ async def create_user_no_commit(
         has_made_first_topup=False,
         promo_group_id=promo_group_id,
         bot_id=bot_id,
+        account_scope_bot_id=_scope_for(bot_id),
     )
 
     db.add(user)
@@ -361,6 +403,7 @@ async def create_user(
             has_made_first_topup=False,
             promo_group_id=promo_group_id,
             bot_id=bot_id,
+            account_scope_bot_id=_scope_for(bot_id),
         )
 
         db.add(user)

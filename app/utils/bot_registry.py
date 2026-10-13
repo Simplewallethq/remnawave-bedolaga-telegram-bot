@@ -161,6 +161,18 @@ def is_primary_bot(bot_id: int | None) -> bool:
     return primary_bot_id is not None and bot_id == primary_bot_id
 
 
+def account_scope_for_bot(bot_id: int | None) -> int | None:
+    """Скоуп аккаунта, который заводит новый пользователь в этом боте.
+
+    Копикет — свой аккаунт на каждого бота. Основной бот и копии Leto делят
+    один аккаунт: скоуп — id основного бота. Вне апдейта (кабинет, web API)
+    бота нет, и это тоже скоуп основного.
+    """
+    if bot_id is not None and is_copycat_bot(bot_id):
+        return bot_id
+    return _primary_bot_id()
+
+
 def clear() -> None:
     _registry.clear()
     _instances.clear()

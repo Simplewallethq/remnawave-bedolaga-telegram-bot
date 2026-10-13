@@ -3298,6 +3298,121 @@ async def ensure_user_bot_id_column():
         return False
 
 
+_USER_ACCOUNT_SCOPE_INDEXES = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_tg_legacy ON users (telegram_id) "
+    "WHERE account_scope_bot_id IS NULL",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_tg_scope ON users (telegram_id, account_scope_bot_id) "
+    "WHERE account_scope_bot_id IS NOT NULL",
+)
+
+
+async def ensure_user_account_scope() -> bool:
+    """Отдельный аккаунт нового пользователя на каждый бот.
+
+    users.telegram_id перестаёт быть уникальным: уникальны старый общий аккаунт
+    (account_scope_bot_id IS NULL) и пара (telegram_id, скоуп). Существующие
+    строки остаются общими — колонка не заполняется. FK на users.telegram_id
+    (button_click_logs) снимается: он держится только на уникальности.
+    """
+    try:
+        db_type = await get_database_type()
+
+        if db_type == "postgresql":
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("ALTER TABLE users ADD COLUMN IF NOT EXISTS account_scope_bot_id BIGINT NULL")
+                )
+                for statement in _USER_ACCOUNT_SCOPE_INDEXES:
+                    await conn.execute(text(statement))
+
+                foreign_keys = await conn.execute(
+                    text(
+                        """
+                        SELECT c.conrelid::regclass::text, c.conname
+                        FROM pg_constraint c
+                        JOIN pg_attribute a
+                          ON a.attrelid = c.confrelid AND a.attnum = ANY (c.confkey)
+                        WHERE c.contype = 'f'
+                          AND c.confrelid = 'users'::regclass
+                          AND a.attname = 'telegram_id'
+                        """
+                    )
+                )
+                for table_name, constraint_name in foreign_keys.fetchall():
+                    await conn.execute(
+                        text(f'ALTER TABLE {table_name} DROP CONSTRAINT "{constraint_name}"')
+                    )
+                    logger.info(f"✅ Снят FK {constraint_name} на users.telegram_id")
+
+                unique_constraints = await conn.execute(
+                    text(
+                        """
+                        SELECT c.conname
+                        FROM pg_constraint c
+                        JOIN pg_attribute a
+                          ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+                        WHERE c.contype = 'u'
+                          AND c.conrelid = 'users'::regclass
+                          AND array_length(c.conkey, 1) = 1
+                          AND a.attname = 'telegram_id'
+                        """
+                    )
+                )
+                for (constraint_name,) in unique_constraints.fetchall():
+                    await conn.execute(
+                        text(f'ALTER TABLE users DROP CONSTRAINT "{constraint_name}"')
+                    )
+                    logger.info(f"✅ Снята уникальность {constraint_name} с users.telegram_id")
+
+                # Уникальный индекс без констрейнта (так его создаёт SQLAlchemy при
+                # unique=True, index=True) — полный, на одной колонке telegram_id.
+                unique_indexes = await conn.execute(
+                    text(
+                        """
+                        SELECT ic.relname
+                        FROM pg_index i
+                        JOIN pg_class ic ON ic.oid = i.indexrelid
+                        JOIN pg_attribute a
+                          ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0]
+                        WHERE i.indrelid = 'users'::regclass
+                          AND i.indisunique
+                          AND i.indnatts = 1
+                          AND i.indpred IS NULL
+                          AND a.attname = 'telegram_id'
+                        """
+                    )
+                )
+                # Обычный индекс для поиска — idx_users_telegram_id из init_db.
+                for (index_name,) in unique_indexes.fetchall():
+                    await conn.execute(text(f'DROP INDEX "{index_name}"'))
+                    logger.info(f"✅ Снят уникальный индекс {index_name} с users.telegram_id")
+
+            logger.info("✅ Скоуп аккаунтов пользователей готов")
+            return True
+
+        if db_type == "sqlite":
+            async with engine.begin() as conn:
+                if not await check_column_exists("users", "account_scope_bot_id"):
+                    await conn.execute(
+                        text("ALTER TABLE users ADD COLUMN account_scope_bot_id BIGINT NULL")
+                    )
+                for statement in _USER_ACCOUNT_SCOPE_INDEXES:
+                    await conn.execute(text(statement))
+            # SQLite не снимает UNIQUE без пересоздания таблицы; dev-база.
+            logger.warning(
+                "⚠️ SQLite: старая уникальность users.telegram_id остаётся "
+                "(пересоздайте dev-базу; на проде PostgreSQL)"
+            )
+            return True
+
+        logger.error(f"Неподдерживаемый тип БД для скоупа аккаунтов: {db_type}")
+        return False
+
+    except Exception as e:
+        logger.error(f"Ошибка настройки скоупа аккаунтов пользователей: {e}")
+        return False
+
+
 async def ensure_device_link_revoked_at_column():
     try:
         async with engine.begin() as conn:
@@ -5257,7 +5372,7 @@ async def create_button_click_logs_table() -> bool:
                 CREATE TABLE button_click_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     button_id VARCHAR(100) NOT NULL,
-                    user_id BIGINT NULL REFERENCES users(telegram_id) ON DELETE SET NULL,
+                    user_id BIGINT NULL,
                     callback_data VARCHAR(255) NULL,
                     clicked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     button_type VARCHAR(20) NULL,
@@ -5269,7 +5384,7 @@ async def create_button_click_logs_table() -> bool:
                 CREATE TABLE button_click_logs (
                     id SERIAL PRIMARY KEY,
                     button_id VARCHAR(100) NOT NULL,
-                    user_id BIGINT NULL REFERENCES users(telegram_id) ON DELETE SET NULL,
+                    user_id BIGINT NULL,
                     callback_data VARCHAR(255) NULL,
                     clicked_at TIMESTAMP DEFAULT NOW(),
                     button_type VARCHAR(20) NULL,
@@ -5285,8 +5400,7 @@ async def create_button_click_logs_table() -> bool:
                     callback_data VARCHAR(255) NULL,
                     clicked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     button_type VARCHAR(20) NULL,
-                    button_text VARCHAR(255) NULL,
-                    FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE SET NULL
+                    button_text VARCHAR(255) NULL
                 ) ENGINE=InnoDB
                 """
 
@@ -8702,6 +8816,12 @@ async def run_universal_migration():
             logger.info("✅ Колонка bot_id добавлена")
         else:
             logger.warning("⚠️ Не удалось добавить колонку bot_id")
+
+        logger.info("=== ОТДЕЛЬНЫЕ АККАУНТЫ ПОЛЬЗОВАТЕЛЕЙ ПО БОТАМ ===")
+        if await ensure_user_account_scope():
+            logger.info("✅ Скоуп аккаунтов по ботам готов")
+        else:
+            logger.warning("⚠️ Не удалось настроить скоуп аккаунтов по ботам")
 
         logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ BOT_SCOPE В BROADCAST_HISTORY ===")
         bot_scope_ready = await ensure_broadcast_history_bot_scope_column()

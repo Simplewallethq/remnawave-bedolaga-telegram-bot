@@ -7,6 +7,7 @@ from aiogram.types import Message, CallbackQuery, TelegramObject, User as TgUser
 from aiogram.fsm.context import FSMContext
 
 from app.config import settings
+from app.utils.panel_identity import panel_description_for_user
 from app.database.database import get_db
 from app.database.crud.user import get_user_by_telegram_id, create_user
 from app.services.remnawave_service import RemnaWaveService
@@ -185,11 +186,7 @@ class AuthMiddleware(BaseMiddleware):
                         logger.info(f"💾 [Middleware] Профиль пользователя {user.id} обновлен в middleware")
 
                         if db_user.remnawave_uuid:
-                            description = settings.format_remnawave_user_description(
-                                full_name=db_user.full_name,
-                                username=db_user.username,
-                                telegram_id=db_user.telegram_id
-                            )
+                            description = panel_description_for_user(db_user)
                             asyncio.create_task(
                                 _refresh_remnawave_description(
                                     remnawave_uuid=db_user.remnawave_uuid,

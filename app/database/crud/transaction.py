@@ -382,8 +382,8 @@ async def find_tribute_transactions_by_payment_id(
     )
     
     if user_telegram_id:
-        from app.database.models import User
-        query = query.join(User).where(User.telegram_id == user_telegram_id)
+        from app.database.crud.user import telegram_account_clause
+        query = query.join(User).where(telegram_account_clause(user_telegram_id))
     
     result = await db.execute(query.order_by(Transaction.created_at.desc()))
     return result.scalars().all()
@@ -395,6 +395,8 @@ async def check_tribute_payment_duplicate(
     amount_kopeks: int,
     user_telegram_id: int
 ) -> Optional[Transaction]:
+    from app.database.crud.user import telegram_account_clause
+
     cutoff_time = datetime.utcnow() - timedelta(hours=24)
     
     exact_external_id = f"donation_{payment_id}"
@@ -407,7 +409,7 @@ async def check_tribute_payment_duplicate(
             Transaction.is_completed == True,
             Transaction.created_at >= cutoff_time  
         )
-    ).join(User).where(User.telegram_id == user_telegram_id)
+    ).join(User).where(telegram_account_clause(user_telegram_id))
     
     result = await db.execute(query)
     transaction = result.scalar_one_or_none()

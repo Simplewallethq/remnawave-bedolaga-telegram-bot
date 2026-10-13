@@ -22,7 +22,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, Mapped, mapped_column
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 
 
 Base = declarative_base()
@@ -903,10 +903,29 @@ class UserPromoGroup(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index(
+            "uq_users_tg_legacy",
+            "telegram_id",
+            unique=True,
+            postgresql_where=text("account_scope_bot_id IS NULL"),
+            sqlite_where=text("account_scope_bot_id IS NULL"),
+        ),
+        Index(
+            "uq_users_tg_scope",
+            "telegram_id",
+            "account_scope_bot_id",
+            unique=True,
+            postgresql_where=text("account_scope_bot_id IS NOT NULL"),
+            sqlite_where=text("account_scope_bot_id IS NOT NULL"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    # telegram_id может быть NULL для пользователей, зарегистрированных через веб-кабинет
-    telegram_id = Column(BigInteger, unique=True, index=True, nullable=True)
+    # telegram_id может быть NULL для пользователей, зарегистрированных через веб-кабинет.
+    # Не уникален: у нового пользователя свой аккаунт на каждый скоуп бота
+    # (account_scope_bot_id), см. индексы в __table_args__.
+    telegram_id = Column(BigInteger, index=True, nullable=True)
     username = Column(String(255), nullable=True)
     first_name = Column(String(255), nullable=True)
     last_name = Column(String(255), nullable=True)
@@ -974,6 +993,10 @@ class User(Base):
     poll_responses = relationship("PollResponse", back_populates="user")
     last_pinned_message_id = Column(Integer, nullable=True)
     bot_id = Column(BigInteger, nullable=True)
+    # Скоуп аккаунта: NULL — старый общий аккаунт (один на все боты, заведён до
+    # разделения); иначе Telegram id копикета или основного бота (скоуп Leto:
+    # основной + его копии). Пара (telegram_id, скоуп) уникальна.
+    account_scope_bot_id = Column(BigInteger, nullable=True)
     raw_start_payload = Column(String(64), nullable=True)
     attribution_source = Column(String(100), nullable=True)
     attribution_campaign_id = Column(String(8), nullable=True, index=True)
@@ -2801,7 +2824,7 @@ class ButtonClickLog(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     button_id = Column(String(100), nullable=False, index=True)  # ID кнопки
-    user_id = Column(BigInteger, ForeignKey("users.telegram_id", ondelete="SET NULL"), nullable=True, index=True)
+    user_id = Column(BigInteger, nullable=True, index=True)  # Telegram id (users.telegram_id не уникален)
     callback_data = Column(String(255), nullable=True)  # callback_data кнопки
     clicked_at = Column(DateTime, default=func.now(), index=True)
 
@@ -2813,9 +2836,6 @@ class ButtonClickLog(Base):
         Index("ix_button_click_logs_button_date", "button_id", "clicked_at"),
         Index("ix_button_click_logs_user_date", "user_id", "clicked_at"),
     )
-
-    # Связи
-    user = relationship("User", foreign_keys=[user_id])
 
     def __repr__(self) -> str:
         return f"<ButtonClickLog id={self.id} button='{self.button_id}' user={self.user_id} at={self.clicked_at}>"

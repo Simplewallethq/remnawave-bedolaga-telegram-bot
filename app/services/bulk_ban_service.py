@@ -7,7 +7,7 @@ from typing import List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram import Bot
 
-from app.database.crud.user import get_user_by_telegram_id
+from app.database.crud.user import get_users_by_telegram_id
 from app.services.user_service import UserService
 from app.services.admin_notification_service import AdminNotificationService
 from app.config import settings
@@ -56,23 +56,27 @@ class BulkBanService:
         
         for telegram_id in telegram_ids:
             try:
-                # Получаем пользователя по Telegram ID
-                user = await get_user_by_telegram_id(db, telegram_id)
+                # Все аккаунты этого Telegram ID: у нового пользователя свой в каждом боте
+                users = await get_users_by_telegram_id(db, telegram_id)
                 
-                if not user:
+                if not users:
                     logger.warning(f"Пользователь с Telegram ID {telegram_id} не найден")
                     not_found_users.append(telegram_id)
                     continue
                 
                 # Проверяем, что пользователь не заблокирован уже
-                if user.status == UserStatus.BLOCKED.value:
+                to_ban = [user for user in users if user.status != UserStatus.BLOCKED.value]
+                if not to_ban:
                     logger.info(f"Пользователь {telegram_id} уже заблокирован")
                     continue
                 
                 # Блокируем пользователя
-                ban_success = await self.user_service.block_user(
-                    db, user.id, admin_user_id, reason
-                )
+                ban_success = True
+                for user in to_ban:
+                    if not await self.user_service.block_user(
+                        db, user.id, admin_user_id, reason
+                    ):
+                        ban_success = False
                 
                 if ban_success:
                     successfully_banned += 1

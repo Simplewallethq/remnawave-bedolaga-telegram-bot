@@ -17,6 +17,12 @@ from app.utils.pricing_utils import (
     calculate_prorated_price,
     validate_pricing_calculation
 )
+from app.utils.panel_identity import (
+    base_panel_username,
+    find_panel_user,
+    panel_description_for_user,
+    resolve_panel_username,
+)
 from app.utils.panel_squads import build_panel_squads
 from app.utils.subscription_utils import (
     resolve_hwid_device_limit_for_payload,
@@ -192,29 +198,11 @@ class SubscriptionService:
             async with self.get_api_client() as api:
                 hwid_limit = resolve_hwid_device_limit_for_payload(subscription)
 
-                if user.telegram_id:
-                    username = settings.format_remnawave_username(
-                        full_name=user.full_name,
-                        username=user.username,
-                        telegram_id=user.telegram_id,
-                    )
-                else:
-                    # Веб-пользователь без Telegram: детерминированный username.
-                    # Паддинг до 10 символов — RemnaWave требует username длиннее 5.
-                    username = f"web_{user.id:06d}"
-
-                # Ищем существующего пользователя панели: по telegram_id (веб-пользователи
-                # кабинета его не имеют), затем по сохранённому UUID, затем по username —
-                # иначе create_user упадёт с "username already exists".
-                remnawave_user = None
-                if user.telegram_id:
-                    existing_users = await api.get_user_by_telegram_id(user.telegram_id)
-                    if existing_users:
-                        remnawave_user = existing_users[0]
-                if remnawave_user is None and user.remnawave_uuid:
-                    remnawave_user = await api.get_user_by_uuid(user.remnawave_uuid)
-                if remnawave_user is None:
-                    remnawave_user = await api.get_user_by_username(username)
+                # Существующий панельный юзер этого аккаунта (у аккаунта бота — только
+                # по своему UUID, см. find_panel_user), иначе create_user упадёт с
+                # "username already exists" или перезапишет чужой аккаунт.
+                username = base_panel_username(user)
+                remnawave_user = await find_panel_user(api, user, username)
 
                 if remnawave_user:
                     logger.info(f"🔄 Найден существующий пользователь в панели для {user.telegram_id or user.email}")
@@ -231,11 +219,7 @@ class SubscriptionService:
                         expire_at=subscription.end_date,
                         traffic_limit_bytes=self._gb_to_bytes(subscription.traffic_limit_gb),
                         traffic_limit_strategy=get_traffic_reset_strategy(),
-                        description=settings.format_remnawave_user_description(
-                            full_name=user.full_name,
-                            username=user.username,
-                            telegram_id=user.telegram_id
-                        ),
+                        description=panel_description_for_user(user),
                         active_internal_squads=build_panel_squads(subscription),
                     )
 
@@ -258,18 +242,14 @@ class SubscriptionService:
                 else:
                     logger.info(f"🆕 Создаем нового пользователя в панели для {user.telegram_id or user.email}")
                     create_kwargs = dict(
-                        username=username,
+                        username=await resolve_panel_username(api, user),
                         expire_at=subscription.end_date,
                         status=UserStatus.ACTIVE,
                         traffic_limit_bytes=self._gb_to_bytes(subscription.traffic_limit_gb),
                         traffic_limit_strategy=get_traffic_reset_strategy(),
                         telegram_id=user.telegram_id,
                         email=user.email,
-                        description=settings.format_remnawave_user_description(
-                            full_name=user.full_name,
-                            username=user.username,
-                            telegram_id=user.telegram_id
-                        ),
+                        description=panel_description_for_user(user),
                         active_internal_squads=build_panel_squads(subscription),
                     )
 
@@ -348,11 +328,7 @@ class SubscriptionService:
                     expire_at=subscription.end_date,
                     traffic_limit_bytes=self._gb_to_bytes(subscription.traffic_limit_gb),
                     traffic_limit_strategy=get_traffic_reset_strategy(),
-                    description=settings.format_remnawave_user_description(
-                        full_name=user.full_name,
-                        username=user.username,
-                        telegram_id=user.telegram_id
-                    ),
+                    description=panel_description_for_user(user),
                     active_internal_squads=build_panel_squads(subscription),
                 )
 

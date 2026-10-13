@@ -938,7 +938,8 @@ class Settings(BaseSettings):
         *,
         full_name: str,
         username: Optional[str],
-        telegram_id: int
+        telegram_id: int,
+        bot_id: Optional[int] = None,
     ) -> str:
         template = self.REMNAWAVE_USER_DESCRIPTION_TEMPLATE or "Bot user: {full_name} {username}"
         template_for_formatting = template.replace("@{username}", "{username}")
@@ -958,6 +959,8 @@ class Settings(BaseSettings):
             description = re.sub(r'\(\s*\)', '', description)
 
         description = re.sub(r'\s+', ' ', description).strip()
+        if bot_id:
+            description = f"{description} | bot {bot_id}".lstrip(" |")
         return description
 
     def format_remnawave_username(
