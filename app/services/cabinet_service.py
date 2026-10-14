@@ -43,6 +43,7 @@ from app.utils.user_utils import (
 from app.services.plan_pricing_service import (
     get_lowest_monthly_price,
     list_active_plans,
+    select_prices_for_cohort,
 )
 from app.services.cold_solo_offer_service import cold_solo_offer_service
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
@@ -198,6 +199,20 @@ def build_support_context(user: User) -> Dict[str, Any]:
 
 # ── Тарифы ───────────────────────────────────────────────────────────────
 
+# Периоды, которые кабинет умеет купить: POST /subscription/purchase берёт
+# months от 1 до 12 и считает период как months * 30 дней.
+CABINET_PERIOD_DAYS = (30, 90, 360)
+
+
+def _plan_periods(plan, cohort: str) -> List[Dict[str, Any]]:
+    prices = select_prices_for_cohort(plan, cohort)
+    return [
+        {"months": days // 30, "days": days, "priceRub": round(kopeks / 100)}
+        for days, kopeks in sorted(prices.items())
+        if days in CABINET_PERIOD_DAYS and kopeks
+    ]
+
+
 def _plan_features(plan) -> List[Dict[str, Any]]:
     apps_only = bool(plan.custom_app_only)
     features = [
@@ -227,6 +242,7 @@ async def _serialize_plan(
         "unlimited": traffic_gb == 0,
         "popular": bool(plan.priority_support),
         "features": _plan_features(plan),
+        "periods": _plan_periods(plan, cohort),
     }
 
     if user is not None:
