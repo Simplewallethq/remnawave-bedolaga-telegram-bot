@@ -12,7 +12,7 @@ from app.utils.formatters import format_days_declension
 from app.localization.loader import DEFAULT_LANGUAGE
 from app.localization.texts import get_texts
 from app.utils.install_referrer import build_personal_play_link
-from app.branding.context import current_brand
+from app.branding.context import current_bot_id, current_brand
 from app.branding.apps import HAPP_ANDROID_PLAY_URL, HAPP_WINDOWS_DOWNLOAD_URL
 from app.utils.miniapp_buttons import build_miniapp_or_callback_button
 from app.utils.pricing_utils import (
@@ -3319,6 +3319,13 @@ def get_new_main_menu_keyboard(
     """
     texts = get_texts(language)
     keyboard = []
+
+    # Бот-платформа для владельцев витрин: из VPN-режима — в создание своего бота.
+    if settings.is_owner_platform_bot(current_bot_id()):
+        keyboard.append([InlineKeyboardButton(
+            text=texts.t("OWNER_MENU_CREATE_BOT_BUTTON", "🤖 Создать VPN бота"),
+            callback_data="wl_entry",
+        )])
     
     if not trial_used and not trial_active and not has_active_subscription:
         if paid_trial_offer:

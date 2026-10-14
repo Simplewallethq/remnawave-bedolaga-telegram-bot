@@ -8,7 +8,7 @@
 Бот перечитывает таблицы раз в COPYCAT_SYNC_INTERVAL_SECONDS: новая витрина
 поднимается и получает вебхук, выключенная гасится, правки бренда и весов
 подхватываются на лету. Писать в таблицы может кто угодно — CLI
-(`python -m scripts.copycats`), будущий бот для владельцев витрин.
+(`python -m scripts.copycats`) и бот-платформа для владельцев витрин.
 """
 
 from __future__ import annotations
@@ -132,6 +132,15 @@ def effective_gateway_weights(
         from_group = normalize_gateway_weights(group.payment_gateway_weights)
         if from_group is not None:
             return from_group, f"group:{group.name}"
+    return None
+
+
+def effective_price_scheme_id(row: CopycatBot, group: Optional[CopycatGroup]) -> Optional[int]:
+    """Ценовая схема витрины: своя, иначе группы. None — глобальные цены."""
+    if row.price_scheme_id is not None:
+        return int(row.price_scheme_id)
+    if group is not None and group.price_scheme_id is not None:
+        return int(group.price_scheme_id)
     return None
 
 
@@ -318,8 +327,13 @@ class CopycatRuntime:
     async def sync(self) -> None:
         from app.database.crud.copycat import list_copycat_bots
         from app.database.database import AsyncSessionLocal
+        from app.services.price_scheme_service import reload_schemes
 
         async with self._lock:
+            try:
+                await reload_schemes()
+            except Exception as error:
+                logger.error("Ценовые схемы не перечитались: %s", error)
             async with AsyncSessionLocal() as db:
                 rows = await list_copycat_bots(db)
                 # Дальше идут запросы в Telegram, а прод рвёт соединения,
@@ -456,6 +470,7 @@ class CopycatRuntime:
             bot_registry.set_payment_weights(tg_id, None)
         else:
             bot_registry.set_payment_weights(tg_id, weights[0], weights[1])
+        bot_registry.set_price_scheme(tg_id, effective_price_scheme_id(row, row.group))
 
     async def _bring_down(self, row_id: int, *, reason: str) -> bool:
         bot = self._live.get(row_id)

@@ -55,6 +55,7 @@ from app.database.crud.partner_link import (
 )
 from app.services.partner_link_service import decode_and_verify_partner_token
 from app.services.trial_paid_offer_service import trial_paid_offer_service
+from app.services.price_scheme_service import trial_days_for_user
 from app.handlers.subscription.paid_trial_offer import render_paid_trial_offer
 from app.services.trial_activation_service import (
     charge_trial_activation_if_required,
@@ -164,6 +165,7 @@ async def activate_trial_for_user(
         subscription = await create_trial_subscription(
             db,
             user.id,
+            duration_days=trial_days_for_user(user),
             device_limit=forced_devices,
         )
 
@@ -1203,6 +1205,13 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             await state.clear()
             return
 
+        # Бот-платформа: владелец ботов попадает в своё меню, а не в VPN.
+        if settings.is_owner_platform_bot(message.bot.id if message.bot else None):
+            from app.handlers.owner_platform import show_owner_home_on_start
+
+            if await show_owner_home_on_start(message, state, db, user):
+                return
+
         has_active_subscription, subscription_is_active = _calculate_subscription_flags(
             user.subscription
         )
@@ -1353,6 +1362,15 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
     logger.info(
         "🌐 LANGUAGE: для нового пользователя автоматически установлен русский язык",
     )
+
+    # Бот-платформа: сначала выбор — создать своего бота или попробовать VPN.
+    # Аккаунт заводится после выбора (VPN — обычной регистрацией с триалом).
+    if settings.is_owner_platform_bot(message.bot.id if message.bot else None):
+        from app.handlers.owner_platform import show_platform_choice
+
+        await state.set_state(RegistrationStates.waiting_for_platform_choice)
+        await show_platform_choice(message, "ru")
+        return
 
     await _continue_registration_after_language(
         message=message,

@@ -650,6 +650,32 @@ class Settings(BaseSettings):
     # гасятся, правки бренда и весов роутера подхватываются без рестарта.
     COPYCAT_SYNC_INTERVAL_SECONDS: int = 60
     BOT_IMAGES_DIR: str = "bot_images"
+
+    # Платформа для владельцев витрин: в этом боте (Telegram id) любой может
+    # подключить своего VPN-бота. 0 — платформа выключена.
+    OWNER_PLATFORM_BOT_ID: int = 0
+    # Группа копикетов, в которую попадают боты владельцев.
+    OWNER_BOTS_GROUP: str = "owners"
+    # Куда сохраняются картинки ботов владельцев (каталог должен быть
+    # доступен на запись — в докере смонтирован ./data).
+    OWNER_BOT_IMAGES_DIR: str = "data/bot_logos"
+    OWNER_MAX_BOTS: int = 10
+    OWNER_DEFAULT_REVSHARE_PERCENT: int = 60
+    # Минимальная цена Solo за месяц, ₽ — поверх минимальных цен для покупателей.
+    OWNER_PRICE_MIN_SOLO_RUB: int = 120
+    # Схема с минимальными ценами для покупателей ботов владельцев: ниже них
+    # владелец цену не поставит. Нет такой схемы — минимум = текущие цены
+    # основного бота для новых пользователей.
+    OWNER_PRICE_FLOOR_SCHEME: str = "owner-floor"
+    # Цены на 3 мес / 1 год / 2 года из месячной цены владельца: "дней:множитель".
+    OWNER_PRICE_PERIOD_MULTIPLIERS: str = "90:1.78,360:4.875,720:6.75"
+    # Ссылки в меню владельца. Пусто — ссылки бренда бота-платформы.
+    OWNER_TERMS_URL: str = ""
+    OWNER_PRIVACY_URL: str = ""
+    # Вывод заработка: продажи старше N дней, курс ЦБ + наценка, комиссия сети.
+    OWNER_PAYOUT_HOLD_DAYS: int = 7
+    OWNER_PAYOUT_RATE_MARKUP_PERCENT: float = 7.0
+    OWNER_PAYOUT_FEE_USDT: float = 3.0
     SKIP_RULES_ACCEPT: bool = False
     SKIP_REFERRAL_CODE: bool = False
 
@@ -2495,6 +2521,22 @@ class Settings(BaseSettings):
         if path.exists():
             return str(path)
         return str(candidate)
+
+    def get_owner_price_period_multipliers(self) -> dict[int, float]:
+        """{дней: множитель месячной цены} для цен владельцев на длинные периоды."""
+        result: dict[int, float] = {}
+        for chunk in (self.OWNER_PRICE_PERIOD_MULTIPLIERS or "").split(","):
+            days, sep, factor = chunk.partition(":")
+            if not sep:
+                continue
+            try:
+                result[int(days.strip())] = float(factor.strip())
+            except ValueError:
+                logger.warning("Некорректный множитель цены владельца: %r", chunk)
+        return result
+
+    def is_owner_platform_bot(self, bot_id: int | None) -> bool:
+        return bool(self.OWNER_PLATFORM_BOT_ID) and bot_id == self.OWNER_PLATFORM_BOT_ID
 
     def _load_mirror_bots_from_file(self) -> list[dict] | None:
         log = logging.getLogger(__name__)

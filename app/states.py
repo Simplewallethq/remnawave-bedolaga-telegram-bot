@@ -5,6 +5,8 @@ class RegistrationStates(StatesGroup):
     waiting_for_rules_accept = State()
     waiting_for_privacy_policy_accept = State()
     waiting_for_referral_code = State()
+    # Бот-платформа: новый пользователь выбирает «создать бота» или «попробовать VPN».
+    waiting_for_platform_choice = State()
 
 class SubscriptionStates(StatesGroup):
     selecting_period = State()
@@ -222,3 +224,21 @@ class AdminSubmenuStates(StatesGroup):
 
 class BlacklistStates(StatesGroup):
     waiting_for_blacklist_url = State()
+
+
+class OwnerStates(StatesGroup):
+    """Платформа для владельцев витрин: подключение и настройка своего бота."""
+
+    waiting_for_bot_username = State()
+    waiting_for_bot_token = State()
+    waiting_for_bot_picture = State()
+    waiting_for_support_username = State()
+
+    waiting_for_new_support = State()
+    waiting_for_solo_price = State()
+    waiting_for_plus_price = State()
+    waiting_for_pro_price = State()
+    waiting_for_new_picture = State()
+
+    waiting_for_wallet = State()
+    waiting_for_payout_amount = State()

@@ -11,7 +11,6 @@ from app.utils.panel_identity import panel_description_for_user
 from app.database.database import get_db
 from app.database.crud.user import get_user_by_telegram_id, create_user
 from app.services.remnawave_service import RemnaWaveService
-from app.states import RegistrationStates
 from app.utils.check_reg_process import is_registration_process
 from app.utils.validators import sanitize_telegram_name
 
@@ -116,24 +115,9 @@ class AuthMiddleware(BaseMiddleware):
                         if state:
                             current_state = await state.get_state()
                         
-                        registration_states = [
-                            RegistrationStates.waiting_for_language.state,
-                            RegistrationStates.waiting_for_rules_accept.state,
-                            RegistrationStates.waiting_for_privacy_policy_accept.state,
-                            RegistrationStates.waiting_for_referral_code.state
-                        ]
-
                         is_start_or_registration = (
                             (isinstance(event, Message) and event.text and event.text.startswith('/start'))
-                            or (current_state in registration_states)
-                            or (
-                                isinstance(event, CallbackQuery)
-                                and event.data
-                                and (
-                                    event.data in ['rules_accept', 'rules_decline', 'privacy_policy_accept', 'privacy_policy_decline', 'referral_skip']
-                                    or event.data.startswith('language_select:')
-                                )
-                            )
+                            or is_registration_process(event, current_state)
                         )
                         
                         if is_start_or_registration:

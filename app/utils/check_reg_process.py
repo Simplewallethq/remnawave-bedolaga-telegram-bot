@@ -11,7 +11,8 @@ def is_registration_process(event: TelegramObject, current_state: Optional[str])
         RegistrationStates.waiting_for_language.state,
         RegistrationStates.waiting_for_rules_accept.state,
         RegistrationStates.waiting_for_privacy_policy_accept.state,
-        RegistrationStates.waiting_for_referral_code.state
+        RegistrationStates.waiting_for_referral_code.state,
+        RegistrationStates.waiting_for_platform_choice.state,
     ]
 
     registration_callbacks = [
@@ -19,7 +20,10 @@ def is_registration_process(event: TelegramObject, current_state: Optional[str])
         "rules_decline",
         "privacy_policy_accept",
         "privacy_policy_decline",
-        "referral_skip"
+        "referral_skip",
+        # Выбор режима нового пользователя в боте-платформе.
+        "wl_choice_create",
+        "wl_choice_vpn",
     ]
 
     language_select_prefix = "language_select:"

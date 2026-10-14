@@ -19,6 +19,8 @@ _brand_configs: dict[int, Mapping[str, Any]] = {}
 # Веса платёжного роутера витрины (своё или от группы) и откуда они взяты:
 # "bot" | "group:<name>". Нет записи — глобальные веса.
 _payment_weights: dict[int, tuple[dict[str, int], str]] = {}
+# Ценовая схема витрины (своя или от группы). Нет записи — глобальные цены.
+_price_schemes: dict[int, int] = {}
 
 
 def register_bot(
@@ -52,6 +54,7 @@ def forget_bot(bot_id: int) -> None:
     _instances.pop(bot_id, None)
     _brand_configs.pop(bot_id, None)
     _payment_weights.pop(bot_id, None)
+    _price_schemes.pop(bot_id, None)
 
 
 def set_payment_weights(
@@ -71,6 +74,19 @@ def get_payment_weights(bot_id: int | None) -> tuple[dict[str, int], str] | None
     if entry is None:
         return None
     return dict(entry[0]), entry[1]
+
+
+def set_price_scheme(bot_id: int, scheme_id: int | None) -> None:
+    if scheme_id is None:
+        _price_schemes.pop(bot_id, None)
+    else:
+        _price_schemes[bot_id] = int(scheme_id)
+
+
+def get_price_scheme_id(bot_id: int | None) -> int | None:
+    if bot_id is None:
+        return None
+    return _price_schemes.get(bot_id)
 
 
 def get_brand_for_bot(bot_id: int | None) -> "BrandProfile":
@@ -178,6 +194,7 @@ def clear() -> None:
     _instances.clear()
     _brand_configs.clear()
     _payment_weights.clear()
+    _price_schemes.clear()
 
 
 def _same_file(first: Path, second: Path) -> bool:

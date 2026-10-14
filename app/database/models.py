@@ -19,6 +19,7 @@ from sqlalchemy import (
     Index,
     Table,
     SmallInteger,
+    Numeric,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, Mapped, mapped_column
@@ -2882,6 +2883,59 @@ class AdCampaignVisit(Base):
     visited_at = Column(DateTime, nullable=False, default=func.now())
 
 
+class PriceScheme(Base):
+    """Ценовая схема витрины: триал и цены тарифов Solo/Plus/Pro по периодам.
+
+    Цепляется к боту или группе копикетов (бот перебивает группу); у кого схемы
+    нет — глобальные цены основного бота по когорте.
+    """
+
+    __tablename__ = "price_schemes"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(64), nullable=False, unique=True)
+    # Длительность триала, дней. NULL — глобальный TRIAL_DURATION_DAYS.
+    trial_days = Column(Integer, nullable=True)
+    # Цены не ниже минимальных для покупателей (OWNER_PRICE_FLOOR_SCHEME) —
+    # у схем ботов владельцев, чтобы не продать подписку по рублю.
+    enforce_floor = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+    tariffs = relationship(
+        "PriceSchemeTariff",
+        back_populates="scheme",
+        cascade="all, delete-orphan",
+        order_by="PriceSchemeTariff.id",
+    )
+
+    def __repr__(self) -> str:
+        return f"<PriceScheme id={self.id} name={self.name!r}>"
+
+
+class PriceSchemeTariff(Base):
+    """Тариф в схеме: устройства и цены {дней: копейки}."""
+
+    __tablename__ = "price_scheme_tariffs"
+    __table_args__ = (UniqueConstraint("scheme_id", "plan_code", name="uq_price_scheme_plan"),)
+
+    id = Column(Integer, primary_key=True)
+    scheme_id = Column(
+        Integer,
+        ForeignKey("price_schemes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    plan_code = Column(String(16), nullable=False)
+    # NULL — как у тарифа (subscription_plans.device_limit).
+    device_limit = Column(Integer, nullable=True)
+    # {"30": 32000, "90": 57000, "360": 156000, "720": 216000}
+    period_prices = Column(JSON, nullable=False, default=dict)
+
+    scheme = relationship("PriceScheme", back_populates="tariffs")
+
+
 class CopycatGroup(Base):
     """Группа копикетов: общие настройки бренда и платежей для своих ботов.
 
@@ -2907,6 +2961,11 @@ class CopycatGroup(Base):
     payment_gateway_weights = Column(JSON, nullable=True)
     # Доля владельца витрины в выручке, %. Остальное — наше. NULL — не задана.
     owner_share_percent = Column(Integer, nullable=True)
+    price_scheme_id = Column(
+        Integer,
+        ForeignKey("price_schemes.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     created_at = Column(DateTime, nullable=False, default=func.now())
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
@@ -2965,6 +3024,12 @@ class CopycatBot(Base):
         index=True,
     )
     owner_share_percent = Column(Integer, nullable=True)
+    # Своя ценовая схема; NULL — как у группы.
+    price_scheme_id = Column(
+        Integer,
+        ForeignKey("price_schemes.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     created_at = Column(DateTime, nullable=False, default=func.now())
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
@@ -2973,3 +3038,69 @@ class CopycatBot(Base):
 
     def __repr__(self) -> str:
         return f"<CopycatBot id={self.id} @{self.username} tg={self.telegram_bot_id}>"
+
+
+class BotOwner(Base):
+    """Владелец витрин из бота-платформы (OWNER_PLATFORM_BOT_ID).
+
+    Аккаунт владельца — его пользователь в боте-платформе. Его витрины —
+    copycat_bots с owner_user_id = user_id.
+    """
+
+    __tablename__ = "bot_owners"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    # Последний выбранный режим платформы: "owner" | "vpn".
+    mode = Column(String(16), nullable=False, default="owner")
+    # Ревшара, %. NULL — OWNER_DEFAULT_REVSHARE_PERCENT.
+    revshare_percent = Column(Integer, nullable=True)
+    trc20_address = Column(String(64), nullable=True)
+
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<BotOwner id={self.id} user_id={self.user_id} mode={self.mode}>"
+
+
+class OwnerPayout(Base):
+    """Заявка владельца витрин на вывод заработка в USDT TRC-20.
+
+    Сумма в рублях — то, что вычитается из доступного баланса (отклонённые
+    не вычитаются).
+    """
+
+    __tablename__ = "owner_payouts"
+
+    id = Column(Integer, primary_key=True)
+    owner_id = Column(
+        Integer,
+        ForeignKey("bot_owners.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    amount_rub_kopeks = Column(BigInteger, nullable=False)
+    amount_usdt = Column(Numeric(18, 2), nullable=False)
+    fee_usdt = Column(Numeric(18, 2), nullable=False)
+    cbr_rate = Column(Numeric(12, 4), nullable=False)
+    rate = Column(Numeric(12, 4), nullable=False)
+    trc20_address = Column(String(64), nullable=False)
+    # WithdrawalStatus: pending | paid | rejected
+    status = Column(String(16), nullable=False, default=WithdrawalStatus.PENDING.value, index=True)
+    processed_by = Column(BigInteger, nullable=True)
+
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    processed_at = Column(DateTime, nullable=True)
+
+    owner = relationship("BotOwner")
+
+    def __repr__(self) -> str:
+        return f"<OwnerPayout id={self.id} owner={self.owner_id} {self.amount_usdt} USDT {self.status}>"

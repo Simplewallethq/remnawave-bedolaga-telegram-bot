@@ -46,6 +46,7 @@ from app.services.plan_pricing_service import (
     get_plan_price,
     list_active_plans,
     resolve_pricing_cohort,
+    plan_device_limit,
     select_prices_for_cohort,
 )
 from app.services.cold_solo_offer_service import cold_solo_offer_service
@@ -139,6 +140,7 @@ async def _save_tariff_intent_cart(
         "period_days": period_days,
         "total_price": total_price,
         "intent": True,
+        "pricing_cohort": resolve_pricing_cohort(db_user),
     }
     if offer_id is not None and price_override_kopeks is not None:
         cart_data.update(
@@ -722,7 +724,7 @@ async def finalize_tariff_purchase(
             existing_sub.start_date = now
             existing_sub.end_date = end_date
             existing_sub.traffic_limit_gb = plan.traffic_limit_gb
-            existing_sub.device_limit = plan.device_limit
+            existing_sub.device_limit = plan_device_limit(plan, resolve_pricing_cohort(db_user))
             existing_sub.connected_squads = connected_squads
             existing_sub.plan_id = plan.id
             existing_sub.plan_period_days = period_days
@@ -736,7 +738,7 @@ async def finalize_tariff_purchase(
                 start_date=now,
                 end_date=end_date,
                 traffic_limit_gb=plan.traffic_limit_gb,
-                device_limit=plan.device_limit,
+                device_limit=plan_device_limit(plan, resolve_pricing_cohort(db_user)),
                 connected_squads=connected_squads,
                 autopay_enabled=settings.is_autopay_enabled_by_default(),
                 autopay_days_before=settings.DEFAULT_AUTOPAY_DAYS_BEFORE,
@@ -881,7 +883,7 @@ async def finalize_tier_switch(
                 return active_sub
 
             active_sub.plan_id = plan.id
-            active_sub.device_limit = plan.device_limit
+            active_sub.device_limit = plan_device_limit(plan, resolve_pricing_cohort(db_user))
             active_sub.traffic_limit_gb = plan.traffic_limit_gb
             await db.flush()
 
@@ -894,7 +896,7 @@ async def finalize_tier_switch(
             )
         else:
             active_sub.plan_id = plan.id
-            active_sub.device_limit = plan.device_limit
+            active_sub.device_limit = plan_device_limit(plan, resolve_pricing_cohort(db_user))
             active_sub.traffic_limit_gb = plan.traffic_limit_gb
             await db.commit()
     except Exception:

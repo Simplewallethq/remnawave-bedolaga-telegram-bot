@@ -22,9 +22,16 @@ SUPPORTED_PERIOD_DAYS: List[int] = [30, 90, 360, 720]
 
 
 def resolve_pricing_cohort(db_user) -> str:
-    """Pricing cohort for a user: 'new' if they registered at/after the new-pricing
-    cutoff, else 'legacy'. None-safe — missing user/created_at/cutoff falls back to
-    'legacy' (the grandfathered, current-prices set)."""
+    """Pricing cohort for a user: 'scheme:<id>' when the bot they are buying in has
+    a price scheme (see price_scheme_service), else 'new' if they registered at/after
+    the new-pricing cutoff, else 'legacy'. None-safe — missing user/created_at/cutoff
+    falls back to 'legacy' (the grandfathered, current-prices set)."""
+    from app.services.price_scheme_service import scheme_cohort, scheme_for_user
+
+    scheme = scheme_for_user(db_user)
+    if scheme is not None:
+        return scheme_cohort(scheme.id)
+
     override = str(getattr(db_user, "tariff_pricing_cohort_override", None) or "").lower()
     if override in ("new", "legacy"):
         return override
@@ -36,14 +43,42 @@ def resolve_pricing_cohort(db_user) -> str:
     return "legacy"
 
 
-def select_prices_for_cohort(plan: SubscriptionPlan, cohort: str) -> dict:
-    """{period_days: price_kopeks} for the cohort — rows tagged 'all' plus the cohort's
-    own rows. `plan.prices` is already eagerly loaded, so this filters in memory."""
+def select_prices_for_audience(plan: SubscriptionPlan, cohort: str) -> dict:
+    """{period_days: price_kopeks} from the plan's own price rows — rows tagged 'all'
+    plus the cohort's own rows. `plan.prices` is already eagerly loaded."""
     return {
         p.period_days: p.price_kopeks
         for p in plan.prices
         if getattr(p, "audience", "all") in ("all", cohort)
     }
+
+
+def select_prices_for_cohort(plan: SubscriptionPlan, cohort: str) -> dict:
+    """{period_days: price_kopeks} for the cohort. A price-scheme cohort takes the
+    scheme's prices on top of the 'new' ones; filtering is in memory."""
+    from app.services.price_scheme_service import (
+        BASE_COHORT,
+        get_scheme,
+        scheme_id_from_cohort,
+        scheme_prices_for_plan,
+    )
+
+    scheme_id = scheme_id_from_cohort(cohort)
+    if scheme_id is None:
+        return select_prices_for_audience(plan, cohort)
+    base = select_prices_for_audience(plan, BASE_COHORT)
+    scheme = get_scheme(scheme_id)
+    if scheme is None:
+        return base
+    return scheme_prices_for_plan(scheme, plan.code, base)
+
+
+def plan_device_limit(plan: SubscriptionPlan, cohort: Optional[str] = None) -> int:
+    """Devices included in the plan — the scheme's own number when it sets one."""
+    from app.services.price_scheme_service import get_scheme, scheme_device_limit, scheme_id_from_cohort
+
+    limit = scheme_device_limit(get_scheme(scheme_id_from_cohort(cohort)), plan.code)
+    return int(limit) if limit is not None else int(plan.device_limit)
 
 
 async def list_active_plans(db: AsyncSession) -> List[SubscriptionPlan]:
@@ -83,7 +118,25 @@ async def get_plan_price(
 ) -> Optional[int]:
     """Absolute price (kopeks) for (plan, period) in the given cohort. None if not
     configured. A period is either tagged 'all' or split per-cohort, never both, so
-    filtering audience IN ('all', cohort) yields at most one row."""
+    filtering audience IN ('all', cohort) yields at most one row. A price-scheme
+    cohort reads the scheme's prices, falling back to the 'new' ones."""
+    from app.services.price_scheme_service import (
+        BASE_COHORT,
+        get_scheme,
+        plan_code_for_id,
+        scheme_id_from_cohort,
+        scheme_prices_for_plan,
+    )
+
+    scheme_id = scheme_id_from_cohort(cohort)
+    if scheme_id is not None:
+        base = await get_plan_price(db, plan_id, period_days, cohort=BASE_COHORT)
+        scheme = get_scheme(scheme_id)
+        if scheme is None:
+            return base
+        fallback = {period_days: base} if base is not None else {}
+        return scheme_prices_for_plan(scheme, plan_code_for_id(plan_id), fallback).get(period_days)
+
     result = await db.execute(
         select(SubscriptionPlanPrice.price_kopeks).where(
             SubscriptionPlanPrice.plan_id == plan_id,
@@ -101,17 +154,16 @@ def get_lowest_monthly_price(plan: SubscriptionPlan, cohort: str = "new") -> Opt
     (Longer periods carry a discount, but we don't advertise the cheapest-per-month rate
     to avoid setting a wrong price expectation.)
     """
-    prices = [p for p in plan.prices if getattr(p, "audience", "all") in ("all", cohort)]
+    prices = select_prices_for_cohort(plan, cohort)
     if not prices:
         return None
-    for p in prices:
-        if p.period_days == 30:
-            return int(p.price_kopeks)
+    if 30 in prices:
+        return int(prices[30])
     # Fallback if no 30-day price configured — use the lowest effective monthly rate.
     monthly_rates = [
-        int(round(p.price_kopeks * 30 / p.period_days))
-        for p in prices
-        if p.period_days > 0
+        int(round(price * 30 / period_days))
+        for period_days, price in prices.items()
+        if period_days > 0
     ]
     return min(monthly_rates) if monthly_rates else None
 

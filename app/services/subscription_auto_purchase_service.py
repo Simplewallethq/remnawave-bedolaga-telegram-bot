@@ -713,8 +713,9 @@ async def _auto_tariff_purchase(
     if fresh_user is None:
         return False
     user = fresh_user
-    # Charge the same cohort price the user saw when the cart was saved.
-    cohort = resolve_pricing_cohort(user)
+    # Charge the same cohort price the user saw when the cart was saved: the
+    # cart remembers it (a price scheme depends on the bot they bought in).
+    cohort = cart_data.get("pricing_cohort") or resolve_pricing_cohort(user)
 
     plan = await get_plan_by_id(db, plan_id)
     if not plan or not plan.is_active:

@@ -3306,6 +3306,91 @@ _USER_ACCOUNT_SCOPE_INDEXES = (
 )
 
 
+_WHITE_LABEL_TABLES_PG = (
+    """
+    CREATE TABLE IF NOT EXISTS price_schemes (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(64) NOT NULL UNIQUE,
+        trial_days INTEGER NULL,
+        enforce_floor BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS price_scheme_tariffs (
+        id SERIAL PRIMARY KEY,
+        scheme_id INTEGER NOT NULL REFERENCES price_schemes(id) ON DELETE CASCADE,
+        plan_code VARCHAR(16) NOT NULL,
+        device_limit INTEGER NULL,
+        period_prices JSON NOT NULL,
+        CONSTRAINT uq_price_scheme_plan UNIQUE (scheme_id, plan_code)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_price_scheme_tariffs_scheme_id ON price_scheme_tariffs (scheme_id)",
+    "ALTER TABLE copycat_groups ADD COLUMN IF NOT EXISTS price_scheme_id INTEGER NULL "
+    "REFERENCES price_schemes(id) ON DELETE SET NULL",
+    "ALTER TABLE copycat_bots ADD COLUMN IF NOT EXISTS price_scheme_id INTEGER NULL "
+    "REFERENCES price_schemes(id) ON DELETE SET NULL",
+    """
+    CREATE TABLE IF NOT EXISTS bot_owners (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        mode VARCHAR(16) NOT NULL DEFAULT 'owner',
+        revshare_percent INTEGER NULL,
+        trc20_address VARCHAR(64) NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS owner_payouts (
+        id SERIAL PRIMARY KEY,
+        owner_id INTEGER NOT NULL REFERENCES bot_owners(id) ON DELETE CASCADE,
+        amount_rub_kopeks BIGINT NOT NULL,
+        amount_usdt NUMERIC(18, 2) NOT NULL,
+        fee_usdt NUMERIC(18, 2) NOT NULL,
+        cbr_rate NUMERIC(12, 4) NOT NULL,
+        rate NUMERIC(12, 4) NOT NULL,
+        trc20_address VARCHAR(64) NOT NULL,
+        status VARCHAR(16) NOT NULL DEFAULT 'pending',
+        processed_by BIGINT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        processed_at TIMESTAMP NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_owner_payouts_owner_id ON owner_payouts (owner_id)",
+    "CREATE INDEX IF NOT EXISTS ix_owner_payouts_status ON owner_payouts (status)",
+)
+
+
+async def ensure_white_label_schema() -> bool:
+    """Ценовые схемы витрин и платформа владельцев: таблицы price_schemes,
+    price_scheme_tariffs, bot_owners, owner_payouts и price_scheme_id у
+    копикетов и их групп. Таблицы обычно создаёт create_all раньше — здесь
+    идемпотентный фолбэк и новые колонки существующих таблиц."""
+    try:
+        db_type = await get_database_type()
+        if db_type == "postgresql":
+            async with engine.begin() as conn:
+                for statement in _WHITE_LABEL_TABLES_PG:
+                    await conn.execute(text(statement))
+            return True
+
+        # SQLite/MySQL: таблицы — через create_all, здесь только колонки.
+        for table in ("copycat_groups", "copycat_bots"):
+            if not await check_table_exists(table):
+                continue
+            if await check_column_exists(table, "price_scheme_id"):
+                continue
+            async with engine.begin() as conn:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN price_scheme_id INTEGER NULL"))
+        return True
+    except Exception as error:
+        logger.error(f"Ошибка подготовки схемы white label: {error}")
+        return False
+
+
 async def ensure_user_account_scope() -> bool:
     """Отдельный аккаунт нового пользователя на каждый бот.
 
@@ -8822,6 +8907,12 @@ async def run_universal_migration():
             logger.info("✅ Скоуп аккаунтов по ботам готов")
         else:
             logger.warning("⚠️ Не удалось настроить скоуп аккаунтов по ботам")
+
+        logger.info("=== ЦЕНОВЫЕ СХЕМЫ И ПЛАТФОРМА ВЛАДЕЛЬЦЕВ ВИТРИН ===")
+        if await ensure_white_label_schema():
+            logger.info("✅ Ценовые схемы и платформа владельцев готовы")
+        else:
+            logger.warning("⚠️ Не удалось подготовить ценовые схемы и платформу владельцев")
 
         logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ BOT_SCOPE В BROADCAST_HISTORY ===")
         bot_scope_ready = await ensure_broadcast_history_bot_scope_column()

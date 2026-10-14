@@ -26,13 +26,27 @@ Usage
     # дозалить новые записи из mirror_bots.yaml (существующие токены пропускаются)
     python -m scripts.copycats import-yaml [--group NAME]
 
+    # ценовые схемы: триал, устройства и цены тарифов (в рублях) по периодам;
+    # цепляются к боту или группе: set BOT price_scheme=NAME, group-set G price_scheme=NAME
+    python -m scripts.copycats schemes
+    python -m scripts.copycats scheme-show NAME
+    python -m scripts.copycats scheme-add NAME [trial_days=N] [enforce_floor=true]
+    python -m scripts.copycats scheme-set NAME [trial_days=N] [enforce_floor=true] [name=NEW]
+    python -m scripts.copycats scheme-tariff NAME solo [devices=1] [30=320 90=570 360=1560 720=2160]
+    python -m scripts.copycats scheme-clone SRC DST       # SRC=- — цены основного бота
+    python -m scripts.copycats scheme-delete NAME         # боты и группы вернутся к ценам по умолчанию
+
+    # владельцы ботов с платформы (OWNER_PLATFORM_BOT_ID)
+    python -m scripts.copycats owners
+    python -m scripts.copycats owner-set OWNER revshare=70   # OWNER: Telegram id или user:<id>
+
 Поля бота: name, logo, image_url, privacy_url, terms_url, channel_link,
 channel_id, support, subscription_domain, happ_redirect_template,
 referral_terms_url, has_own_app, rays_enabled, is_copycat, enabled, group,
-owner_user_id, owner_share_percent.
+owner_user_id, owner_share_percent, price_scheme.
 Поля группы: name, description, support, subscription_domain,
 happ_redirect_template, privacy_url, terms_url, referral_terms_url,
-owner_share_percent.
+owner_share_percent, price_scheme.
 """
 
 from __future__ import annotations
@@ -51,14 +65,30 @@ from app.database.crud.copycat import (
     list_copycat_groups,
 )
 from app.database.database import AsyncSessionLocal, engine
-from app.database.models import Base, CopycatBot, CopycatGroup
+from app.database.models import (
+    Base,
+    BotOwner,
+    CopycatBot,
+    CopycatGroup,
+    OwnerPayout,
+    PriceScheme,
+    PriceSchemeTariff,
+    User,
+)
 from app.services.copycat_service import (
     BOT_BRAND_FIELDS,
     DEFAULT_GROUP_NAME,
     GROUP_BRAND_FIELDS,
     effective_gateway_weights,
     effective_owner_share_percent,
+    effective_price_scheme_id,
     import_legacy_mirrors,
+)
+from app.services.price_scheme_service import (
+    clone_scheme,
+    get_scheme_by_name,
+    set_tariff,
+    snapshot_from_row,
 )
 from app.services.payment_gateway_router import ROUTED_GATEWAYS
 
@@ -70,10 +100,17 @@ BOT_FIELDS = BOT_BRAND_FIELDS + (
     "group",
     "owner_user_id",
     "owner_share_percent",
+    "price_scheme",
 )
-GROUP_FIELDS = ("name", "description", "owner_share_percent") + GROUP_BRAND_FIELDS
-BOOL_FIELDS = {"has_own_app", "rays_enabled", "is_copycat", "enabled"}
-INT_FIELDS = {"owner_user_id", "owner_share_percent"}
+GROUP_FIELDS = ("name", "description", "owner_share_percent", "price_scheme") + GROUP_BRAND_FIELDS
+SCHEME_FIELDS = ("name", "trial_days", "enforce_floor")
+OWNER_FIELDS = ("revshare",)
+BOOL_FIELDS = {"has_own_app", "rays_enabled", "is_copycat", "enabled", "enforce_floor"}
+INT_FIELDS = {"owner_user_id", "owner_share_percent", "trial_days", "revshare"}
+PLAN_CODES = ("solo", "plus", "pro")
+
+# id схемы → имя, для вывода list/show/groups.
+_scheme_names: dict[int, str] = {}
 
 
 class UsageError(Exception):
@@ -110,9 +147,10 @@ def _parse_assignments(pairs: list[str], allowed: tuple[str, ...]) -> dict[str, 
                 raise UsageError(f"{key}: ожидалось целое, получено {value!r}") from error
         else:
             result[key] = value
-    share = result.get("owner_share_percent")
-    if share is not None and not 0 <= share <= 100:
-        raise UsageError("owner_share_percent должен быть от 0 до 100")
+    for key in ("owner_share_percent", "revshare"):
+        share = result.get(key)
+        if share is not None and not 0 <= share <= 100:
+            raise UsageError(f"{key} должен быть от 0 до 100")
     if "enabled" in result and result["enabled"] is None:
         raise UsageError("enabled не может быть пустым")
     if "is_copycat" in result and result["is_copycat"] is None:
@@ -134,12 +172,68 @@ async def _require_group(db, name: str) -> CopycatGroup:
     return group
 
 
-async def _apply_bot_fields(db, row: CopycatBot, values: dict[str, Any]) -> None:
+async def _require_scheme(db, name: str) -> PriceScheme:
+    scheme = await get_scheme_by_name(db, name)
+    if scheme is None:
+        raise UsageError(f"ценовая схема {name!r} не найдена")
+    return scheme
+
+
+async def _apply_bot_fields(db, row: Any, values: dict[str, Any]) -> None:
+    """Поля бота или группы: group и price_scheme задаются именем."""
     for key, value in values.items():
         if key == "group":
             row.group_id = None if value is None else (await _require_group(db, value)).id
+        elif key == "price_scheme":
+            row.price_scheme_id = None if value is None else (await _require_scheme(db, value)).id
         else:
             setattr(row, key, value)
+
+
+def _scheme_name(scheme_id: Optional[int]) -> str:
+    if scheme_id is None:
+        return "—"
+    return _scheme_names.get(scheme_id, f"#{scheme_id}")
+
+
+def _parse_rubles(value: str) -> int:
+    try:
+        rubles = int(value)
+    except ValueError as error:
+        raise UsageError(f"цена {value!r} не целое число рублей") from error
+    if rubles <= 0:
+        raise UsageError("цена должна быть больше нуля")
+    return rubles * 100
+
+
+def _show_scheme(scheme: PriceScheme) -> None:
+    trial = f"{scheme.trial_days} дн." if scheme.trial_days else "глобальный"
+    floor = " пол=да" if scheme.enforce_floor else ""
+    print(f"#{scheme.id:<3} {scheme.name:<24} триал={trial}{floor}")
+    snapshot = snapshot_from_row(scheme)
+    for code, tariff in snapshot.tariffs.items():
+        devices = tariff.device_limit if tariff.device_limit is not None else "как у тарифа"
+        prices = ", ".join(f"{days}д={price // 100}₽" for days, price in sorted(tariff.prices.items()))
+        print(f"  {code:<5} устройств={devices}  {prices or 'цен нет'}")
+
+
+async def _require_owner(db, ref: str) -> BotOwner:
+    from sqlalchemy import select
+
+    ref = (ref or "").strip()
+    query = select(BotOwner).join(User, User.id == BotOwner.user_id)
+    if ref.startswith("user:"):
+        query = query.where(BotOwner.user_id == int(ref.split(":", 1)[1]))
+    elif ref.isdigit():
+        query = query.where(User.telegram_id == int(ref))
+    else:
+        raise UsageError("владелец указывается Telegram id или user:<id>")
+    owners = list((await db.execute(query)).scalars().all())
+    if not owners:
+        raise UsageError(f"владелец {ref!r} не найден")
+    if len(owners) > 1:
+        raise UsageError(f"у Telegram id {ref} несколько аккаунтов-владельцев, укажите user:<id>")
+    return owners[0]
 
 
 def _fmt_weights(weights: Optional[dict]) -> str:
@@ -156,9 +250,12 @@ def _bot_line(row: CopycatBot) -> str:
     routing = f" роутер={weights[1]}" if weights else ""
     share = effective_owner_share_percent(row, row.group)
     share_text = f" доля={share}%" if share is not None else ""
+    scheme_id = effective_price_scheme_id(row, row.group)
+    scheme_text = f" цены={_scheme_name(scheme_id)}" if scheme_id is not None else ""
+    owner_text = f" владелец=user:{row.owner_user_id}" if row.owner_user_id else ""
     return (
         f"#{row.id:<4} {status} @{row.username or '?':<28} tg={row.telegram_bot_id or '-':<12} "
-        f"группа={group}{kind}{routing}{share_text}"
+        f"группа={group}{kind}{routing}{share_text}{scheme_text}{owner_text}"
     )
 
 
@@ -181,6 +278,9 @@ def _show_bot(row: CopycatBot) -> None:
         print("  веса роутера: глобальные")
     share = effective_owner_share_percent(row, group)
     print(f"  доля владельца: {share if share is not None else '—'}%  owner_user_id: {row.owner_user_id or '—'}")
+    own = " (своя)" if row.price_scheme_id is not None else " (группы)"
+    scheme_id = effective_price_scheme_id(row, group)
+    print(f"  ценовая схема: {_scheme_name(scheme_id)}{own if scheme_id is not None else ' (цены основного бота)'}")
 
 
 def _show_group(group: CopycatGroup, count: int) -> None:
@@ -194,18 +294,34 @@ def _show_group(group: CopycatGroup, count: int) -> None:
             print(f"  {field}: {value}")
     if group.payment_gateway_weights is not None:
         print(f"  веса роутера: {_fmt_weights(group.payment_gateway_weights)}")
+    if group.price_scheme_id is not None:
+        print(f"  ценовая схема: {_scheme_name(group.price_scheme_id)}")
 
 
 async def run(args: argparse.Namespace) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(
             lambda sync_conn: Base.metadata.create_all(
-                sync_conn, tables=[CopycatGroup.__table__, CopycatBot.__table__]
+                sync_conn,
+                tables=[
+                    PriceScheme.__table__,
+                    PriceSchemeTariff.__table__,
+                    CopycatGroup.__table__,
+                    CopycatBot.__table__,
+                    BotOwner.__table__,
+                    OwnerPayout.__table__,
+                ],
             )
         )
 
     async with AsyncSessionLocal() as db:
+        from sqlalchemy import select
+
         command = args.command
+        _scheme_names.clear()
+        _scheme_names.update(
+            {scheme_id: name for scheme_id, name in (await db.execute(select(PriceScheme.id, PriceScheme.name))).all()}
+        )
 
         if command == "list":
             group_id = (await _require_group(db, args.group)).id if args.group else None
@@ -274,8 +390,7 @@ async def run(args: argparse.Namespace) -> None:
             if await get_copycat_group_by_name(db, name):
                 raise UsageError(f"группа {name!r} уже есть")
             group = CopycatGroup(name=name)
-            for key, value in _parse_assignments(args.fields, GROUP_FIELDS).items():
-                setattr(group, key, value)
+            await _apply_bot_fields(db, group, _parse_assignments(args.fields, GROUP_FIELDS))
             db.add(group)
             await db.commit()
             print(f"Группа #{group.id} {group.name} создана")
@@ -288,8 +403,7 @@ async def run(args: argparse.Namespace) -> None:
                 raise UsageError("нечего менять")
             if "name" in values and not values["name"]:
                 raise UsageError("имя группы не может быть пустым")
-            for key, value in values.items():
-                setattr(group, key, value)
+            await _apply_bot_fields(db, group, values)
             await db.commit()
             print(f"Группа {group.name} обновлена")
             return
@@ -333,6 +447,132 @@ async def run(args: argparse.Namespace) -> None:
             result = await import_legacy_mirrors(db, group_name=args.group or DEFAULT_GROUP_NAME)
             await db.commit()
             print(f"Импорт: добавлено {result.added}, пропущено {result.skipped}")
+            return
+
+        if command == "schemes":
+            schemes = (
+                await db.execute(select(PriceScheme).order_by(PriceScheme.id))
+            ).scalars().all()
+            for scheme in schemes:
+                await db.refresh(scheme, ["tariffs"])
+                _show_scheme(scheme)
+            if not schemes:
+                print("Схем нет: все боты продают по ценам основного бота")
+            return
+
+        if command == "scheme-show":
+            _show_scheme(await _require_scheme(db, args.name))
+            return
+
+        if command == "scheme-add":
+            name = args.name.strip()
+            if await get_scheme_by_name(db, name):
+                raise UsageError(f"схема {name!r} уже есть")
+            values = _parse_assignments(args.fields, SCHEME_FIELDS)
+            scheme = PriceScheme(name=name, enforce_floor=bool(values.pop("enforce_floor", False)))
+            for key, value in values.items():
+                setattr(scheme, key, value)
+            db.add(scheme)
+            await db.commit()
+            print(f"Схема #{scheme.id} {scheme.name} создана; цены — scheme-tariff {scheme.name} solo 30=…")
+            return
+
+        if command == "scheme-set":
+            scheme = await _require_scheme(db, args.name)
+            values = _parse_assignments(args.fields, SCHEME_FIELDS)
+            if not values:
+                raise UsageError("нечего менять")
+            if "name" in values and not values["name"]:
+                raise UsageError("имя схемы не может быть пустым")
+            if "enforce_floor" in values and values["enforce_floor"] is None:
+                values["enforce_floor"] = False
+            for key, value in values.items():
+                setattr(scheme, key, value)
+            await db.commit()
+            print(f"Схема {scheme.name} обновлена")
+            return
+
+        if command == "scheme-tariff":
+            scheme = await _require_scheme(db, args.name)
+            plan_code = args.plan.strip().lower()
+            if plan_code not in PLAN_CODES:
+                raise UsageError(f"тариф {plan_code!r}; доступны: {', '.join(PLAN_CODES)}")
+            prices: dict[int, int] = {}
+            device_limit: Any = ...
+            for pair in args.pairs:
+                key, sep, value = pair.partition("=")
+                if not sep:
+                    raise UsageError(f"ожидалось key=value, получено {pair!r}")
+                key = key.strip()
+                if key == "devices":
+                    device_limit = int(value) if value.strip() else None
+                elif key.isdigit():
+                    prices[int(key)] = _parse_rubles(value.strip())
+                else:
+                    raise UsageError(f"неизвестный ключ {key!r}: devices или число дней")
+            if not prices and device_limit is ...:
+                raise UsageError("укажите devices=N и/или цены ДНЕЙ=РУБЛЕЙ")
+            set_tariff(scheme, plan_code, prices=prices, device_limit=device_limit)
+            await db.commit()
+            await db.refresh(scheme, ["tariffs"])
+            _show_scheme(scheme)
+            return
+
+        if command == "scheme-clone":
+            dst = args.dst.strip()
+            if await get_scheme_by_name(db, dst):
+                raise UsageError(f"схема {dst!r} уже есть")
+            from app.services.price_scheme_service import load_schemes
+
+            await load_schemes(db)
+            source = None
+            if args.src != "-":
+                source = snapshot_from_row(await _require_scheme(db, args.src))
+            scheme = clone_scheme(source, dst, enforce_floor=bool(source and source.enforce_floor))
+            db.add(scheme)
+            await db.commit()
+            await db.refresh(scheme, ["tariffs"])
+            _show_scheme(scheme)
+            return
+
+        if command == "scheme-delete":
+            scheme = await _require_scheme(db, args.name)
+            await db.delete(scheme)
+            await db.commit()
+            print(f"Схема {args.name} удалена")
+            return
+
+        if command == "owners":
+            from sqlalchemy import func
+
+            rows = (
+                await db.execute(
+                    select(BotOwner, User.telegram_id, User.username, func.count(CopycatBot.id))
+                    .join(User, User.id == BotOwner.user_id)
+                    .outerjoin(CopycatBot, CopycatBot.owner_user_id == BotOwner.user_id)
+                    .group_by(BotOwner.id, User.telegram_id, User.username)
+                    .order_by(BotOwner.id)
+                )
+            ).all()
+            from app.config import settings
+
+            for owner, telegram_id, username, bots in rows:
+                share = owner.revshare_percent
+                share_text = f"{share}%" if share is not None else f"{settings.OWNER_DEFAULT_REVSHARE_PERCENT}% (по умолчанию)"
+                print(
+                    f"user:{owner.user_id:<8} tg={telegram_id:<12} @{username or '-':<24} "
+                    f"ботов={bots:<3} ревшара={share_text} режим={owner.mode}"
+                )
+            print(f"Всего владельцев: {len(rows)}")
+            return
+
+        if command == "owner-set":
+            owner = await _require_owner(db, args.owner)
+            values = _parse_assignments(args.fields, OWNER_FIELDS)
+            if "revshare" in values:
+                owner.revshare_percent = values["revshare"]
+            await db.commit()
+            print(f"Владелец user:{owner.user_id} обновлён")
             return
 
         raise UsageError(f"неизвестная команда {command!r}")
@@ -380,6 +620,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("import-yaml")
     p.add_argument("--group")
+
+    sub.add_parser("schemes")
+    sub.add_parser("scheme-show").add_argument("name")
+    for name, required in (("scheme-add", "*"), ("scheme-set", "+")):
+        p = sub.add_parser(name)
+        p.add_argument("name")
+        p.add_argument("fields", nargs=required)
+    p = sub.add_parser("scheme-tariff")
+    p.add_argument("name")
+    p.add_argument("plan")
+    p.add_argument("pairs", nargs="+")
+    p = sub.add_parser("scheme-clone")
+    p.add_argument("src")
+    p.add_argument("dst")
+    sub.add_parser("scheme-delete").add_argument("name")
+
+    sub.add_parser("owners")
+    p = sub.add_parser("owner-set")
+    p.add_argument("owner")
+    p.add_argument("fields", nargs="+")
     return parser
 
 

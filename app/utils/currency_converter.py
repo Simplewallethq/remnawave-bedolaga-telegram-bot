@@ -1,6 +1,7 @@
 import logging
 import aiohttp
 import asyncio
+from decimal import Decimal
 from typing import Optional
 from datetime import datetime, timedelta
 
@@ -107,6 +108,52 @@ class CurrencyConverter:
             logger.debug(f"Ошибка получения курса fixer: {e}")
             return None
     
+    async def get_cbr_usd_rate(self) -> Optional[Decimal]:
+        """Официальный курс USD ЦБ РФ (руб. за доллар) без сторонних источников
+        и выдуманного запасного значения: None — курс сейчас не узнать."""
+        cache_key = "CBR_USD"
+        now = datetime.utcnow()
+        if (
+            cache_key in self._cache
+            and (now - self._last_update[cache_key]).total_seconds() < self._cache_ttl
+        ):
+            return self._cache[cache_key]
+
+        for source in (self._fetch_cbr_official_xml, self._fetch_from_cbr):
+            try:
+                rate = await source()
+            except Exception as e:  # noqa: BLE001 - пробуем следующий источник
+                logger.debug(f"Ошибка получения курса ЦБ из {source.__name__}: {e}")
+                continue
+            if rate and 50 < float(rate) < 200:
+                rate = Decimal(str(rate)).quantize(Decimal("0.0001"))
+                self._cache[cache_key] = rate
+                self._last_update[cache_key] = now
+                return rate
+
+        if cache_key in self._cache:
+            logger.warning("Курс ЦБ недоступен, используем последний полученный")
+            return self._cache[cache_key]
+        return None
+
+    async def _fetch_cbr_official_xml(self) -> Optional[Decimal]:
+        """Курс USD с cbr.ru/scripts/XML_daily.asp."""
+        import xml.etree.ElementTree as ET
+
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get("https://www.cbr.ru/scripts/XML_daily.asp") as response:
+                if response.status != 200:
+                    return None
+                body = await response.read()
+        root = ET.fromstring(body)
+        for valute in root.findall("Valute"):
+            if (valute.findtext("CharCode") or "").strip() != "USD":
+                continue
+            value = Decimal((valute.findtext("Value") or "").replace(",", ".").strip())
+            nominal = Decimal((valute.findtext("Nominal") or "1").strip())
+            return value / nominal
+        return None
+
     async def usd_to_rub(self, usd_amount: float) -> float:
         """Конвертирует USD в RUB"""
         rate = await self.get_usd_to_rub_rate()

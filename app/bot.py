@@ -21,6 +21,7 @@ from app.utils.cache import cache
 from app.handlers import (
     commands,
     start,
+    owner_platform,
     menu,
     subscription,
     balance,
@@ -190,6 +191,7 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     dp.callback_query.middleware(SubscriptionStatusMiddleware())
     commands.register_handlers(dp)
     start.register_handlers(dp)
+    owner_platform.register_handlers(dp)
     menu.register_handlers(dp)
     subscription.register_handlers(dp)
     balance.register_balance_handlers(dp)

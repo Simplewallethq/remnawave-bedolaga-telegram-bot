@@ -12,6 +12,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.services.price_scheme_service import trial_days_for_user
 from app.config import settings, PERIOD_PRICES, get_traffic_prices
 from app.database.crud.discount_offer import (
     get_offer_by_id,
@@ -538,7 +539,7 @@ async def show_trial_offer(
             ).format(price=settings.format_price(trial_price))
 
     trial_text = texts.TRIAL_AVAILABLE.format(
-        days=settings.TRIAL_DURATION_DAYS,
+        days=trial_days_for_user(db_user),
         traffic=texts.format_traffic(settings.TRIAL_TRAFFIC_LIMIT_GB),
         devices=trial_device_limit if trial_device_limit is not None else "",
         devices_line=devices_line,
@@ -614,6 +615,7 @@ async def activate_trial(
         subscription = await create_trial_subscription(
             db,
             db_user.id,
+            duration_days=trial_days_for_user(db_user),
             device_limit=forced_devices,
         )
 
