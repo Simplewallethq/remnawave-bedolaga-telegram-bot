@@ -386,3 +386,22 @@ async def test_owner_screens(world, monkeypatch) -> None:
     finally:
         schemes.set_snapshot_for_tests([])
         await db.close()
+
+
+async def test_reconnect_with_the_same_token(world) -> None:
+    db = await _session()
+    owner = await _owner(db)
+    db.add(CopycatBot(token=TOKEN, telegram_bot_id=777000, username="same_bot", enabled=False,
+                      owner_user_id=owner.id, support="@kept"))
+    await db.commit()
+    world[TOKEN] = SimpleNamespace(id=777000, username="same_bot", full_name="Same")
+    state = _state()
+    await state.set_state(OwnerStates.waiting_for_bot_username)
+    await create.handle_bot_username(_message("same_bot"), state, db, owner)
+
+    restored = _message(TOKEN)
+    await create.handle_bot_token(restored, state, db, owner)
+    assert "снова подключен" in _answered(restored)
+    row = (await db.execute(select(CopycatBot))).scalar_one()
+    assert row.enabled and row.support == "@kept"
+    await db.close()

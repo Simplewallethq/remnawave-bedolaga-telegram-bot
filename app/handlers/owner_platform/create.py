@@ -279,11 +279,18 @@ async def handle_bot_token(message: types.Message, state: FSMContext, db: AsyncS
             reply_markup=back_keyboard(language, "wl_step2"),
         )
         return
-    if platform.is_reserved_bot_id(me.id) or await get_copycat_bot_by_token(db, token):
+    if platform.is_reserved_bot_id(me.id):
         await _reply_already_connected(message, language)
         return
 
     occupancy = await platform.occupancy_by_bot_id(db, me.id, db_user.id)
+    if occupancy.status == "free":
+        # Токен уже в базе у записи, которая ещё не узнала Telegram id бота.
+        # Тот же токен у выключенного бота владельца — обычное повторное
+        # подключение, его ловит поиск по Telegram id выше.
+        token_row = await get_copycat_bot_by_token(db, token)
+        if token_row is not None:
+            occupancy = platform.classify(token_row, db_user.id)
     if occupancy.status == "active":
         await _reply_already_connected(message, language)
         return
