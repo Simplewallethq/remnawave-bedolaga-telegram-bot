@@ -1241,6 +1241,9 @@ def _tariff_period_rows(
 # Порядок кнопок тарифов: хит первым, остальные — как в БД (по sort_order).
 _TARIFF_BUTTON_ORDER = ("plus", "pro", "solo")
 _TARIFF_HIT_CODE = "plus"
+# Solo со страницы тарифов сначала предлагает взять Plus (экран tariff_solo_upsell).
+_SOLO_UPSELL_CODE = "solo"
+_SOLO_UPSELL_CALLBACK = "tariff_solo_upsell"
 # Хит среди периодов идёт первым и подсвечен; дальше — по возрастанию.
 _TARIFF_PERIOD_ORDER = (90, 30, 360, 720)
 _TARIFF_PERIOD_PLAIN_ORDER = (30, 90, 360, 720)
@@ -1272,8 +1275,19 @@ def get_tariffs_keyboard(
         if promo
         else plans_with_lowest_monthly
     )
+    has_hit_plan = any(
+        (getattr(plan, "code", "") or "").lower() == _TARIFF_HIT_CODE for plan, _ in ordered
+    )
     for plan, lowest_monthly in ordered:
-        is_hit = promo and (getattr(plan, "code", "") or "").lower() == _TARIFF_HIT_CODE
+        code = (getattr(plan, "code", "") or "").lower()
+        is_hit = promo and code == _TARIFF_HIT_CODE
+        # Апселл только при покупке с нуля: с активной подпиской Solo ведёт
+        # на продление или смену тарифа, а не на выбор периода.
+        callback_data = (
+            _SOLO_UPSELL_CALLBACK
+            if promo and has_hit_plan and current_plan_id is None and code == _SOLO_UPSELL_CODE
+            else f"tariff_select:{plan.code}"
+        )
         if current_plan_id is not None and plan.id == current_plan_id and current_plan_label:
             label = current_plan_label
         elif is_hit:
@@ -1289,7 +1303,7 @@ def get_tariffs_keyboard(
         rows.append([
             InlineKeyboardButton(
                 text=label,
-                callback_data=f"tariff_select:{plan.code}",
+                callback_data=callback_data,
                 style=ButtonStyle.SUCCESS if is_hit else None,
             )
         ])
@@ -1301,6 +1315,26 @@ def get_tariffs_keyboard(
         )
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def get_solo_upsell_keyboard(language: str = DEFAULT_LANGUAGE) -> InlineKeyboardMarkup:
+    """Plus выше Solo: экран апселла перед выбором периода Solo."""
+    texts = get_texts(language)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=texts.t("TARIFF_SOLO_UPSELL_PLUS", "Выбрать Plus"),
+            callback_data=f"tariff_select:{_TARIFF_HIT_CODE}",
+            style=ButtonStyle.SUCCESS,
+        )],
+        [InlineKeyboardButton(
+            text=texts.t("TARIFF_SOLO_UPSELL_SOLO", "Выбрать Solo"),
+            callback_data=f"tariff_select:{_SOLO_UPSELL_CODE}",
+        )],
+        [InlineKeyboardButton(
+            text=texts.t("TARIFFS_BACK", "⬅️ Назад"),
+            callback_data="subscription_tariffs",
+        )],
+    ])
 
 
 def get_tariff_periods_keyboard(
