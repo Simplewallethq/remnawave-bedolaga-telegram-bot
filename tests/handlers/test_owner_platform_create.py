@@ -405,3 +405,35 @@ async def test_reconnect_with_the_same_token(world) -> None:
     row = (await db.execute(select(CopycatBot))).scalar_one()
     assert row.enabled and row.support == "@kept"
     await db.close()
+
+
+async def test_start_shows_choice_until_a_mode_is_picked(monkeypatch) -> None:
+    from app.handlers.owner_platform import common
+
+    platform_bot = 8722
+    monkeypatch.setattr(settings, "OWNER_PLATFORM_BOT_ID", platform_bot, raising=False)
+    db = await _session()
+    try:
+        # Общий аккаунт из основного бота, в платформе режим не выбирал.
+        legacy = User(telegram_id=7, referral_code="legacy", bot_id=None)
+        # Зарегистрирован в платформе через «Попробовать VPN» до запоминания режима.
+        local = User(telegram_id=8, referral_code="local", bot_id=platform_bot)
+        db.add_all([legacy, local])
+        await db.commit()
+
+        start = _message("/start")
+        assert await common.show_owner_home_on_start(start, _state(), db, legacy)
+        assert "Создай свой VPN бот" in _answered(start)
+        assert not await common.show_owner_home_on_start(_message("/start"), _state(), db, local)
+
+        # Выбрал VPN — дальше обычное меню.
+        await platform.set_mode(db, legacy.id, platform.MODE_VPN)
+        assert not await common.show_owner_home_on_start(_message("/start"), _state(), db, legacy)
+
+        # Выбрал «создать бота», ботов нет — снова выбор.
+        await platform.set_mode(db, legacy.id, platform.MODE_OWNER)
+        again = _message("/start")
+        assert await common.show_owner_home_on_start(again, _state(), db, legacy)
+        assert "Создай свой VPN бот" in _answered(again)
+    finally:
+        await db.close()

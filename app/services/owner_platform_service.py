@@ -106,22 +106,19 @@ async def get_owner(db: AsyncSession, user_id: int) -> Optional[BotOwner]:
     return result.scalar_one_or_none()
 
 
-async def get_or_create_owner(db: AsyncSession, user_id: int) -> BotOwner:
+async def get_or_create_owner(db: AsyncSession, user_id: int, mode: str = MODE_OWNER) -> BotOwner:
     owner = await get_owner(db, user_id)
     if owner is None:
-        owner = BotOwner(user_id=user_id, mode=MODE_OWNER)
+        owner = BotOwner(user_id=user_id, mode=mode)
         db.add(owner)
         await db.flush()
     return owner
 
 
-async def set_mode(db: AsyncSession, user_id: int, mode: str) -> Optional[BotOwner]:
-    """Запоминает режим. Строка владельца заводится только при «создать бота»."""
-    owner = await get_owner(db, user_id)
-    if owner is None:
-        if mode != MODE_OWNER:
-            return None
-        owner = await get_or_create_owner(db, user_id)
+async def set_mode(db: AsyncSession, user_id: int, mode: str) -> BotOwner:
+    """Запоминает выбранный режим. Строка заводится при первом выборе любого
+    режима: по ней /start понимает, что экран выбора человек уже видел."""
+    owner = await get_or_create_owner(db, user_id, mode)
     owner.mode = mode
     await db.commit()
     return owner

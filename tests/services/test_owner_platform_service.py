@@ -306,10 +306,11 @@ async def test_connect_bot_and_mode(monkeypatch) -> None:
     newcomer = User(telegram_id=3, referral_code="newcomer")
     db.add(newcomer)
     await db.commit()
-    # Режим VPN строку владельца не заводит, «создать бота» — заводит.
-    assert await platform.set_mode(db, newcomer.id, platform.MODE_VPN) is None
+    # Любой выбор заводит строку: по ней /start понимает, что выбор уже был.
+    first = await platform.set_mode(db, newcomer.id, platform.MODE_VPN)
+    assert first.mode == "vpn"
     owner = await platform.set_mode(db, newcomer.id, platform.MODE_OWNER)
-    assert owner.mode == "owner"
+    assert owner.id == first.id and owner.mode == "owner"
     assert (await platform.set_mode(db, newcomer.id, platform.MODE_VPN)).mode == "vpn"
     await db.close()
 

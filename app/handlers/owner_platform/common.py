@@ -110,7 +110,16 @@ async def show_owner_home_on_start(message: types.Message, state: FSMContext, db
     """/start зарегистрированного в боте-платформе. True — экран показан здесь,
     False — пользователь в режиме VPN, показывать обычное меню."""
     owner = await platform.get_owner(db, user.id)
-    if owner is None or owner.mode != platform.MODE_OWNER:
+    if owner is None:
+        # Зарегистрирован в самой платформе — выбрал VPN, когда режим ещё не
+        # запоминался. Пришёл с общим аккаунтом из другого бота — режим не
+        # выбирал, показываем выбор, как новому.
+        if settings.is_owner_platform_bot(user.bot_id):
+            return False
+        await state.clear()
+        await show_platform_choice(message, language_of(user))
+        return True
+    if owner.mode != platform.MODE_OWNER:
         return False
     await state.clear()
     await show_home(message, db, user)

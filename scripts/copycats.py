@@ -556,6 +556,8 @@ async def run(args: argparse.Namespace) -> None:
             ).all()
             from app.config import settings
 
+            # Строки режима VPN без ботов — просто выбор «попробовать VPN».
+            rows = [row for row in rows if row[0].mode == "owner" or row[3]]
             for owner, telegram_id, username, bots in rows:
                 share = owner.revshare_percent
                 share_text = f"{share}%" if share is not None else f"{settings.OWNER_DEFAULT_REVSHARE_PERCENT}% (по умолчанию)"
