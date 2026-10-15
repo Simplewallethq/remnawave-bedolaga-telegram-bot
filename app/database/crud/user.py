@@ -64,9 +64,17 @@ def _scope_for(bot_id: Optional[int]) -> Optional[int]:
 def telegram_account_clause(telegram_id: int, bot_id: Optional[int] = None):
     """Аккаунты telegram_id, видимые из бота: старый общий или аккаунт скоупа бота.
 
-    bot_id по умолчанию — бот текущего апдейта; вне апдейта — основной.
+    bot_id по умолчанию — бот текущего апдейта; вне апдейта — основной. В боте
+    владельца общий аккаунт виден, только если в этом боте и заведён.
     """
+    from app.branding.context import current_bot_id
+    from app.utils.bot_registry import has_isolated_accounts
+
+    bot = bot_id if bot_id is not None else current_bot_id()
     scope = _scope_for(bot_id)
+    if has_isolated_accounts(bot):
+        own_legacy = and_(User.account_scope_bot_id.is_(None), User.bot_id == bot)
+        return and_(User.telegram_id == telegram_id, or_(User.account_scope_bot_id == scope, own_legacy))
     scope_condition = User.account_scope_bot_id.is_(None)
     if scope is not None:
         scope_condition = or_(scope_condition, User.account_scope_bot_id == scope)

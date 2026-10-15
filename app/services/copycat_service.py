@@ -471,6 +471,9 @@ class CopycatRuntime:
         else:
             bot_registry.set_payment_weights(tg_id, weights[0], weights[1])
         bot_registry.set_price_scheme(tg_id, effective_price_scheme_id(row, row.group))
+        # Бот владельца — чужая витрина: наши пользователи заводят в нём новый
+        # аккаунт, а не приносят туда свою подписку и баланс.
+        bot_registry.set_isolated_accounts(tg_id, row.owner_user_id is not None)
 
     async def _bring_down(self, row_id: int, *, reason: str) -> bool:
         bot = self._live.get(row_id)

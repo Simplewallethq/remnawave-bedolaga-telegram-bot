@@ -136,6 +136,37 @@ async def test_legacy_shared_account_wins_in_every_bot(bots) -> None:
     await db.close()
 
 
+@pytest.mark.anyio
+@needs_sqlite
+async def test_owner_bot_does_not_see_legacy_account(bots) -> None:
+    owner_bot = 2003
+    bot_registry.register_bot(
+        owner_bot, Path("data/bot_logos/x.jpg"), brand_config={"token": "t2003", "copycat": True, "name": "Owner"}
+    )
+    bot_registry.set_isolated_accounts(owner_bot, True)
+    db = await _make_session()
+    legacy = User(telegram_id=TG_ID, bot_id=PRIMARY_ID, referral_code="reflegacy")
+    # Общий аккаунт, заведённый в самом боте владельца, остаётся его.
+    other_legacy = User(telegram_id=TG_ID + 1, bot_id=owner_bot, referral_code="refown")
+    db.add_all([legacy, other_legacy])
+    await db.commit()
+
+    assert await get_user_by_telegram_id(db, TG_ID, bot_id=owner_bot) is None
+    with brand_scope(owner_bot):
+        assert await get_user_by_telegram_id(db, TG_ID) is None
+        own = await create_user(db, telegram_id=TG_ID)
+        assert own.account_scope_bot_id == owner_bot
+        assert (await get_user_by_telegram_id(db, TG_ID)).id == own.id
+    assert (await get_user_by_telegram_id(db, TG_ID + 1, bot_id=owner_bot)).id == other_legacy.id
+    # В остальных ботах общий аккаунт по-прежнему главный.
+    assert (await get_user_by_telegram_id(db, TG_ID, bot_id=COPYCAT_A)).id == legacy.id
+    assert (await get_user_by_telegram_id(db, TG_ID)).id == legacy.id
+
+    bot_registry.forget_bot(owner_bot)
+    assert not bot_registry.has_isolated_accounts(owner_bot)
+    await db.close()
+
+
 class _FakePanel:
     def __init__(self, users):
         self.users = {u.username: u for u in users}

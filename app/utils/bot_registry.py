@@ -21,6 +21,8 @@ _brand_configs: dict[int, Mapping[str, Any]] = {}
 _payment_weights: dict[int, tuple[dict[str, int], str]] = {}
 # Ценовая схема витрины (своя или от группы). Нет записи — глобальные цены.
 _price_schemes: dict[int, int] = {}
+# Боты владельцев: старые общие аккаунты сюда не пускаются (см. telegram_account_clause).
+_isolated_accounts: set[int] = set()
 
 
 def register_bot(
@@ -55,6 +57,7 @@ def forget_bot(bot_id: int) -> None:
     _brand_configs.pop(bot_id, None)
     _payment_weights.pop(bot_id, None)
     _price_schemes.pop(bot_id, None)
+    _isolated_accounts.discard(bot_id)
 
 
 def set_payment_weights(
@@ -81,6 +84,18 @@ def set_price_scheme(bot_id: int, scheme_id: int | None) -> None:
         _price_schemes.pop(bot_id, None)
     else:
         _price_schemes[bot_id] = int(scheme_id)
+
+
+def set_isolated_accounts(bot_id: int, isolated: bool) -> None:
+    if isolated:
+        _isolated_accounts.add(bot_id)
+    else:
+        _isolated_accounts.discard(bot_id)
+
+
+def has_isolated_accounts(bot_id: int | None) -> bool:
+    """Бот видит только свои аккаунты: общий аккаунт основного бота в нём не находится."""
+    return bot_id is not None and bot_id in _isolated_accounts
 
 
 def get_price_scheme_id(bot_id: int | None) -> int | None:
@@ -195,6 +210,7 @@ def clear() -> None:
     _brand_configs.clear()
     _payment_weights.clear()
     _price_schemes.clear()
+    _isolated_accounts.clear()
 
 
 def _same_file(first: Path, second: Path) -> bool:
