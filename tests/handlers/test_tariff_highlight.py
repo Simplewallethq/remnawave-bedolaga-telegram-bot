@@ -51,9 +51,30 @@ def test_tariff_buttons_put_highlighted_plus_first():
     assert [(row[0].text, row[0].callback_data) for row in rows] == [
         ("Выбрать Plus · ⭐️ хит", "tariff_select:plus"),
         ("Выбрать Pro", "tariff_select:pro"),
-        ("Выбрать Solo", "tariff_select:solo"),
+        ("Выбрать Solo", "tariff_solo_upsell"),
     ]
     assert [row[0].style for row in rows] == [ButtonStyle.SUCCESS, None, None]
+
+
+def test_solo_skips_upsell_with_active_plan():
+    keyboard = inline.get_tariffs_keyboard(
+        _plans_from_db_order(),
+        language="ru",
+        current_plan_id=4,
+        current_plan_label="✅ Текущий: Pro",
+    )
+
+    assert keyboard.inline_keyboard[2][0].callback_data == "tariff_select:solo"
+
+
+def test_solo_upsell_puts_plus_above_solo():
+    keyboard = inline.get_solo_upsell_keyboard(language="ru")
+
+    assert [(row[0].text, row[0].callback_data) for row in keyboard.inline_keyboard] == [
+        ("Выбрать Plus", "tariff_select:plus"),
+        ("Выбрать Solo", "tariff_select:solo"),
+        ("⬅️ Назад", "subscription_tariffs"),
+    ]
 
 
 def test_current_plan_keeps_its_label_but_stays_in_place():

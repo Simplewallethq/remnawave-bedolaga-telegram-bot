@@ -29,6 +29,7 @@ from app.handlers.subscription.notifications import (
 )
 from app.keyboards.inline import (
     get_payment_methods_keyboard,
+    get_solo_upsell_keyboard,
     get_renew_periods_keyboard,
     get_tariff_periods_keyboard,
     get_tariff_upgrade_keyboard,
@@ -473,6 +474,34 @@ async def show_change_tariff_page(
         db,
         back_callback="subscription",
     )
+
+
+async def show_solo_upsell(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+):
+    """Solo со страницы тарифов: перед выбором периода предлагаем сразу Plus."""
+    plus = await get_plan_by_code(db, "plus")
+    if await _resolve_active_subscription(db_user) or not plus or not plus.is_active:
+        # Апселл только для покупки с нуля — иначе обычный путь Solo.
+        solo_callback = callback.model_copy(update={"data": "tariff_select:solo"})
+        await show_tariff_periods(solo_callback, db_user, db)
+        return
+
+    texts = get_texts(db_user.language)
+    message_text = texts.t(
+        "TARIFF_SOLO_UPSELL_TEXT",
+        "Через день захочешь второе устройство? Бери Plus сразу",
+    )
+    image_path = os.path.join("images", "plans.webp")
+    await edit_or_answer_photo(
+        callback,
+        message_text,
+        get_solo_upsell_keyboard(db_user.language),
+        photo_path=image_path if os.path.exists(image_path) else None,
+    )
+    await callback.answer()
 
 
 async def show_tariff_periods(
@@ -2109,6 +2138,10 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         show_change_tariff_page,
         F.data == "subscription_change_tariff",
+    )
+    dp.callback_query.register(
+        show_solo_upsell,
+        F.data == "tariff_solo_upsell",
     )
     dp.callback_query.register(
         show_tariff_periods,
