@@ -1,7 +1,7 @@
 import logging
 import html
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple
 import os
 from aiogram import Dispatcher, types, F, Bot
 from aiogram.enums import ChatMemberStatus
@@ -853,6 +853,20 @@ async def process_tv_pairing_decision(
     await callback.answer()
 
 
+def split_cabinet_start_payload(start_parameter: Optional[str]) -> Tuple[bool, Optional[str]]:
+    """Разбирает deep-link входа в кабинет: "cabinet" или "cabinet_<реф-код>".
+
+    Возвращает (это вход в кабинет, оставшийся payload). Чужой payload не трогает.
+    """
+    if not start_parameter:
+        return False, start_parameter
+    if start_parameter == "cabinet":
+        return True, None
+    if start_parameter.startswith("cabinet_"):
+        return True, start_parameter[len("cabinet_"):] or None
+    return False, start_parameter
+
+
 async def _send_cabinet_login_link(message: types.Message, user, texts) -> None:
     """Выдаёт ссылку авто-входа в веб-кабинет (deep-link /start cabinet)."""
     from app.services.cabinet_auth_service import cabinet_auth_service
@@ -941,11 +955,13 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
 
     # Deep-link "cabinet": пользователь пришёл с сайта за входом в личный кабинет.
     # Обрабатываем до кампаний/рефералов, чтобы payload не считался реф-кодом.
-    cabinet_login = False
-    if start_parameter == "cabinet":
-        cabinet_login = True
-        start_parameter = None
-        logger.info("🔐 START: Запрошен вход в личный кабинет (deep-link cabinet)")
+    # С реф-ссылки сайта приходит "cabinet_<реф-код>" — хвост идёт дальше как реф-код.
+    cabinet_login, start_parameter = split_cabinet_start_payload(start_parameter)
+    if cabinet_login:
+        logger.info(
+            "🔐 START: Запрошен вход в личный кабинет (deep-link cabinet, реф-код: %s)",
+            start_parameter,
+        )
 
     if start_parameter and start_parameter.startswith("p_"):
         # Partner VIP-link: locally HMAC-verified before any DB/network calls.
