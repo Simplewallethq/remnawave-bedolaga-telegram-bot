@@ -17,7 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database.models import UserStatus
-from app.database.crud.device_link import create_device_link, get_device_link
+from app.database.crud.device_link import (
+    create_device_link,
+    get_device_link,
+    restore_revoked_device_link,
+)
 from app.database.crud.subscription import (
     create_trial_denied_subscription,
     create_trial_subscription,
@@ -202,6 +206,19 @@ async def verify_otp(
     # Перечитываем с eager-подпиской, чтобы вернуть свежие remnawave_uuid/URL.
     full = await get_user_by_id(db, user.id) or user
     subscription = getattr(full, "subscription", None)
+
+    # Устройство отвязали в ЛК или боте — повторный вход возвращает его, как и вход
+    # через Telegram. Иначе teleVpn отвечает DEVICE_REVOKED, и приложение выкидывает
+    # на экран входа сразу после успешного входа.
+    if device_id and subscription is not None:
+        restored = await restore_revoked_device_link(db, device_id, subscription.id)
+        if restored is not None:
+            logger.info(
+                "🔓 OTP: снят отзыв устройства %s, подписка %s (user_id=%s)",
+                device_id,
+                subscription.id,
+                full.id,
+            )
 
     return AppOtpVerifyResponse(
         user_id=full.id,

@@ -41,6 +41,7 @@ from app.database.crud.device_link import (  # noqa: E402
     get_device_link,
     reactivate_device_link,
     rebind_device_link,
+    restore_revoked_device_link,
     revoke_all_device_links,
     revoke_device_links,
 )
@@ -162,3 +163,39 @@ async def test_counting_is_unchanged_by_revocation():
         await revoke_device_links(db, ["dev-1"])
 
         assert await count_device_links(db, 1) == 2
+
+
+async def test_login_restores_revoked_device_on_own_subscription():
+    """Вход по почте с отвязанного устройства: иначе teleVpn выкидывает его снова и снова."""
+    async with _db() as db:
+        await _link(db, "dev-1", subscription_id=1)
+        await revoke_device_links(db, ["dev-1"])
+
+        assert await restore_revoked_device_link(db, "dev-1", 1) is not None
+
+        fresh = await get_device_link(db, "dev-1")
+        assert fresh.subscription_id == 1
+        assert fresh.is_active
+
+
+async def test_login_moves_revoked_device_to_the_new_account():
+    async with _db() as db:
+        await _link(db, "dev-1", subscription_id=1)
+        await revoke_device_links(db, ["dev-1"])
+
+        await restore_revoked_device_link(db, "dev-1", 2)
+
+        fresh = await get_device_link(db, "dev-1")
+        assert fresh.subscription_id == 2
+        assert fresh.is_active
+
+
+async def test_login_leaves_active_and_unknown_devices_alone():
+    async with _db() as db:
+        await _link(db, "dev-1", subscription_id=1)
+
+        assert await restore_revoked_device_link(db, "dev-1", 2) is None
+        assert await restore_revoked_device_link(db, "unknown", 2) is None
+
+        assert (await get_device_link(db, "dev-1")).subscription_id == 1
+        assert await get_device_link(db, "unknown") is None
