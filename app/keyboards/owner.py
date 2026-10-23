@@ -17,20 +17,40 @@ def _kb(*rows: list[InlineKeyboardButton]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[list(row) for row in rows])
 
 
+def _constructor_url() -> str | None:
+    """Создание и управление ботами переведены в конструктор — кнопки ведут туда."""
+    from app.constructor import constructor_runtime
+
+    return constructor_runtime.redirect_url()
+
+
 def platform_choice_keyboard(language: str) -> InlineKeyboardMarkup:
     texts = get_texts(language)
+    create_text = texts.t("OWNER_CHOICE_CREATE_BUTTON", "🤖 Создать своего VPN бота")
+    constructor_url = _constructor_url()
     return _kb(
-        [_btn(texts.t("OWNER_CHOICE_CREATE_BUTTON", "🤖 Создать своего VPN бота"), "wl_choice_create")],
+        [InlineKeyboardButton(text=create_text, url=constructor_url) if constructor_url
+         else _btn(create_text, "wl_choice_create")],
         [_btn(texts.t("OWNER_CHOICE_VPN_BUTTON", "🛡 Попробовать тестовый VPN"), "wl_choice_vpn")],
     )
 
 
 def owner_menu_keyboard(language: str) -> InlineKeyboardMarkup:
     texts = get_texts(language)
+    try_vpn = [_btn(texts.t("OWNER_TRY_VPN_BUTTON", "🛡 Попробовать тестовый VPN"), "wl_try_vpn")]
+    constructor_url = _constructor_url()
+    if constructor_url:
+        return _kb(
+            [InlineKeyboardButton(
+                text=texts.t("OWNER_OPEN_CONSTRUCTOR_BUTTON", "🧩 Управлять ботами в конструкторе"),
+                url=constructor_url,
+            )],
+            try_vpn,
+        )
     return _kb(
         [_btn(texts.t("OWNER_SETTINGS_BUTTON", "⚙️ Настройки"), "wl_settings")],
         [_btn(texts.t("OWNER_EARNINGS_BUTTON", "💰 Заработок"), "wl_earn")],
-        [_btn(texts.t("OWNER_TRY_VPN_BUTTON", "🛡 Попробовать тестовый VPN"), "wl_try_vpn")],
+        try_vpn,
     )
 
 

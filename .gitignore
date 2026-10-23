@@ -25,6 +25,14 @@ docker-compose.override.yml
 !scripts/enable_autopay_for_all.py
 !images/
 !images/**
+# Конструктор VPN-ботов: обложки бота и мини-апп (собирается в Dockerfile)
+!assets/
+!assets/constructor/
+!assets/constructor/**
+!constructor_web/
+!constructor_web/**
+constructor_web/node_modules/
+constructor_web/dist/
 
 # Дополнительно разрешаем README и лицензию (опционально)
 !README.md

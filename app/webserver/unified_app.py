@@ -163,6 +163,11 @@ def create_unified_app(
         telegram_processor = None
         app.state.mirror_webhook_hub = None
 
+    # Конструктор VPN-ботов: вебхук его бота, API и статика мини-аппа (/constructor/…).
+    from app.constructor import constructor_runtime
+
+    constructor_runtime.mount(app, enable_webhook=enable_telegram_webhook)
+
     miniapp_mounted, miniapp_path = _mount_miniapp_static(app)
 
     unified_health_path = "/health/unified" if settings.is_web_api_enabled() else "/health"

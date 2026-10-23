@@ -242,13 +242,7 @@ async def handle_price(message: types.Message, state: FSMContext, db: AsyncSessi
     error = platform.price_error(code, value, solo=data.get("wl_solo"), plus=data.get("wl_plus"))
     if error is not None:
         key, values = error
-        defaults = {
-            "OWNER_PRICE_SOLO_MIN": "Минимальная цена на Solo {min}₽.",
-            "OWNER_PRICE_PLUS_STEP": "Цена на Plus должна быть выше цены Solo на 10%, то есть минимум {min}₽.",
-            "OWNER_PRICE_PRO_STEP": "Цена на Pro должна быть выше цены Plus на 20%, то есть минимум {min}₽.",
-            "OWNER_PRICE_FLOOR": "Минимальная цена на {plan} — {min}₽.",
-        }
-        await message.answer(t(language, key, defaults[key], **values), reply_markup=back)
+        await message.answer(t(language, key, platform.PRICE_ERROR_DEFAULTS[key], **values), reply_markup=back)
         return
 
     await state.update_data(**{f"wl_{code}": value})

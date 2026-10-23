@@ -676,6 +676,20 @@ class Settings(BaseSettings):
     OWNER_PAYOUT_HOLD_DAYS: int = 7
     OWNER_PAYOUT_RATE_MARKUP_PERCENT: float = 7.0
     OWNER_PAYOUT_FEE_USDT: float = 3.0
+
+    # Конструктор VPN-ботов: отдельный Telegram-бот (app/constructor) поверх той
+    # же платформы владельцев. В боте — быстрый старт и мастер создания, всё
+    # управление — в мини-аппе. Пустой токен — конструктор выключен.
+    CONSTRUCTOR_BOT_TOKEN: str = ""
+    # HTTPS-адрес мини-аппа конструктора (кнопки «Открыть приложение»).
+    CONSTRUCTOR_WEBAPP_URL: str = ""
+    # Живой пример VPN-бота для кнопки «Пример». Пусто — кнопки нет.
+    CONSTRUCTOR_EXAMPLE_BOT_URL: str = ""
+    # Собранный фронтенд мини-аппа; веб-сервер отдаёт его по /constructor/.
+    CONSTRUCTOR_WEBAPP_STATIC_PATH: str = "constructor_web/dist"
+    # true — «Создать VPN бота» в боте-платформе ведёт в конструктор, а не во
+    # встроенный мастер. Включать, когда конструктор проверен.
+    OWNER_PLATFORM_REDIRECT_TO_CONSTRUCTOR: bool = False
     SKIP_RULES_ACCEPT: bool = False
     SKIP_REFERRAL_CODE: bool = False
 
@@ -2537,6 +2551,11 @@ class Settings(BaseSettings):
 
     def is_owner_platform_bot(self, bot_id: int | None) -> bool:
         return bool(self.OWNER_PLATFORM_BOT_ID) and bot_id == self.OWNER_PLATFORM_BOT_ID
+
+    def is_constructor_enabled(self) -> bool:
+        """Конструктор работает поверх платформы владельцев: без неё ему некуда
+        заводить аккаунты владельцев."""
+        return bool((self.CONSTRUCTOR_BOT_TOKEN or "").strip()) and bool(self.OWNER_PLATFORM_BOT_ID)
 
     def _load_mirror_bots_from_file(self) -> list[dict] | None:
         log = logging.getLogger(__name__)

@@ -1,3 +1,12 @@
+# Мини-апп конструктора VPN-ботов (constructor_web → /app/constructor_web/dist)
+FROM node:22-slim AS web
+
+WORKDIR /web
+COPY constructor_web/package.json constructor_web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY constructor_web/ ./
+RUN npm run build
+
 FROM python:3.13-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -32,6 +41,7 @@ RUN groupadd -g 1000 app && \
 WORKDIR /app
 
 COPY --chown=app:app . .
+COPY --from=web --chown=app:app /web/dist ./constructor_web/dist
 
 RUN mkdir -p logs data && \
     chown -R app:app /app logs data

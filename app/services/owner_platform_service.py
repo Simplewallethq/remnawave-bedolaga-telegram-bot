@@ -91,11 +91,19 @@ def looks_like_token(text: str) -> bool:
     return bool(_TOKEN_RE.match((text or "").strip()))
 
 
+_reserved_bot_ids: set[int] = set()
+
+
+def reserve_bot_id(bot_id: int) -> None:
+    """Служебный бот, который нельзя подключить витриной (конструктор)."""
+    _reserved_bot_ids.add(int(bot_id))
+
+
 def is_reserved_bot_id(bot_id: int) -> bool:
-    """Основной бот и сама платформа не подключаются как витрины."""
+    """Основной бот, сама платформа и служебные боты не подключаются как витрины."""
     from app.utils.bot_registry import is_primary_bot
 
-    return is_primary_bot(bot_id) or settings.is_owner_platform_bot(bot_id)
+    return is_primary_bot(bot_id) or settings.is_owner_platform_bot(bot_id) or bot_id in _reserved_bot_ids
 
 
 # ---------------------------------------------------------------- владелец
@@ -286,6 +294,43 @@ async def save_picture(bot: Bot, file_id: str, bot_id: int, *, suffix: str = ".j
     return str(path)
 
 
+_MAX_PICTURE_SIDE = 2560
+_MAX_PICTURE_RATIO = 20  # больше Telegram не примет как фото
+
+
+def save_picture_bytes(data: bytes, bot_id: int) -> str:
+    """Картинка бота из байтов (мини-апп, файл из чата) в OWNER_BOT_IMAGES_DIR.
+
+    Перекодируется в JPEG: так Telegram всегда примет её как фото, а метаданные
+    файла не уходят дальше. ValueError — это не картинка или Telegram её не примет.
+    """
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        with Image.open(BytesIO(data)) as source:
+            source.load()
+            if source.mode in ("RGBA", "LA", "P"):
+                source = source.convert("RGBA")
+                picture = Image.new("RGB", source.size, (255, 255, 255))
+                picture.paste(source, mask=source.getchannel("A"))
+            else:
+                picture = source.convert("RGB")
+    except Exception as error:  # noqa: BLE001 - любой отказ PIL = не картинка
+        raise ValueError("not an image") from error
+    width, height = picture.size
+    if not width or not height or max(width, height) / min(width, height) > _MAX_PICTURE_RATIO:
+        raise ValueError("bad proportions")
+    picture.thumbnail((_MAX_PICTURE_SIDE, _MAX_PICTURE_SIDE))
+
+    directory = Path(settings.OWNER_BOT_IMAGES_DIR)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{bot_id}_{int(time.time() * 1000)}.jpg"
+    picture.save(path, "JPEG", quality=90)
+    return str(path)
+
+
 # ---------------------------------------------------------------- цены
 
 
@@ -328,6 +373,25 @@ def price_error(plan_code: str, value: int, *, solo: Optional[int] = None, plus:
     return None
 
 
+PRICE_ERROR_DEFAULTS = {
+    "OWNER_PRICE_SOLO_MIN": "Минимальная цена на Solo {min}₽.",
+    "OWNER_PRICE_PLUS_STEP": "Цена на Plus должна быть выше цены Solo на 10%, то есть минимум {min}₽.",
+    "OWNER_PRICE_PRO_STEP": "Цена на Pro должна быть выше цены Plus на 20%, то есть минимум {min}₽.",
+    "OWNER_PRICE_FLOOR": "Минимальная цена на {plan} — {min}₽.",
+}
+
+
+def monthly_prices_errors(monthly: dict[str, int]) -> dict[str, tuple[str, dict]]:
+    """Ошибки набора месячных цен Solo/Plus/Pro: {тариф: (ключ текста, подстановки)}.
+    Plus сверяется с Solo, Pro — с Plus, как при пошаговом вводе в боте."""
+    errors = {}
+    for code in PLAN_TITLES:
+        error = price_error(code, monthly[code], solo=monthly.get("solo"), plus=monthly.get("plus"))
+        if error is not None:
+            errors[code] = error
+    return errors
+
+
 def current_monthly_prices(row: CopycatBot) -> dict[str, int]:
     """Месячные цены бота в рублях: из его схемы (своей или группы), иначе
     цены основного бота для новых."""
@@ -340,6 +404,29 @@ def current_monthly_prices(row: CopycatBot) -> dict[str, int]:
         prices = scheme_prices_for_plan(scheme, code) if scheme else base_prices(code)
         result[code] = int(prices.get(30, 0)) // 100
     return result
+
+
+def current_period_prices(row: CopycatBot) -> dict[str, dict[int, int]]:
+    """Цены бота по всем продаваемым периодам, ₽: {тариф: {дней: рублей}}."""
+    from app.services.price_scheme_service import base_prices, get_scheme, scheme_prices_for_plan
+    from app.utils.bot_registry import get_price_scheme_id
+
+    scheme = get_scheme(get_price_scheme_id(row.telegram_bot_id))
+    result = {}
+    for code in PLAN_TITLES:
+        prices = scheme_prices_for_plan(scheme, code) if scheme else base_prices(code)
+        result[code] = {int(days): int(kopeks) // 100 for days, kopeks in sorted(prices.items())}
+    return result
+
+
+def preview_period_prices(monthly: dict[str, int]) -> dict[str, dict[int, int]]:
+    """Какими станут цены по периодам после сохранения месячных, ₽."""
+    from app.services.price_scheme_service import derive_period_prices
+
+    return {
+        code: {days: kopeks // 100 for days, kopeks in sorted(derive_period_prices(monthly[code], code).items())}
+        for code in PLAN_TITLES
+    }
 
 
 async def save_owner_prices(db: AsyncSession, row: CopycatBot, monthly: dict[str, int]) -> None:
@@ -402,6 +489,28 @@ async def owner_stats(db: AsyncSession, user_id: int, *, now: Optional[datetime]
         )
     )
     return OwnerStats(active, int(total or 0), int(yesterday or 0))
+
+
+@dataclass(frozen=True)
+class BotStats:
+    users_total: int
+    users_yesterday: int
+    turnover_total: int
+
+
+async def bot_stats(db: AsyncSession, row: CopycatBot, *, now: Optional[datetime] = None) -> BotStats:
+    """Пользователи и оборот одного бота владельца."""
+    if not row.telegram_bot_id:
+        return BotStats(0, 0, 0)
+    start, end = _yesterday_utc(now)
+    total = await db.scalar(select(func.count(User.id)).where(User.bot_id == row.telegram_bot_id))
+    yesterday = await db.scalar(
+        select(func.count(User.id)).where(
+            User.bot_id == row.telegram_bot_id, User.created_at >= start, User.created_at < end
+        )
+    )
+    turnover = await db.scalar(_turnover_query([row.telegram_bot_id]))
+    return BotStats(int(total or 0), int(yesterday or 0), int(turnover or 0))
 
 
 # ---------------------------------------------------------------- заработок
@@ -565,6 +674,17 @@ async def create_payout(
     db.add(payout)
     await db.commit()
     return payout
+
+
+async def list_payouts(db: AsyncSession, owner_id: int, *, limit: int = 20) -> list[OwnerPayout]:
+    """Последние заявки владельца на вывод, новые сверху."""
+    result = await db.execute(
+        select(OwnerPayout)
+        .where(OwnerPayout.owner_id == owner_id)
+        .order_by(OwnerPayout.created_at.desc(), OwnerPayout.id.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
 
 
 async def notify_admins_new_payout(user: User, payout: OwnerPayout) -> None:

@@ -264,16 +264,21 @@ async def admin_process_payout(callback: types.CallbackQuery):
     except Exception:  # noqa: BLE001
         pass
 
-    platform_bot = get_bot_instance(settings.OWNER_PLATFORM_BOT_ID)
-    if recipient is not None and platform_bot is not None:
+    # Владелец узнаёт о выплате в конструкторе; не открывал его — в боте-платформе.
+    from app.constructor import constructor_runtime
+
+    senders = [constructor_runtime.bot, get_bot_instance(settings.OWNER_PLATFORM_BOT_ID)]
+    if recipient is not None:
         to_send = Decimal(payout.amount_usdt) - Decimal(payout.fee_usdt)
         text = (
             f"💸 Заявка №{payout.id} на вывод {to_send} USDT выплачена."
             if paid
             else f"❌ Заявка №{payout.id} на вывод отклонена, сумма вернулась в доступный баланс."
         )
-        try:
-            await platform_bot.send_message(recipient.telegram_id, text)
-        except Exception as error:  # noqa: BLE001
-            logger.warning("Не удалось уведомить владельца о заявке №%s: %s", payout.id, error)
+        for sender in filter(None, senders):
+            try:
+                await sender.send_message(recipient.telegram_id, text)
+                break
+            except Exception as error:  # noqa: BLE001
+                logger.warning("Не удалось уведомить владельца о заявке №%s из бота %s: %s", payout.id, sender.id, error)
     await callback.answer("Готово")

@@ -34,6 +34,8 @@ docker-compose*.yml
 # Build artifacts
 build/
 dist/
+constructor_web/node_modules/
+constructor_web/dist/
 *.egg-info/
 
 # OS files

@@ -3354,12 +3354,18 @@ def get_new_main_menu_keyboard(
     texts = get_texts(language)
     keyboard = []
 
-    # Бот-платформа для владельцев витрин: из VPN-режима — в создание своего бота.
+    # Бот-платформа для владельцев витрин: из VPN-режима — в создание своего бота
+    # (в конструктор, если создание переведено туда).
     if settings.is_owner_platform_bot(current_bot_id()):
-        keyboard.append([InlineKeyboardButton(
-            text=texts.t("OWNER_MENU_CREATE_BOT_BUTTON", "🤖 Создать VPN бота"),
-            callback_data="wl_entry",
-        )])
+        from app.constructor import constructor_runtime
+
+        create_text = texts.t("OWNER_MENU_CREATE_BOT_BUTTON", "🤖 Создать VPN бота")
+        constructor_url = constructor_runtime.redirect_url()
+        keyboard.append([
+            InlineKeyboardButton(text=create_text, url=constructor_url)
+            if constructor_url
+            else InlineKeyboardButton(text=create_text, callback_data="wl_entry")
+        ])
     
     if not trial_used and not trial_active and not has_active_subscription:
         if paid_trial_offer:

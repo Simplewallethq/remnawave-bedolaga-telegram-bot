@@ -176,6 +176,9 @@ python -m scripts.copycats owners
 python -m scripts.copycats owner-set 123456789 revshare=70    # Telegram id или user:<id>
 ```
 
+Тех же владельцев и те же правила обслуживает отдельный бот-конструктор с
+мини-аппом — см. `CONSTRUCTOR.md`.
+
 Имя «Adrenalin VPN» в шаблоне «{project_name} VPN» не удваивает слово: если в
 имени уже есть VPN, оно подставляется как есть.
 
