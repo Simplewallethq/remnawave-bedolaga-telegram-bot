@@ -3794,7 +3794,7 @@ async def toggle_user_server(
                 async with remnawave_service.get_api_client() as api:
                     await api.update_user(
                         uuid=user.remnawave_uuid,
-                        active_internal_squads=build_panel_squads(subscription, current_squads),
+                        active_internal_squads=build_panel_squads(subscription, current_squads, user=user),
                         description=panel_description_for_user(user)
                     )
                 logger.info(f"✅ Обновлены серверы в RemnaWave для пользователя {user.telegram_id}")
@@ -5050,7 +5050,7 @@ async def admin_buy_subscription_execute(
                             traffic_limit_bytes=subscription.traffic_limit_gb * (1024**3) if subscription.traffic_limit_gb > 0 else 0,
                             traffic_limit_strategy=TrafficLimitStrategy.MONTH,
                             description=panel_description_for_user(target_user),
-                            active_internal_squads=build_panel_squads(subscription),
+                            active_internal_squads=build_panel_squads(subscription, user=target_user),
                         )
 
                         if hwid_limit is not None:
@@ -5067,7 +5067,7 @@ async def admin_buy_subscription_execute(
                             traffic_limit_strategy=TrafficLimitStrategy.MONTH,
                             telegram_id=target_user.telegram_id,
                             description=panel_description_for_user(target_user),
-                            active_internal_squads=build_panel_squads(subscription),
+                            active_internal_squads=build_panel_squads(subscription, user=target_user),
                         )
 
                         if hwid_limit is not None:

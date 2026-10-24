@@ -165,6 +165,9 @@ class Settings(BaseSettings):
     # Внутренний сквад панели, который получает каждая не-триальная подписка
     # (поверх connected_squads). Пусто — сквад не добавляется.
     PAID_INTERNAL_SQUAD_UUID: Optional[str] = None
+    # Внутренний сквад панели для всех пользователей основного бренда (Leto и его
+    # копии, триал и платные) — у копикетов его нет. Пусто — сквад не добавляется.
+    PRIMARY_BRAND_INTERNAL_SQUAD_UUID: Optional[str] = None
 
     PRICE_TRAFFIC_5GB: int = 2000
     PRICE_TRAFFIC_10GB: int = 3500
@@ -1290,6 +1293,13 @@ class Settings(BaseSettings):
 
     def get_paid_internal_squad_uuid(self) -> Optional[str]:
         value = self.PAID_INTERNAL_SQUAD_UUID
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
+    def get_primary_brand_internal_squad_uuid(self) -> Optional[str]:
+        value = self.PRIMARY_BRAND_INTERNAL_SQUAD_UUID
         if value is None:
             return None
         cleaned = str(value).strip()

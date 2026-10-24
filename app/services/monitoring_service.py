@@ -495,7 +495,7 @@ class MonitoringService:
                     traffic_limit_bytes=self._gb_to_bytes(subscription.traffic_limit_gb),
                     traffic_limit_strategy=TrafficLimitStrategy.MONTH,
                     description=panel_description_for_user(user),
-                    active_internal_squads=build_panel_squads(subscription),
+                    active_internal_squads=build_panel_squads(subscription, user=user),
                 )
 
                 if hwid_limit is not None:

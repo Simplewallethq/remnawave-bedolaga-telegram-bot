@@ -111,7 +111,7 @@ async def main() -> None:
                         if paid_uuid in current:
                             stats["already"] += 1
                             return
-                        target = build_panel_squads(subscription, current)
+                        target = build_panel_squads(subscription, current, user=user)
                         if not args.apply:
                             logger.info(
                                 "[dry-run] user_id=%s %s: %s -> %s",
