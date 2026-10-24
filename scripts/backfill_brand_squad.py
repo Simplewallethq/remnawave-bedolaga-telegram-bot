@@ -29,6 +29,11 @@ Usage
 
     # пробный прогон: обновить не больше N пользователей
     python -m scripts.backfill_brand_squad --apply --limit 20
+
+    # по очереди: ручные аккаунты, потом активные, потом все остальные
+    python -m scripts.backfill_brand_squad --apply --only manual
+    python -m scripts.backfill_brand_squad --apply --only active
+    python -m scripts.backfill_brand_squad --apply
 """
 
 import argparse
@@ -108,6 +113,11 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--apply", action="store_true", help="выполнить запись в панель (без флага — dry-run)")
     parser.add_argument("--limit", type=int, default=0, help="обновить не больше N пользователей (0 = все)")
+    parser.add_argument(
+        "--only",
+        choices=("manual", "active"),
+        help="manual — только аккаунты без префикса, active — только со статусом ACTIVE",
+    )
     args = parser.parse_args()
 
     squad_uuid = get_primary_brand_squad_uuid()
@@ -115,7 +125,7 @@ async def main() -> None:
         parser.error("PRIMARY_BRAND_INTERNAL_SQUAD_UUID не задан — нечего раздавать")
 
     mode = "APPLY" if args.apply else "DRY-RUN"
-    logger.info("Режим: %s, сквад: %s", mode, squad_uuid)
+    logger.info("Режим: %s, сквад: %s, выборка: %s", mode, squad_uuid, args.only or "все")
 
     copycat_uuids, bot_uuids = await _load_bot_accounts()
 
@@ -149,6 +159,10 @@ async def main() -> None:
                     continue
                 if username.startswith(BOT_PREFIXES) and panel_user.uuid not in bot_uuids:
                     stats["skip_orphan"] += 1
+                    continue
+                if args.only == "manual" and _category(username) != "manual":
+                    continue
+                if args.only == "active" and getattr(panel_user.status, "value", panel_user.status) != "ACTIVE":
                     continue
                 current = _panel_squad_uuids(panel_user)
                 if squad_uuid in current:
