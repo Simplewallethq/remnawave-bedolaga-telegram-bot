@@ -71,13 +71,14 @@ async def test_support_context_returns_404_for_unknown_user(
 ) -> None:
     monkeypatch.setattr(
         support_context_module,
-        "get_user_by_telegram_id",
-        AsyncMock(return_value=None),
+        "find_support_user",
+        AsyncMock(return_value=(None, 0)),
     )
 
     with pytest.raises(HTTPException) as exc_info:
         await support_context_module.get_support_context_by_telegram_id(
             999,
+            prefer="main",
             _=object(),
             db=DummySession(),
         )
@@ -89,20 +90,20 @@ async def test_support_context_serializes_known_user(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user = _user()
-    monkeypatch.setattr(
-        support_context_module,
-        "get_user_by_telegram_id",
-        AsyncMock(return_value=user),
-    )
+    finder = AsyncMock(return_value=(user, 2))
+    monkeypatch.setattr(support_context_module, "find_support_user", finder)
 
     payload = await support_context_module.get_support_context_by_telegram_id(
         user.telegram_id,
+        prefer="copy",
         _=object(),
         db=DummySession(),
     )
 
+    finder.assert_awaited_once_with(finder.await_args.args[0], user.telegram_id, "copy")
     assert payload["user"]["telegramId"] == user.telegram_id
     assert payload["subscription"]["deviceLimit"] == 3
+    assert payload["account"]["accounts"] == 2
 
 
 async def test_support_context_resolves_cabinet_account_id(

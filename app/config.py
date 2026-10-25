@@ -726,6 +726,9 @@ class Settings(BaseSettings):
     WEB_API_DEFAULT_TOKEN_NAME: str = "Bootstrap Token"
     WEB_API_TOKEN_HASH_ALGORITHM: str = "sha256"
     WEB_API_REQUEST_LOGGING: bool = True
+    # Подпись действий поддержки (ChatSupport): начисление баланса, тариф, сброс
+    # устройств через /cabinet/internal/support. Пусто — действия выключены.
+    SUPPORT_ACTIONS_SECRET: Optional[str] = None
 
     # Личный кабинет (веб-аутентификация без Telegram)
     CABINET_ENABLED: bool = True
