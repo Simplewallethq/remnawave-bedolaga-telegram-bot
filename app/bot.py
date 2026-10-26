@@ -6,6 +6,7 @@ import redis.asyncio as redis
 
 from app.config import settings
 from app.middlewares.brand_context import BrandContextMiddleware
+from app.middlewares.payments_disabled import PaymentsDisabledMiddleware
 from app.middlewares.global_error import GlobalErrorMiddleware
 from app.middlewares.private_chat_only import PrivateChatOnlyMiddleware
 from app.middlewares.auth import AuthMiddleware
@@ -189,6 +190,8 @@ async def setup_bot() -> tuple[list[Bot], Dispatcher]:
     dp.pre_checkout_query.middleware(AuthMiddleware())
     dp.message.middleware(SubscriptionStatusMiddleware())
     dp.callback_query.middleware(SubscriptionStatusMiddleware())
+    dp.callback_query.middleware(PaymentsDisabledMiddleware())
+    dp.pre_checkout_query.middleware(PaymentsDisabledMiddleware())
     commands.register_handlers(dp)
     start.register_handlers(dp)
     owner_platform.register_handlers(dp)

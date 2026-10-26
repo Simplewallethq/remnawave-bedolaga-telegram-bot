@@ -79,6 +79,16 @@ def get_payment_weights(bot_id: int | None) -> tuple[dict[str, int], str] | None
     return dict(entry[0]), entry[1]
 
 
+def payments_disabled(bot_id: int | None) -> bool:
+    """Все свои веса бота нулевые — в этом боте оплата не принимается вовсе.
+
+    Без этого нулевые веса лишь убирают кнопку «Оплатить», и бот откатывается
+    на прямые кнопки шлюзов.
+    """
+    entry = get_payment_weights(bot_id)
+    return entry is not None and all(weight <= 0 for weight in entry[0].values())
+
+
 def set_price_scheme(bot_id: int, scheme_id: int | None) -> None:
     if scheme_id is None:
         _price_schemes.pop(bot_id, None)

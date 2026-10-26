@@ -1699,6 +1699,7 @@
     "TARIFF_APP_HAPP_BLOCKED": "ℹ️ App 套餐仅支持我们的应用，Happ 按钮不可用。",
     "PAYMENT_AUTO_PAY_BUTTON": "💳 支付 {amount}",
     "PAYMENT_AUTO_PAY_BUTTON_WITH_AMOUNT": "💳 支付 – {amount}",
+    "PAYMENTS_DISABLED_IN_BOT": "此机器人暂不支持付款。",
     "PAYMENT_AUTO_INSTRUCTIONS": "<b>支付 — {amount}</b>\n银行卡 / SBP / 加密货币\n\n🔒 安全支付\n通常需要 10 秒以内",
     "PAYMENT_AUTO_UNAVAILABLE": "❌ 支付暂时不可用，请稍后重试或联系客服。",
     "PAYMENT_AUTO_CREATE_ERROR": "❌ 无法创建账单，请稍后重试或联系客服。",

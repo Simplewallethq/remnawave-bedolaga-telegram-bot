@@ -1701,6 +1701,7 @@
   "TARIFF_APP_HAPP_BLOCKED": "ℹ️ На тарифі App використовується лише наш застосунок. Кнопка Happ недоступна.",
   "PAYMENT_AUTO_PAY_BUTTON": "💳 Сплатити {amount}",
   "PAYMENT_AUTO_PAY_BUTTON_WITH_AMOUNT": "💳 Сплатити – {amount}",
+  "PAYMENTS_DISABLED_IN_BOT": "Оплата в цьому боті недоступна.",
   "PAYMENT_AUTO_INSTRUCTIONS": "<b>Оплата — {amount}</b>\nКартка / СБП / Крипто\n\n🔒 Захищений платіж\nЗазвичай займає до 10 секунд",
   "PAYMENT_AUTO_UNAVAILABLE": "❌ Оплата тимчасово недоступна. Спробуйте пізніше або зверніться в підтримку.",
   "PAYMENT_AUTO_CREATE_ERROR": "❌ Не вдалося створити рахунок. Спробуйте пізніше або зверніться в підтримку.",

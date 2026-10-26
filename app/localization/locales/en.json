@@ -1888,6 +1888,7 @@
   "TV_PAIRING_ERROR": "⚠️ Could not connect the TV. Please try again in a minute.",
   "PAYMENT_AUTO_PAY_BUTTON": "💳 Pay {amount}",
   "PAYMENT_AUTO_PAY_BUTTON_WITH_AMOUNT": "💳 Pay – {amount}",
+  "PAYMENTS_DISABLED_IN_BOT": "Payments are not available in this bot.",
   "PAYMENT_AUTO_INSTRUCTIONS": "<b>Payment — {amount}</b>\nCard / SBP / Crypto\n\n🔒 Secure payment\nUsually takes up to 10 seconds",
   "PAYMENT_AUTO_UNAVAILABLE": "❌ Payments are temporarily unavailable. Please try later or contact support.",
   "PAYMENT_AUTO_CREATE_ERROR": "❌ Could not create the invoice. Please try later or contact support.",
