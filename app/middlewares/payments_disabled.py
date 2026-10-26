@@ -42,6 +42,24 @@ _ALLOWED_SIMPLE = frozenset(
 )
 
 
+def _disabled_text(language: str | None) -> str:
+    return get_texts(language or "ru").t(
+        "PAYMENTS_DISABLED_IN_BOT",
+        "Оплата в этом боте недоступна.",
+    )
+
+
+async def reject_payment_if_disabled(callback: CallbackQuery, language: str | None) -> bool:
+    """Для мест, где счёт выставляется не по кнопке оплаты, а следом за покупкой
+    (доплата за тариф, прямой счёт Platega): фильтр колбэков их не видит."""
+    bot_id = current_bot_id()
+    if not payments_disabled(bot_id):
+        return False
+    logger.info("Оплата в боте %s выключена: счёт для %s не выставлен", bot_id, callback.from_user.id)
+    await callback.answer(_disabled_text(language), show_alert=True)
+    return True
+
+
 def is_payment_callback(data: str) -> bool:
     if data in _BLOCKED_EXACT or data.startswith(_BLOCKED_PREFIXES):
         return True
@@ -63,12 +81,7 @@ class PaymentsDisabledMiddleware(BaseMiddleware):
         if not payments_disabled(bot_id):
             return await handler(event, data)
 
-        db_user = data.get("db_user")
-        texts = get_texts(getattr(db_user, "language", None) or "ru")
-        message = texts.t(
-            "PAYMENTS_DISABLED_IN_BOT",
-            "Оплата в этом боте недоступна.",
-        )
+        message = _disabled_text(getattr(data.get("db_user"), "language", None))
 
         if isinstance(event, PreCheckoutQuery):
             logger.info("Оплата в боте %s выключена: pre-checkout %s отклонён", bot_id, event.id)

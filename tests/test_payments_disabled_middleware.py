@@ -5,7 +5,11 @@ import pytest
 from aiogram.types import CallbackQuery, PreCheckoutQuery
 
 from app.branding.context import brand_scope
-from app.middlewares.payments_disabled import PaymentsDisabledMiddleware, is_payment_callback
+from app.middlewares.payments_disabled import (
+    PaymentsDisabledMiddleware,
+    is_payment_callback,
+    reject_payment_if_disabled,
+)
 from app.utils import bot_registry
 
 BOT_ID = 990001
@@ -114,3 +118,17 @@ async def test_rejects_pre_checkout_in_disabled_bot():
 
     handler.assert_not_awaited()
     assert event.answer.await_args.kwargs["ok"] is False
+
+
+@pytest.mark.anyio
+async def test_reject_payment_if_disabled_answers_only_in_disabled_bot():
+    event = _callback("tariff_buy:solo:30")
+
+    with brand_scope(BOT_ID):
+        assert await reject_payment_if_disabled(event, "ru") is False
+        event.answer.assert_not_awaited()
+
+        bot_registry.set_payment_weights(BOT_ID, {"platega": 0, "wata": 0})
+        assert await reject_payment_if_disabled(event, "ru") is True
+
+    assert event.answer.await_args.kwargs["show_alert"] is True

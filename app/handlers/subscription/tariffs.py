@@ -186,6 +186,11 @@ async def _start_tariff_platega_checkout(
     balance_callback: str | None = None,
 ) -> None:
     """Create a Platega invoice for a tariff operation with an optional balance-payment action."""
+    from app.middlewares.payments_disabled import reject_payment_if_disabled
+
+    if await reject_payment_if_disabled(callback, db_user.language):
+        return
+
     texts = get_texts(db_user.language)
     missing_kopeks = max(0, total_kopeks - db_user.balance_kopeks)
     invoice_kopeks = missing_kopeks or total_kopeks

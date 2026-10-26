@@ -18,6 +18,7 @@ from app.keyboards.inline import (
     get_platega_autopay_keyboard,
 )
 from app.localization.texts import get_texts
+from app.middlewares.payments_disabled import reject_payment_if_disabled
 from app.services.payment_service import PaymentService
 from app.states import BalanceStates
 from app.utils.decorators import error_handler
@@ -419,6 +420,9 @@ async def start_platega_payment(
     db_user: User,
     state: FSMContext,
 ):
+    if await reject_payment_if_disabled(callback, db_user.language):
+        return
+
     texts = get_texts(db_user.language)
 
     if not settings.is_platega_enabled():
@@ -955,6 +959,9 @@ async def start_platega_universal_payment(
     db_user: User,
     state: FSMContext,
 ):
+    if await reject_payment_if_disabled(callback, db_user.language):
+        return
+
     texts = get_texts(db_user.language)
 
     if not settings.is_platega_universal_enabled():
