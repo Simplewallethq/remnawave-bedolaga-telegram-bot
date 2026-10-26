@@ -220,7 +220,7 @@ class SubscriptionService:
                         traffic_limit_bytes=self._gb_to_bytes(subscription.traffic_limit_gb),
                         traffic_limit_strategy=get_traffic_reset_strategy(),
                         description=panel_description_for_user(user),
-                        active_internal_squads=build_panel_squads(subscription),
+                        active_internal_squads=build_panel_squads(subscription, user=user),
                     )
 
                     if user_tag is not None:
@@ -250,7 +250,7 @@ class SubscriptionService:
                         telegram_id=user.telegram_id,
                         email=user.email,
                         description=panel_description_for_user(user),
-                        active_internal_squads=build_panel_squads(subscription),
+                        active_internal_squads=build_panel_squads(subscription, user=user),
                     )
 
                     if user_tag is not None:
@@ -329,7 +329,7 @@ class SubscriptionService:
                     traffic_limit_bytes=self._gb_to_bytes(subscription.traffic_limit_gb),
                     traffic_limit_strategy=get_traffic_reset_strategy(),
                     description=panel_description_for_user(user),
-                    active_internal_squads=build_panel_squads(subscription),
+                    active_internal_squads=build_panel_squads(subscription, user=user),
                 )
 
                 if user_tag is not None:

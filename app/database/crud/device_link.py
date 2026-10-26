@@ -97,6 +97,19 @@ async def reactivate_device_link(db: AsyncSession, link: DeviceLink) -> DeviceLi
     return link
 
 
+async def restore_revoked_device_link(
+    db: AsyncSession, device_id: str, subscription_id: int
+) -> DeviceLink | None:
+    """Вход в приложение с отозванного устройства: снять отзыв и привязать к подписке
+    вошедшего. Активную привязку не трогает. Возвращает ссылку, если отзыв сняли."""
+    link = await get_device_link(db, device_id)
+    if link is None or link.revoked_at is None:
+        return None
+    if link.subscription_id == subscription_id:
+        return await reactivate_device_link(db, link)
+    return await rebind_device_link(db, link, subscription_id)
+
+
 async def get_subscription_by_device_id(db: AsyncSession, device_id: str) -> Subscription | None:
     """Get subscription associated with a device_id via JOIN. Returns None if device not found."""
     result = await db.execute(
