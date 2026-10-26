@@ -122,6 +122,9 @@ async def _queue_vpn_deposit_bonus_safely(
 
 _UUID_MAP_MISSING = object()
 
+# Сколько пользователей бота полный синк поднимает из БД за один запрос.
+_SYNC_USERS_CHUNK_SIZE = 2000
+
 
 class _UUIDMapMutation:
     """Tracks in-memory UUID map/user changes so they can be rolled back."""
@@ -1440,17 +1443,28 @@ class RemnaWaveService:
                 
                 logger.info(f"✅ Всего загружено пользователей из панели: {len(panel_users)}")
             
-            # Загрузка пользователей с их подписками за один запрос (bulk loading)
             from sqlalchemy.orm import selectinload
-            from app.database.models import User, Subscription
+            from app.database.models import User
             from sqlalchemy import select
-            
-            # Получаем всех пользователей с их подписками за один запрос
-            bot_users_result = await db.execute(
-                select(User)
-                .options(selectinload(User.subscription))
-            )
-            bot_users = bot_users_result.scalars().all()
+
+            # Пользователей с подписками грузим пачками по id: один запрос на все
+            # ~450k строк держал event loop по 10–20 с, и бот не отвечал на апдейты.
+            bot_users = []
+            last_user_id = 0
+            while True:
+                chunk_result = await db.execute(
+                    select(User)
+                    .options(selectinload(User.subscription))
+                    .where(User.id > last_user_id)
+                    .order_by(User.id)
+                    .limit(_SYNC_USERS_CHUNK_SIZE)
+                )
+                chunk = chunk_result.scalars().all()
+                if not chunk:
+                    break
+                bot_users.extend(chunk)
+                last_user_id = chunk[-1].id
+                await asyncio.sleep(0)
             # По telegram_id сопоставляем только старые общие аккаунты: у нового
             # пользователя аккаунт на каждый бот, и под одним telegramId в панели
             # лежит несколько юзеров — их сопоставляем только по UUID.
@@ -1512,18 +1526,6 @@ class RemnaWaveService:
                 for user in panel_users
                 if user.get('uuid')
             }
-
-            # Для ускорения - подготовим данные о подписках
-            # Соберем все существующие подписки за один запрос
-            existing_subscriptions_result = await db.execute(
-                select(Subscription)
-                .join(User)
-                .options(selectinload(Subscription.user))
-            )
-            existing_subscriptions = existing_subscriptions_result.scalars().all()
-            
-            # Создадим словарь для быстрого доступа к подпискам
-            subscriptions_by_user_id = {sub.user_id: sub for sub in existing_subscriptions}
 
             # Для оптимизации коммитим изменения каждые N пользователей
             batch_size = 50

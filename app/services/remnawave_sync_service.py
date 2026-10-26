@@ -47,8 +47,6 @@ class RemnaWaveAutoSyncService:
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._initialized = False
-        self._pending_refresh = False
-        self._pending_run_immediately = False
 
         self._next_run: Optional[datetime] = None
         self._last_run_started_at: Optional[datetime] = None
@@ -62,14 +60,7 @@ class RemnaWaveAutoSyncService:
     async def initialize(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._initialized = True
-
-        run_immediately = self._pending_run_immediately
-        if self._pending_refresh:
-            self._pending_refresh = False
-            self._pending_run_immediately = False
-            await self.refresh_schedule(run_immediately=run_immediately)
-        else:
-            await self.refresh_schedule()
+        await self.refresh_schedule()
 
     def refresh_configuration(self) -> None:
         """Rebuild the RemnaWave service instance using current settings."""
@@ -105,9 +96,9 @@ class RemnaWaveAutoSyncService:
 
     def schedule_refresh(self, *, run_immediately: bool = False) -> None:
         if not self._initialized:
-            self._pending_refresh = True
-            if run_immediately:
-                self._pending_run_immediately = True
+            # До initialize() это применение сохранённых настроек при старте бота.
+            # initialize() сам поставит расписание, а полный синк при каждом
+            # рестарте не нужен: он полчаса листает всю панель.
             return
 
         loop = self._loop or asyncio.get_running_loop()

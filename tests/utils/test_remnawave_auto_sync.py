@@ -129,3 +129,32 @@ def test_perform_sync_rebuilds_service_on_each_run(monkeypatch):
 
     assert not services
     cache_mock.delete_pattern.assert_awaited_once_with("available_countries*")
+
+
+def test_stored_setting_at_startup_does_not_run_sync_immediately(monkeypatch):
+    monkeypatch.setattr(settings, "REMNAWAVE_AUTO_SYNC_ENABLED", True)
+    monkeypatch.setattr(settings, "REMNAWAVE_AUTO_SYNC_TIMES", "03:00")
+
+    async def settle():
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+    async def runner():
+        service = RemnaWaveAutoSyncService(service_factory=lambda: SimpleNamespace())
+        service.run_sync_now = AsyncMock()
+
+        # Так при старте бота применяется REMNAWAVE_AUTO_SYNC_ENABLED из БД.
+        service.schedule_refresh(run_immediately=True)
+        await service.initialize()
+        await settle()
+        service.run_sync_now.assert_not_awaited()
+        assert service.get_status().next_run is not None
+
+        # Включение из админки после старта запускает синк сразу.
+        service.schedule_refresh(run_immediately=True)
+        await settle()
+        service.run_sync_now.assert_awaited_once_with(reason="immediate")
+
+        await service.stop()
+
+    asyncio.run(runner())
