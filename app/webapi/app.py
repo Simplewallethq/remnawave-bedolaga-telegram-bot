@@ -41,6 +41,7 @@ from .routes import (
     support_settings,
     subscription_events,
     stats,
+    support_actions,
     support_context,
     subscriptions,
     tickets,
@@ -281,6 +282,11 @@ def create_web_api_app() -> FastAPI:
     app.include_router(cabinet.router, prefix="/cabinet", tags=["cabinet"])
     app.include_router(
         support_context.router,
+        prefix="/cabinet/internal/support",
+        tags=["support-internal"],
+    )
+    app.include_router(
+        support_actions.router,
         prefix="/cabinet/internal/support",
         tags=["support-internal"],
     )
