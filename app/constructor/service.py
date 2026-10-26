@@ -88,6 +88,22 @@ def find_token(text: Optional[str]) -> Optional[str]:
     return match.group(1) if match else None
 
 
+_refresh_tasks: set[asyncio.Task] = set()
+
+
+def refresh_runtime_in_background() -> None:
+    """Поднять/обновить витрины, не задерживая ответ владельцу.
+
+    Синхронизация проходит все витрины под общей блокировкой и при сбоях сети
+    до Telegram может занять минуту — ждать её в запросе мини-аппа или в шаге
+    мастера нельзя. Бот поднимается через секунды, статус на его странице
+    показывает «Запускается», пока синхронизация не закончится.
+    """
+    task = asyncio.create_task(platform.refresh_runtime())
+    _refresh_tasks.add(task)  # держим ссылку: иначе задачу может собрать GC
+    task.add_done_callback(_refresh_tasks.discard)
+
+
 # ---------------------------------------------------------------- аккаунт
 
 
@@ -195,7 +211,7 @@ async def launch_bot(
     support: Optional[str],
     logo: Optional[str],
 ) -> tuple[CopycatBot, bool]:
-    """Подключает бота владельцу и сразу поднимает его. (запись, вернули ли
+    """Подключает бота владельцу и запускает подъём в фоне. (запись, вернули ли
     выключенного бота). Вернувшийся бот сохраняет прежние саппорт, обложку и цены."""
     await platform.get_or_create_owner(db, user.id)
     await db.commit()
@@ -205,7 +221,7 @@ async def launch_bot(
         if row is None or row.enabled:
             raise ConnectError("active")
         await platform.restore_bot(db, row, token=info.token, username=info.username, title=info.title)
-        await platform.refresh_runtime()
+        refresh_runtime_in_background()
         return row, True
 
     active = await platform.list_owner_bots(db, user.id, enabled_only=True)
@@ -226,7 +242,7 @@ async def launch_bot(
         # Пока владелец заполнял мастер, этого бота успели подключить.
         await db.rollback()
         raise ConnectError("active") from None
-    await platform.refresh_runtime()
+    refresh_runtime_in_background()
     return row, False
 
 

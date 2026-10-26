@@ -60,6 +60,10 @@ BOT_BRAND_FIELDS = (
 _LEGACY_IMPORT_FIELDS = BOT_BRAND_FIELDS + ("logo", "image_url")
 
 _CONNECT_CONCURRENCY = 16
+# Запрос к Telegram при подъёме витрины. Без своего таймаута — минута по
+# умолчанию aiogram: одна витрина при сбоях сети держала синхронизацию всех
+# (под общей блокировкой), а вместе с ней — запуск бота из конструктора.
+_TELEGRAM_TIMEOUT = 15
 
 
 # ---------------------------------------------------------------- бренд и веса
@@ -240,6 +244,15 @@ class CopycatRuntime:
     def live_bots(self) -> list[Bot]:
         return list(self._live.values())
 
+    def connection_state(self, row: CopycatBot) -> str:
+        """live — бот поднят; failed — Telegram не принял токен при последней
+        попытке; pending — ещё не поднимался (подхватит синхронизация)."""
+        if row.id in self._live:
+            return "live"
+        if row.token in self._failed_tokens:
+            return "failed"
+        return "pending"
+
     @property
     def can_change_live_set(self) -> bool:
         """После старта ботов можно добавлять и снимать только в webhook-режиме:
@@ -409,7 +422,7 @@ class CopycatRuntime:
             async with semaphore:
                 bot = Bot(token=row.token, default=self._default_props)
                 try:
-                    me = await bot.get_me()
+                    me = await bot.get_me(request_timeout=_TELEGRAM_TIMEOUT)
                 except Exception as error:
                     await bot.session.close()
                     log = logger.debug if row.token in self._failed_tokens else logger.error
@@ -512,6 +525,7 @@ class CopycatRuntime:
                 secret_token=settings.WEBHOOK_SECRET_TOKEN,
                 drop_pending_updates=settings.WEBHOOK_DROP_PENDING_UPDATES,
                 allowed_updates=self._allowed_updates,
+                request_timeout=_TELEGRAM_TIMEOUT,
             )
             logger.info("Mirror webhook установлен: %s", url)
         except Exception as error:

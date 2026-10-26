@@ -45,12 +45,39 @@ def fail(error: str, field: Optional[str] = None, status: int = 400, **extra: An
 # ---------------------------------------------------------------- авторизация
 
 
+def _init_data_shape(raw: str) -> dict:
+    """Что пришло в initData — без значений: для разбора отказов в логе."""
+    import time
+    from urllib.parse import parse_qsl
+
+    try:
+        fields = dict(parse_qsl(raw, keep_blank_values=True))
+    except ValueError:
+        return {"len": len(raw), "parse_error": True}
+    auth_date = fields.get("auth_date", "")
+    return {
+        "len": len(raw),
+        "keys": sorted(fields),
+        "age_s": int(time.time()) - int(auth_date) if auth_date.isdigit() else None,
+    }
+
+
 async def tg_user(authorization: str = Header(default="")) -> service.TgUser:
     if not authorization.startswith("tma "):
+        logger.warning("Конструктор: запрос без initData")
         raise fail("Откройте приложение из Telegram", status=401)
     try:
-        data = parse_webapp_init_data(authorization[4:], settings.CONSTRUCTOR_BOT_TOKEN.strip())
-    except (TelegramWebAppAuthError, ValueError):
+        # Telegram Desktop кэширует initData и подолгу отдаёт старый auth_date
+        # (tdesktop#28303, «not planned»), поэтому срок — из настройки, а не сутки.
+        data = parse_webapp_init_data(
+            authorization[4:],
+            settings.CONSTRUCTOR_BOT_TOKEN.strip(),
+            max_age_seconds=int(settings.CONSTRUCTOR_INIT_DATA_MAX_AGE_SECONDS),
+        )
+    except (TelegramWebAppAuthError, ValueError) as error:
+        logger.warning(
+            "Конструктор: initData не принят (%s), initData %s", error, _init_data_shape(authorization[4:])
+        )
         raise fail("Откройте приложение из Telegram", status=401) from None
     user = data.get("user")
     if not isinstance(user, dict) or not user.get("id"):
@@ -285,8 +312,16 @@ async def get_bot(row_id: int, tg: service.TgUser = Depends(tg_user), db: AsyncS
 @router.get("/bots/{row_id}/status")
 async def get_bot_status(row_id: int, tg: service.TgUser = Depends(tg_user), db: AsyncSession = Depends(get_db)) -> dict:
     """Токен жив и вебхук смотрит на нас — отдельно: это запросы к Telegram."""
+    from app.services.copycat_service import copycat_runtime
+
     _, row = await _owned_bot(db, tg, row_id)
-    return {"working": await platform.bot_is_working(row)}
+    state = copycat_runtime.connection_state(row)
+    if state == "pending" and copycat_runtime.can_change_live_set:
+        # Только что подключён: фоновая синхронизация ещё не подняла бота.
+        # В polling-режиме новые боты поднимаются только после рестарта — там
+        # «запускается» висело бы вечно, поэтому честно проверяем как есть.
+        return {"working": False, "starting": True}
+    return {"working": await platform.bot_is_working(row), "starting": False}
 
 
 class BotPatch(BaseModel):
@@ -305,7 +340,7 @@ async def patch_bot(
             raise fail("Нужен username вида @support_name: латиница, цифры и _ (5–32 символа)", "support")
         row.support = f"@{support}"
         await db.commit()
-        await platform.refresh_runtime()
+        service.refresh_runtime_in_background()
     if body.prices is not None:
         monthly = _parse_prices(body.prices)
         errors = _price_errors(monthly)
@@ -340,7 +375,7 @@ async def upload_cover(
     except ValueError:
         raise fail("Эту картинку Telegram не покажет — выберите JPG или PNG обычных пропорций", "image") from None
     await db.commit()
-    await platform.refresh_runtime()
+    service.refresh_runtime_in_background()
     return {"bot": await bot_detail(db, row)}
 
 
@@ -349,7 +384,7 @@ async def reset_cover(row_id: int, tg: service.TgUser = Depends(tg_user), db: As
     _, row = await _owned_bot(db, tg, row_id)
     row.logo = service.DEFAULT_COVER
     await db.commit()
-    await platform.refresh_runtime()
+    service.refresh_runtime_in_background()
     return {"bot": await bot_detail(db, row)}
 
 
@@ -372,7 +407,7 @@ async def delete_bot(row_id: int, tg: service.TgUser = Depends(tg_user), db: Asy
     подключение тем же владельцем вернёт всё."""
     _, row = await _owned_bot(db, tg, row_id)
     await platform.disable_bot(db, row)
-    await platform.refresh_runtime()
+    service.refresh_runtime_in_background()
     return {"deleted": row.id}
 
 

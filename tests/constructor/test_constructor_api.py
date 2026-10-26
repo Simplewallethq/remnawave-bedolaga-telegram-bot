@@ -222,3 +222,36 @@ async def test_wallet_and_payout(client, telegram, prices, db, monkeypatch):
         assert (payout["amount_usdt"], payout["send_usdt"], payout["status"]) == ("5.50", "2.50", "pending")
         assert done.json()["earnings"]["available"] == 50
         notify.assert_awaited_once()
+
+
+async def test_old_init_data_from_telegram_desktop_is_accepted(db, telegram, monkeypatch):
+    """Telegram Desktop кэширует initData (tdesktop#28303): подпись недельной
+    давности должна проходить, просроченная по настройке — нет."""
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api")
+
+    async def test_db():
+        yield db
+
+    app.dependency_overrides[get_db] = test_db
+    week_old = _signed_init_data(settings.CONSTRUCTOR_BOT_TOKEN, {"id": 42}, auth_date=int(time.time()) - 7 * 86400)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test/api") as raw:
+        assert (await raw.get("/state", headers={"Authorization": f"tma {week_old}"})).status_code == 200
+        monkeypatch.setattr(settings, "CONSTRUCTOR_INIT_DATA_MAX_AGE_SECONDS", 86400, raising=False)
+        assert (await raw.get("/state", headers={"Authorization": f"tma {week_old}"})).status_code == 401
+
+
+async def test_status_reports_starting_until_runtime_brings_bot_up(client, telegram, prices, monkeypatch):
+    from app.services.copycat_service import copycat_runtime
+
+    working = AsyncMock(return_value=True)
+    monkeypatch.setattr(platform, "bot_is_working", working)
+    monkeypatch.setattr(type(copycat_runtime), "can_change_live_set", property(lambda self: True))
+    async with client:
+        bot = (await _create(client, telegram)).json()["bot"]
+        status = (await client.get(f"/bots/{bot['id']}/status")).json()
+        assert status == {"working": False, "starting": True}
+        working.assert_not_awaited()  # пока бот не поднят, в Telegram не ходим
+
+        monkeypatch.setitem(copycat_runtime._live, bot["id"], object())
+        assert (await client.get(f"/bots/{bot['id']}/status")).json() == {"working": True, "starting": False}

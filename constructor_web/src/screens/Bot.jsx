@@ -19,11 +19,36 @@ function useBotOrState(id) {
   return [bot, null]
 }
 
-/** Работает ли бот: токен жив и вебхук смотрит на нас (запрос к Telegram — отдельно). */
+const STARTING_POLL_MS = 3000
+const STARTING_POLL_LIMIT = 40 // ~2 минуты
+
+/**
+ * Работает ли бот: токен жив и вебхук смотрит на нас (запрос к Telegram — отдельно).
+ * null — проверяем; 'starting' — только что подключён, сервер его ещё поднимает
+ * (переспрашиваем, пока не поднимется); true / false — ответ.
+ */
 function useWorking(id) {
   const [working, setWorking] = useState(null)
   useEffect(() => {
-    api.botStatus(id).then((s) => setWorking(s.working)).catch(() => setWorking(null))
+    let cancelled = false
+    let timer = null
+    let attempts = 0
+    const check = () => {
+      api.botStatus(id)
+        .then((s) => {
+          if (cancelled) return
+          if (s.starting && attempts++ < STARTING_POLL_LIMIT) {
+            setWorking('starting')
+            timer = setTimeout(check, STARTING_POLL_MS)
+          } else setWorking(s.starting ? 'starting' : s.working)
+        })
+        .catch(() => !cancelled && setWorking(null))
+    }
+    check()
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [id])
   return working
 }
@@ -68,7 +93,10 @@ export default function Bot({ id }) {
           <>
             <button type="button" className="tm-link-more" onClick={() => openLink(bot.link)}>@{bot.username}</button>
             <div style={{ marginTop: 10 }}>
-              {working === null ? <Pill>Проверяем…</Pill> : working ? <Pill tone="good">Работает</Pill> : <Pill tone="danger">Не работает</Pill>}
+              {working === null ? <Pill>Проверяем…</Pill>
+                : working === 'starting' ? <Pill tone="warning">Запускается…</Pill>
+                : working ? <Pill tone="good">Работает</Pill>
+                : <Pill tone="danger">Не работает</Pill>}
             </div>
           </>
         }
