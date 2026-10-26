@@ -202,7 +202,7 @@ class FakeBot:
     async def _close(self):
         self.closed = True
 
-    async def get_me(self):
+    async def get_me(self, **kwargs):
         if self.token.endswith(":DEAD"):
             raise RuntimeError("Unauthorized")
         return SimpleNamespace(id=self.id, username=f"bot{self.id}", full_name=f"Bot {self.id} | Быстрый VPN")

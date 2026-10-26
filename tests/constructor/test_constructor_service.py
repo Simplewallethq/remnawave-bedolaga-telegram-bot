@@ -141,3 +141,65 @@ async def test_bot_limit(db, telegram, monkeypatch):
     with pytest.raises(service.ConnectError) as error:
         await service.launch_bot(db, user, await service.check_token(db, user.id, OTHER_TOKEN), support="help_desk", logo=None)
     assert error.value.code == "limit" and "1 ботов" in error.value.message
+
+
+@needs_sqlite
+async def test_launch_does_not_wait_for_runtime_sync(db, telegram, monkeypatch):
+    """Синхронизация витрин может идти минуту — запуск бота её не ждёт."""
+    import asyncio
+
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    async def slow_sync():
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(platform, "refresh_runtime", slow_sync)
+    telegram(TOKEN, 777000, "My_Vpn_Bot")
+    user = await service.ensure_owner_account(db, OWNER)
+    info = await service.check_token(db, user.id, TOKEN)
+
+    row, restored = await asyncio.wait_for(
+        service.launch_bot(db, user, info, support="help_desk", logo=None), timeout=2
+    )
+    assert row.enabled and not restored
+    await asyncio.wait_for(started.wait(), timeout=2)  # синхронизация запущена в фоне
+    release.set()
+    await asyncio.sleep(0)
+
+
+def test_copycat_connection_state():
+    from types import SimpleNamespace
+
+    from app.services.copycat_service import CopycatRuntime
+
+    runtime = CopycatRuntime()
+    row = SimpleNamespace(id=5, token="t5")
+    assert runtime.connection_state(row) == "pending"
+    runtime._failed_tokens.add("t5")
+    assert runtime.connection_state(row) == "failed"
+    runtime._live[5] = object()
+    assert runtime.connection_state(row) == "live"
+
+
+async def test_copycat_get_me_has_short_timeout(monkeypatch):
+    """Подъём витрины не ждёт Telegram дольше 15 секунд (вместо минуты aiogram)."""
+    from types import SimpleNamespace
+
+    from aiogram import Bot
+
+    from app.services import copycat_service
+
+    seen = {}
+
+    async def fake_get_me(self, request_timeout=None):
+        seen["timeout"] = request_timeout
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(Bot, "get_me", fake_get_me)
+    runtime = copycat_service.CopycatRuntime()
+    row = SimpleNamespace(id=7, token="123456:" + "a" * 35)
+    assert await runtime._connect_all([row]) == []
+    assert seen["timeout"] == copycat_service._TELEGRAM_TIMEOUT == 15
+    assert runtime.connection_state(row) == "failed"

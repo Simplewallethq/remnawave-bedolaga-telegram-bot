@@ -239,3 +239,19 @@ async def test_old_init_data_from_telegram_desktop_is_accepted(db, telegram, mon
         assert (await raw.get("/state", headers={"Authorization": f"tma {week_old}"})).status_code == 200
         monkeypatch.setattr(settings, "CONSTRUCTOR_INIT_DATA_MAX_AGE_SECONDS", 86400, raising=False)
         assert (await raw.get("/state", headers={"Authorization": f"tma {week_old}"})).status_code == 401
+
+
+async def test_status_reports_starting_until_runtime_brings_bot_up(client, telegram, prices, monkeypatch):
+    from app.services.copycat_service import copycat_runtime
+
+    working = AsyncMock(return_value=True)
+    monkeypatch.setattr(platform, "bot_is_working", working)
+    monkeypatch.setattr(type(copycat_runtime), "can_change_live_set", property(lambda self: True))
+    async with client:
+        bot = (await _create(client, telegram)).json()["bot"]
+        status = (await client.get(f"/bots/{bot['id']}/status")).json()
+        assert status == {"working": False, "starting": True}
+        working.assert_not_awaited()  # пока бот не поднят, в Telegram не ходим
+
+        monkeypatch.setitem(copycat_runtime._live, bot["id"], object())
+        assert (await client.get(f"/bots/{bot['id']}/status")).json() == {"working": True, "starting": False}
