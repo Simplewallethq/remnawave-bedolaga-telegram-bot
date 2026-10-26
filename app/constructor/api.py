@@ -45,12 +45,39 @@ def fail(error: str, field: Optional[str] = None, status: int = 400, **extra: An
 # ---------------------------------------------------------------- авторизация
 
 
+def _init_data_shape(raw: str) -> dict:
+    """Что пришло в initData — без значений: для разбора отказов в логе."""
+    import time
+    from urllib.parse import parse_qsl
+
+    try:
+        fields = dict(parse_qsl(raw, keep_blank_values=True))
+    except ValueError:
+        return {"len": len(raw), "parse_error": True}
+    auth_date = fields.get("auth_date", "")
+    return {
+        "len": len(raw),
+        "keys": sorted(fields),
+        "age_s": int(time.time()) - int(auth_date) if auth_date.isdigit() else None,
+    }
+
+
 async def tg_user(authorization: str = Header(default="")) -> service.TgUser:
     if not authorization.startswith("tma "):
+        logger.warning("Конструктор: запрос без initData")
         raise fail("Откройте приложение из Telegram", status=401)
     try:
-        data = parse_webapp_init_data(authorization[4:], settings.CONSTRUCTOR_BOT_TOKEN.strip())
-    except (TelegramWebAppAuthError, ValueError):
+        # Telegram Desktop кэширует initData и подолгу отдаёт старый auth_date
+        # (tdesktop#28303, «not planned»), поэтому срок — из настройки, а не сутки.
+        data = parse_webapp_init_data(
+            authorization[4:],
+            settings.CONSTRUCTOR_BOT_TOKEN.strip(),
+            max_age_seconds=int(settings.CONSTRUCTOR_INIT_DATA_MAX_AGE_SECONDS),
+        )
+    except (TelegramWebAppAuthError, ValueError) as error:
+        logger.warning(
+            "Конструктор: initData не принят (%s), initData %s", error, _init_data_shape(authorization[4:])
+        )
         raise fail("Откройте приложение из Telegram", status=401) from None
     user = data.get("user")
     if not isinstance(user, dict) or not user.get("id"):

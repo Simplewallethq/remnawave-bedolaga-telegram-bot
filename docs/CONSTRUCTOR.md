@@ -41,7 +41,11 @@
 - `/constructor/` — мини-апп (`CONSTRUCTOR_WEBAPP_STATIC_PATH`);
 - `/constructor/api/…` — API мини-аппа. Авторизация —
   `Authorization: tma <initData>`, подпись проверяется токеном
-  конструктора.
+  конструктора. Срок подписи — `CONSTRUCTOR_INIT_DATA_MAX_AGE_SECONDS`
+  (год): Telegram Desktop кэширует initData и подолгу отдаёт старый
+  `auth_date` (tdesktop#28303, закрыт как «not planned»), с проверкой «не
+  старше суток» мини-апп на ПК не открывался. Отказы пишутся в лог с
+  причиной и возрастом подписи.
 
 Мини-апп собран с относительными путями: работает и по
 `https://<хост>/constructor/`, и на отдельном домене, который nginx

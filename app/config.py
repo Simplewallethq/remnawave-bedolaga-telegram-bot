@@ -687,6 +687,10 @@ class Settings(BaseSettings):
     CONSTRUCTOR_EXAMPLE_BOT_URL: str = ""
     # Собранный фронтенд мини-аппа; веб-сервер отдаёт его по /constructor/.
     CONSTRUCTOR_WEBAPP_STATIC_PATH: str = "constructor_web/dist"
+    # Сколько мини-апп принимает подпись Telegram (initData), с. Telegram Desktop
+    # кэширует её и подолгу отдаёт старый auth_date (tdesktop#28303), поэтому
+    # по умолчанию — год, а не сутки.
+    CONSTRUCTOR_INIT_DATA_MAX_AGE_SECONDS: int = 365 * 24 * 3600
     # true — «Создать VPN бота» в боте-платформе ведёт в конструктор, а не во
     # встроенный мастер. Включать, когда конструктор проверен.
     OWNER_PLATFORM_REDIRECT_TO_CONSTRUCTOR: bool = False
