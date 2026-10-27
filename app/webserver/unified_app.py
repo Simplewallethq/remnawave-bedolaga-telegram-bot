@@ -168,6 +168,11 @@ def create_unified_app(
 
     constructor_runtime.mount(app, enable_webhook=enable_telegram_webhook)
 
+    # Админка копикетов: только вебхук её бота (/…/copycat-admin).
+    from app.copycat_admin import copycat_admin_runtime
+
+    copycat_admin_runtime.mount(app, enable_webhook=enable_telegram_webhook)
+
     miniapp_mounted, miniapp_path = _mount_miniapp_static(app)
 
     unified_health_path = "/health/unified" if settings.is_web_api_enabled() else "/health"

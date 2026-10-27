@@ -516,18 +516,22 @@ async def bot_stats(db: AsyncSession, row: CopycatBot, *, now: Optional[datetime
 # ---------------------------------------------------------------- заработок
 
 
+def turnover_conditions() -> tuple:
+    """Оборот бота = оплаченные пополнения его пользователей деньгами (не руками админа)."""
+    return (
+        Transaction.type == TransactionType.DEPOSIT.value,
+        Transaction.is_completed.is_(True),
+        Transaction.payment_method.is_not(None),
+        Transaction.payment_method != "manual",
+        Transaction.amount_kopeks > 0,
+    )
+
+
 def _turnover_query(bot_ids: list[int]):
     return (
         select(func.coalesce(func.sum(Transaction.amount_kopeks), 0))
         .join(User, User.id == Transaction.user_id)
-        .where(
-            User.bot_id.in_(bot_ids),
-            Transaction.type == TransactionType.DEPOSIT.value,
-            Transaction.is_completed.is_(True),
-            Transaction.payment_method.is_not(None),
-            Transaction.payment_method != "manual",
-            Transaction.amount_kopeks > 0,
-        )
+        .where(User.bot_id.in_(bot_ids), *turnover_conditions())
     )
 
 

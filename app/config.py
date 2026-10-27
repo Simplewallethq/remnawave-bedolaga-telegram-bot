@@ -697,6 +697,12 @@ class Settings(BaseSettings):
     # true — «Создать VPN бота» в боте-платформе ведёт в конструктор, а не во
     # встроенный мастер. Включать, когда конструктор проверен.
     OWNER_PLATFORM_REDIRECT_TO_CONSTRUCTOR: bool = False
+
+    # Админка копикетов: отдельный Telegram-бот (app/copycat_admin) со сводкой,
+    # списком витрин и добавлением новых. Пустой токен — выключена.
+    COPYCAT_ADMIN_BOT_TOKEN: str = ""
+    # Telegram id через запятую, кому бот отвечает. Пусто — никому.
+    COPYCAT_ADMIN_USER_IDS: str = ""
     SKIP_RULES_ACCEPT: bool = False
     SKIP_REFERRAL_CODE: bool = False
 
@@ -2582,6 +2588,17 @@ class Settings(BaseSettings):
         """Конструктор работает поверх платформы владельцев: без неё ему некуда
         заводить аккаунты владельцев."""
         return bool((self.CONSTRUCTOR_BOT_TOKEN or "").strip()) and bool(self.OWNER_PLATFORM_BOT_ID)
+
+    def is_copycat_admin_enabled(self) -> bool:
+        return bool((self.COPYCAT_ADMIN_BOT_TOKEN or "").strip())
+
+    def get_copycat_admin_user_ids(self) -> set[int]:
+        ids: set[int] = set()
+        for chunk in str(self.COPYCAT_ADMIN_USER_IDS or "").split(","):
+            chunk = chunk.strip()
+            if chunk.isdigit():
+                ids.add(int(chunk))
+        return ids
 
     def _load_mirror_bots_from_file(self) -> list[dict] | None:
         log = logging.getLogger(__name__)

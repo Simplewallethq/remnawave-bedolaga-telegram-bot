@@ -9,6 +9,7 @@ sys.path.append(str(Path(__file__).parent))
 
 from app.bot import setup_bot
 from app.constructor import constructor_runtime
+from app.copycat_admin import copycat_admin_runtime
 from app.services.copycat_service import copycat_runtime
 from app.config import settings
 from app.database.database import init_db
@@ -175,6 +176,16 @@ async def main():
                 stage.skip("CONSTRUCTOR_BOT_TOKEN или OWNER_PLATFORM_BOT_ID не заданы")
             elif not await constructor_runtime.setup(dp.storage):
                 stage.warning("Конструктор не поднялся — основной бот работает без него")
+
+        async with timeline.stage(
+            "Админка копикетов",
+            "🧩",
+            success_message="Админка копикетов поднята",
+        ) as stage:
+            if not settings.is_copycat_admin_enabled():
+                stage.skip("COPYCAT_ADMIN_BOT_TOKEN не задан")
+            elif not await copycat_admin_runtime.setup(dp.storage):
+                stage.warning("Админка копикетов не поднялась — основной бот работает без неё")
 
         monitoring_service.bot = bot
         maintenance_service.set_bot(bot)
@@ -479,6 +490,7 @@ async def main():
                         await copycat_runtime.attach_webhooks(mirror_hub, allowed_updates)
                         stage.log(f"Витрин на вебхуках: {len(copycat_runtime.live_bots())}")
                     await constructor_runtime.set_webhook()
+                    await copycat_admin_runtime.set_webhook()
                     stage.success("Telegram webhook активен")
             else:
                 stage.skip("Режим webhook отключен")
@@ -532,6 +544,7 @@ async def main():
                 polling_task = asyncio.create_task(dp.start_polling(*all_bots, skip_updates=True))
                 stage.log("skip_updates=True")
                 constructor_runtime.start_polling()
+                copycat_admin_runtime.start_polling()
             else:
                 polling_task = None
                 stage.skip("Polling отключен режимом работы")
@@ -745,6 +758,10 @@ async def main():
             await constructor_runtime.stop(delete_webhook=telegram_webhook_enabled)
         except Exception as e:
             logger.error(f"Ошибка остановки конструктора: {e}")
+        try:
+            await copycat_admin_runtime.stop(delete_webhook=telegram_webhook_enabled)
+        except Exception as e:
+            logger.error(f"Ошибка остановки админки копикетов: {e}")
         if all_bots:
             # Витрины могли подняться и погаснуть на ходу — берём текущий набор.
             all_bots = [all_bots[0], *copycat_runtime.live_bots()]
