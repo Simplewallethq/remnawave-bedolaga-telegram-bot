@@ -2842,7 +2842,9 @@ def _get_share_app_links() -> dict[str, str]:
     android = leto_android if brand_has_own_app() and leto_android else HAPP_ANDROID_PLAY_URL
     return {
         "android": android,
-        "apple": settings.get_incy_download_link(),
+        # Incy выпилили из RU App Store.
+        # "apple": settings.get_incy_download_link(),
+        "apple": settings.get_happ_download_link("ios"),
         "windows": (
             leto_windows
             if brand_has_own_app() and leto_windows

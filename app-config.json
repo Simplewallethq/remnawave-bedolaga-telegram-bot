@@ -14,14 +14,14 @@
   "platforms": {
     "ios": [
       {
-        "id": "incy",
-        "name": "Incy",
+        "id": "happ",
+        "name": "Happ",
         "isFeatured": true,
-        "urlScheme": "incy://add/",
+        "urlScheme": "happ://add/",
         "installationStep": {
           "buttons": [
             {
-              "buttonLink": "https://apps.apple.com/ru/app/incy/id6756943388",
+              "buttonLink": "https://apps.apple.com/app/happ-proxy-utility/id6504287215",
               "buttonText": {
                 "en": "Open in App Store",
                 "fa": "باز کردن در App Store",

@@ -1564,8 +1564,8 @@ async def handle_connect_platform_apple(
         + "\n\n"
         + texts.t(
             "CONNECT_APPLE_TEXT",
-            "<b>Для iOS/macOS доступны два приложения: Incy и Happ.</b>\n\n"
-            "В любое из приложений (после скачивания) можно передать ключ доступа по кнопке ниже.",
+            "<b>Для iOS/macOS используй приложение Happ.</b>\n\n"
+            "После скачивания передай в него ключ доступа по кнопке ниже.",
         )
     )
     await edit_or_answer_photo(
@@ -1573,7 +1573,8 @@ async def handle_connect_platform_apple(
         text,
         get_connect_apple_keyboard(
             user.language,
-            incy_transfer_url=get_incy_button_url(_get_connection_key(user)),
+            # Incy выпилили из RU App Store.
+            # incy_transfer_url=get_incy_button_url(_get_connection_key(user)),
             happ_transfer_url=_get_happ_transfer_url(user),
         ),
         parse_mode="HTML",
@@ -1719,11 +1720,12 @@ async def handle_onboarding_device_selection(
     texts = get_texts(user.language)
     if device_type == "android":
         connection_text = onboarding_android_text(texts)
-    elif is_ios_device_type(device_type):
-        connection_text = texts.t(
-            "ONBOARDING_CONNECTION_TEXT_IOS",
-            "Установи приложение Incy по кнопке ниже.\n\nПосле установки нажми кнопку \"Подключиться\"  ниже → все настроится автоматически.",
-        )
+    # Incy выпилили из RU App Store — на Apple-платформах снова Happ (ветка else).
+    # elif is_ios_device_type(device_type):
+    #     connection_text = texts.t(
+    #         "ONBOARDING_CONNECTION_TEXT_IOS",
+    #         "Установи приложение Incy по кнопке ниже.\n\nПосле установки нажми кнопку \"Подключиться\"  ниже → все настроится автоматически.",
+    #     )
     elif device_type == "windows":
         connection_text = texts.t(
             "ONBOARDING_CONNECTION_TEXT_WINDOWS",
@@ -1801,14 +1803,15 @@ async def handle_onboarding_connect(
     if subscription:
         subscription_link = get_display_subscription_link(subscription)
         if subscription_link:
-            if is_ios_device_type(device_type):
-                # Incy принимает обычную ссылку подписки, а не криптоссылку.
-                redirect_link = get_incy_button_url(
-                    get_raw_subscription_link(subscription) or subscription_link
-                )
-            else:
-                from app.utils.subscription_utils import get_happ_cryptolink_redirect_link
-                redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
+            # Incy выпилили из RU App Store — на Apple-платформах снова Happ.
+            # if is_ios_device_type(device_type):
+            #     # Incy принимает обычную ссылку подписки, а не криптоссылку.
+            #     redirect_link = get_incy_button_url(
+            #         get_raw_subscription_link(subscription) or subscription_link
+            #     )
+            # else:
+            from app.utils.subscription_utils import get_happ_cryptolink_redirect_link
+            redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
             if redirect_link:
                 logger.info(f"✅ ONBOARDING_CONNECT: Deep link сгенерирован для {callback.from_user.id}")
             else:
@@ -1886,7 +1889,9 @@ async def handle_onboarding_manual_link(
         state_data = await state.get_data() or {}
         device_type = state_data.get("onboarding_device_type") or device_type
 
-    is_ios = is_ios_device_type(device_type)
+    # Incy выпилили из RU App Store — на Apple-платформах снова Happ.
+    # is_ios = is_ios_device_type(device_type)
+    is_ios = False
 
     # На iOS Incy добавляет подписку по обычной ссылке, а не по криптоссылке.
     link = (

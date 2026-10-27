@@ -639,9 +639,9 @@ class Settings(BaseSettings):
     # Метод подключения на share-странице: "leto_code" | "incy_link" | "happ_link".
     # Релиз нашего приложения на платформе = флип значения, без изменений кода.
     SHARE_PLATFORM_ANDROID: str = "leto_code"
-    SHARE_PLATFORM_IOS: str = "incy_link"
+    SHARE_PLATFORM_IOS: str = "happ_link"
     SHARE_PLATFORM_WINDOWS: str = "happ_link"
-    SHARE_PLATFORM_MACOS: str = "incy_link"
+    SHARE_PLATFORM_MACOS: str = "happ_link"
     HIDE_SUBSCRIPTION_LINK: bool = False
     ENABLE_LOGO_MODE: bool = True
     LOGO_FILE: str = "vpn_logo.png"
@@ -1949,9 +1949,16 @@ class Settings(BaseSettings):
         if platform_key == "pc":
             platform_key = "windows"
 
-        # Apple-платформы переехали на Incy — Happ там больше не отдаём.
+        # Incy выпилили из RU App Store — на Apple-платформах снова Happ.
+        # # Apple-платформы переехали на Incy — Happ там больше не отдаём.
+        # if platform_key in ("ios", "macos"):
+        #     return self.get_incy_download_link()
         if platform_key in ("ios", "macos"):
-            return self.get_incy_download_link()
+            links_apple = {
+                "ios": (self.HAPP_DOWNLOAD_LINK_IOS or "").strip(),
+                "macos": (self.HAPP_DOWNLOAD_LINK_MACOS or "").strip(),
+            }
+            return links_apple[platform_key] or HAPP_APP_DOWNLOAD_LINK_IOS
 
         links = {
             "ios": (self.HAPP_DOWNLOAD_LINK_IOS or "").strip(),
@@ -2059,9 +2066,11 @@ class Settings(BaseSettings):
             if method == "leto_code" and not self.brand_has_own_app():
                 method = "happ_link"
 
-            if method == "incy_link" and platform in incy_links:
-                store = incy_links[platform]
-            elif method == "leto_code":
+            # Incy выпилили из RU App Store — incy_link отдаём как happ_link.
+            # if method == "incy_link" and platform in incy_links:
+            #     store = incy_links[platform]
+            # elif method == "leto_code":
+            if method == "leto_code":
                 store = [entry for entry in leto_links[platform] if entry["url"]]
             else:
                 method = "happ_link"

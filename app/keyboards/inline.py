@@ -3523,7 +3523,9 @@ def get_activation_keyboard(happ_link_shown: bool = False, language: str = DEFAU
     texts = get_texts(language)
     buttons = [
         [
-            InlineKeyboardButton(text="🍎 iOS (Incy)", url=settings.get_incy_download_link())
+            # Incy выпилили из RU App Store.
+            # InlineKeyboardButton(text="🍎 iOS (Incy)", url=settings.get_incy_download_link())
+            InlineKeyboardButton(text="🍎 iOS (Happ)", url=HAPP_APP_DOWNLOAD_LINK_IOS)
         ],
         [
             InlineKeyboardButton(text="🤖 Android", url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru"),
@@ -3650,19 +3652,20 @@ def get_connect_apple_keyboard(
             )]
         )
 
-    buttons.append(
-        [InlineKeyboardButton(
-            text=texts.t("CONNECT_DOWNLOAD_INCY_BUTTON", "🍏 Скачать Incy (RU App Store)"),
-            url=settings.get_incy_download_link(),
-        )]
-    )
-    if incy_transfer_url:
-        buttons.append(
-            [InlineKeyboardButton(
-                text=texts.t("CONNECT_TRANSFER_INCY_BUTTON", "🛠 Передать ключ в Incy"),
-                url=incy_transfer_url,
-            )]
-        )
+    # Incy выпилили из RU App Store.
+    # buttons.append(
+    #     [InlineKeyboardButton(
+    #         text=texts.t("CONNECT_DOWNLOAD_INCY_BUTTON", "🍏 Скачать Incy (RU App Store)"),
+    #         url=settings.get_incy_download_link(),
+    #     )]
+    # )
+    # if incy_transfer_url:
+    #     buttons.append(
+    #         [InlineKeyboardButton(
+    #             text=texts.t("CONNECT_TRANSFER_INCY_BUTTON", "🛠 Передать ключ в Incy"),
+    #             url=incy_transfer_url,
+    #         )]
+    #     )
 
     buttons.append([InlineKeyboardButton(text=texts.BACK, callback_data="howto")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -3802,10 +3805,17 @@ def get_onboarding_connection_keyboard(
     buttons = []
 
     if is_ios_device_type(device_type):
+        # Incy выпилили из RU App Store — на Apple-платформах снова Happ.
+        # buttons.append([
+        #     InlineKeyboardButton(
+        #         text=texts.t("ONBOARDING_DOWNLOAD_INCY_IOS", "🍎 Скачать Incy"),
+        #         url=settings.get_incy_download_link(),
+        #     ),
+        # ])
         buttons.append([
             InlineKeyboardButton(
-                text=texts.t("ONBOARDING_DOWNLOAD_INCY_IOS", "🍎 Скачать Incy"),
-                url=settings.get_incy_download_link(),
+                text=texts.t("CONNECT_DOWNLOAD_HAPP_IOS_BUTTON", "🍎 Скачать Happ"),
+                url=HAPP_APP_DOWNLOAD_LINK_IOS,
             ),
         ])
     elif device_type == "android":
@@ -3844,10 +3854,11 @@ def get_onboarding_connection_keyboard(
         ])
 
     if device_type != "android":
-        if is_ios_device_type(device_type):
-            redirect_link = get_incy_button_url(raw_subscription_link or subscription_link)
-        else:
-            redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
+        # Incy выпилили из RU App Store — на Apple-платформах снова Happ.
+        # if is_ios_device_type(device_type):
+        #     redirect_link = get_incy_button_url(raw_subscription_link or subscription_link)
+        # else:
+        redirect_link = get_happ_cryptolink_redirect_link(subscription_link)
         if redirect_link:
             buttons.append([InlineKeyboardButton(
                 text=texts.t("ONBOARDING_OPEN_HAPP_BUTTON", "🚀 Подключиться"),
@@ -3909,7 +3920,9 @@ def get_connection_keyboard(happ_link_shown: bool = False, show_link_toggle: boo
     # App download buttons (OS names stay as-is, no translation needed)
     buttons.extend([
         [
-            InlineKeyboardButton(text="🍎 iOS (Incy)", url=settings.get_incy_download_link())
+            # Incy выпилили из RU App Store.
+            # InlineKeyboardButton(text="🍎 iOS (Incy)", url=settings.get_incy_download_link())
+            InlineKeyboardButton(text="🍎 iOS (Happ)", url=HAPP_APP_DOWNLOAD_LINK_IOS)
         ],
         [
             InlineKeyboardButton(text="🤖 Android", url="https://play.google.com/store/apps/details?id=com.happproxy&hl=ru"),

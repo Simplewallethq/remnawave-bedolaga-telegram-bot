@@ -1151,9 +1151,10 @@ async def handle_device_guide(
     subscription = db_user.subscription
     subscription_link = get_display_subscription_link(subscription)
 
-    if is_ios_device_type(device_type):
-        # На Apple-платформах подписка добавляется обычной ссылкой, а не криптоссылкой.
-        subscription_link = get_raw_subscription_link(subscription) or subscription_link
+    # Incy выпилили из RU App Store — на Apple-платформах снова Happ с криптоссылкой.
+    # if is_ios_device_type(device_type):
+    #     # На Apple-платформах подписка добавляется обычной ссылкой, а не криптоссылкой.
+    #     subscription_link = get_raw_subscription_link(subscription) or subscription_link
 
     if not subscription_link:
         await callback.answer(
@@ -1337,9 +1338,10 @@ async def handle_specific_app_guide(
 
     subscription_link = get_display_subscription_link(subscription)
 
-    if is_ios_device_type(device_type):
-        # На Apple-платформах подписка добавляется обычной ссылкой, а не криптоссылкой.
-        subscription_link = get_raw_subscription_link(subscription) or subscription_link
+    # Incy выпилили из RU App Store — на Apple-платформах снова Happ с криптоссылкой.
+    # if is_ios_device_type(device_type):
+    #     # На Apple-платформах подписка добавляется обычной ссылкой, а не криптоссылкой.
+    #     subscription_link = get_raw_subscription_link(subscription) or subscription_link
 
     if not subscription_link:
         await callback.answer(

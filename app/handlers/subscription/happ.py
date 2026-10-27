@@ -145,17 +145,18 @@ async def handle_happ_download_platform_choice(
         "windows": texts.t("HAPP_PLATFORM_WINDOWS", "💻 Windows"),
     }
 
-    if is_ios_device_type(platform):
-        # На Apple-платформах отдаём наше приложение Incy вместо Happ.
-        link_text = texts.t(
-            "INCY_DOWNLOAD_LINK_MESSAGE",
-            "⬇️ Скачайте Incy для {platform}:",
-        ).format(platform=platform_names.get(platform, platform.upper()))
-    else:
-        link_text = texts.t(
-            "HAPP_DOWNLOAD_LINK_MESSAGE",
-            "⬇️ Скачайте Happ для {platform}:",
-        ).format(platform=platform_names.get(platform, platform.upper()))
+    # Incy выпилили из RU App Store — на Apple-платформах снова Happ.
+    # if is_ios_device_type(platform):
+    #     # На Apple-платформах отдаём наше приложение Incy вместо Happ.
+    #     link_text = texts.t(
+    #         "INCY_DOWNLOAD_LINK_MESSAGE",
+    #         "⬇️ Скачайте Incy для {platform}:",
+    #     ).format(platform=platform_names.get(platform, platform.upper()))
+    # else:
+    link_text = texts.t(
+        "HAPP_DOWNLOAD_LINK_MESSAGE",
+        "⬇️ Скачайте Happ для {platform}:",
+    ).format(platform=platform_names.get(platform, platform.upper()))
 
     keyboard = get_happ_download_link_keyboard(db_user.language, link)
 
