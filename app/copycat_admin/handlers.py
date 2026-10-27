@@ -78,7 +78,8 @@ class AccessMiddleware(BaseMiddleware):
             await event.answer("Нет доступа", show_alert=True)
         elif isinstance(event, Message) and event.chat.type == ChatType.PRIVATE:
             logger.info("Админка копикетов: отказ в доступе %s (@%s)", user and user.id, user and user.username)
-            await event.answer("Нет доступа.")
+            # Не message.answer: в режиме логотипа он подменён и шлёт картинку основного бренда.
+            await event.bot.send_message(event.chat.id, "Нет доступа.")
         return None
 
 
