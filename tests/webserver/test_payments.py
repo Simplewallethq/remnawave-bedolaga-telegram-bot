@@ -691,12 +691,12 @@ def _aurapay_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "AURAPAY_WEBHOOK_PATH", "/aurapay", raising=False)
 
 
-def _aurapay_signature(fields: dict) -> str:
+def _aurapay_signature(fields: dict, secret: bytes = b"secret2") -> str:
     import hashlib
     import hmac
 
     concatenated = "".join("" if fields[k] is None else str(fields[k]) for k in sorted(fields))
-    return hmac.new(b"secret2", concatenated.encode(), hashlib.sha256).hexdigest()
+    return hmac.new(secret, concatenated.encode(), hashlib.sha256).hexdigest()
 
 
 @pytest.mark.anyio
@@ -746,3 +746,36 @@ async def test_aurapay_webhook_accepts_signed_body(monkeypatch: pytest.MonkeyPat
     _, payload, method_name = process_mock.await_args.args
     assert method_name == "process_aurapay_webhook"
     assert payload["order_id"] == "aurapay_1_a"
+
+
+@pytest.mark.anyio
+async def test_aurapay_webhook_checks_storefront_shop_with_its_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _aurapay_settings(monkeypatch)
+    monkeypatch.setattr(
+        settings,
+        "AURAPAY_EXTRA_SHOPS",
+        json.dumps({"mig": {"shop_id": "mig-shop", "api_key": "a", "secret_key": "mig-secret"}}),
+        raising=False,
+    )
+    process_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.webserver.payments._process_payment_service_callback", process_mock)
+
+    fields = {"id": "inv-2", "amount": "10.00", "status": "PAID", "shop_id": "mig-shop", "order_id": "aurapay_1_b"}
+    router = create_payment_router(DummyBot(), SimpleNamespace())
+    route = _get_route(router, "/aurapay")
+
+    async def send(secret: bytes) -> int:
+        response = await route.endpoint(
+            _build_request(
+                "/aurapay",
+                body=json.dumps(fields).encode(),
+                headers={"content-type": "application/json", "X-SIGNATURE": _aurapay_signature(fields, secret)},
+            )
+        )
+        return response.status_code
+
+    assert await send(b"secret2") == 401
+    process_mock.assert_not_awaited()
+    assert await send(b"mig-secret") == 200

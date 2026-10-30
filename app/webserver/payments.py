@@ -696,7 +696,11 @@ def create_payment_router(bot: Bot, payment_service: PaymentService) -> APIRoute
         routes_registered = True
 
     if settings.is_aurapay_configured():
-        from app.services.aurapay_service import AurapayService
+        from app.services.aurapay_service import (
+            AurapayService,
+            aurapay_service_for_shop,
+            aurapay_shop_by_shop_id,
+        )
 
         aurapay_service = AurapayService()
 
@@ -727,7 +731,12 @@ def create_payment_router(bot: Bot, payment_service: PaymentService) -> APIRoute
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
 
-            if not aurapay_service.verify_signature(
+            # Подпись — секретом той кассы, чей shop_id в теле.
+            shop_service = (
+                aurapay_service_for_shop(aurapay_shop_by_shop_id(payload.get("shop_id")))
+                or aurapay_service
+            )
+            if not shop_service.verify_signature(
                 raw_body, request.headers.get("X-SIGNATURE")
             ):
                 logger.error(

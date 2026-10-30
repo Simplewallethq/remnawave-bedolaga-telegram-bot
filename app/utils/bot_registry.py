@@ -21,6 +21,8 @@ _brand_configs: dict[int, Mapping[str, Any]] = {}
 _payment_weights: dict[int, tuple[dict[str, int], str]] = {}
 # Ценовая схема витрины (своя или от группы). Нет записи — глобальные цены.
 _price_schemes: dict[int, int] = {}
+# Своя касса AuraPay витрины (имя из AURAPAY_EXTRA_SHOPS). Нет записи — основная.
+_aurapay_shops: dict[int, str] = {}
 # Боты владельцев: старые общие аккаунты сюда не пускаются (см. telegram_account_clause).
 _isolated_accounts: set[int] = set()
 
@@ -57,6 +59,7 @@ def forget_bot(bot_id: int) -> None:
     _brand_configs.pop(bot_id, None)
     _payment_weights.pop(bot_id, None)
     _price_schemes.pop(bot_id, None)
+    _aurapay_shops.pop(bot_id, None)
     _isolated_accounts.discard(bot_id)
 
 
@@ -94,6 +97,20 @@ def set_price_scheme(bot_id: int, scheme_id: int | None) -> None:
         _price_schemes.pop(bot_id, None)
     else:
         _price_schemes[bot_id] = int(scheme_id)
+
+
+def set_aurapay_shop(bot_id: int, shop: str | None) -> None:
+    if shop:
+        _aurapay_shops[bot_id] = shop
+    else:
+        _aurapay_shops.pop(bot_id, None)
+
+
+def get_aurapay_shop(bot_id: int | None) -> str | None:
+    """Касса AuraPay, в которую бот выставляет счета; None — основная."""
+    if bot_id is None:
+        return None
+    return _aurapay_shops.get(bot_id)
 
 
 def set_isolated_accounts(bot_id: int, isolated: bool) -> None:
@@ -220,6 +237,7 @@ def clear() -> None:
     _brand_configs.clear()
     _payment_weights.clear()
     _price_schemes.clear()
+    _aurapay_shops.clear()
     _isolated_accounts.clear()
 
 

@@ -522,6 +522,11 @@ class Settings(BaseSettings):
     AURAPAY_INVOICE_LIFETIME_MINUTES: int = 60
     AURAPAY_REQUEST_TIMEOUT: int = 30
     AURAPAY_WEBHOOK_PATH: str = "/aurapay-webhook"
+    # Отдельные кассы витрин, JSON: {"mig": {"shop_id": "…", "api_key": "…",
+    # "secret_key": "…"}}. Бот привязывается к кассе через
+    # scripts.copycats set BOT aurapay_shop=mig, без привязки — касса выше.
+    # Вебхук общий: кассу узнаём по shop_id в теле.
+    AURAPAY_EXTRA_SHOPS: Optional[str] = None
 
     # --- Роутер платежей: единая кнопка «Оплатить» со взвешенным выбором шлюза ---
     # ВАЖНО: эти ключи НЕ должны попадать в .env — иначе BotConfigurationService
@@ -1722,6 +1727,38 @@ class Settings(BaseSettings):
 
     def is_aurapay_enabled(self) -> bool:
         return bool(self.AURAPAY_ENABLED) and self.is_aurapay_configured()
+
+    def get_aurapay_extra_shops(self) -> Dict[str, Dict[str, str]]:
+        """Отдельные кассы витрин по имени; запись без какого-либо ключа отбрасывается."""
+        raw = (self.AURAPAY_EXTRA_SHOPS or "").strip()
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            logger.error("AURAPAY_EXTRA_SHOPS: не JSON, кассы витрин не подключены")
+            return {}
+        if not isinstance(data, dict):
+            logger.error("AURAPAY_EXTRA_SHOPS: ожидался объект {имя: ключи}")
+            return {}
+        shops: Dict[str, Dict[str, str]] = {}
+        for name, creds in data.items():
+            name = str(name).strip().lower()
+            if not name or name == "default":
+                logger.error("AURAPAY_EXTRA_SHOPS: имя %r занято основной кассой", name)
+                continue
+            if not isinstance(creds, dict):
+                logger.error("AURAPAY_EXTRA_SHOPS[%s]: ожидался объект с ключами", name)
+                continue
+            entry = {
+                key: str(creds.get(key) or "").strip()
+                for key in ("shop_id", "api_key", "secret_key")
+            }
+            if not all(entry.values()):
+                logger.error("AURAPAY_EXTRA_SHOPS[%s]: нужны shop_id, api_key и secret_key", name)
+                continue
+            shops[name] = entry
+        return shops
 
     def get_aurapay_display_name(self) -> str:
         name = (self.AURAPAY_DISPLAY_NAME or "").strip()

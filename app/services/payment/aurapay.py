@@ -6,6 +6,10 @@
 выставивший счёт (`payment_router.bot_id`), — пользователь основного бота мог
 оплатить в витрине, и ответ должен прийти туда же.
 
+Касса — основная или своя у витрины (`scripts.copycats set BOT aurapay_shop=mig`).
+Её имя пишется в `metadata_json.aurapay_shop` счёта: проверка статуса и сверка
+вебхука идут в ту же кассу, даже если витрину потом перевели на другую.
+
 Защита от повторного зачёта — атомарный CAS: AuraPay ретраит вебхук до 5 раз,
 параллельно могут прийти «Проверить оплату» и автосверка.
 """
@@ -23,7 +27,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.branding.context import brand_scope
 from app.config import settings
 from app.database.models import AurapayPayment, PaymentMethod, TransactionType
-from app.services.aurapay_service import AurapayAPIError
+from app.services.aurapay_service import (
+    AurapayAPIError,
+    aurapay_service_for_shop,
+    normalize_shop,
+)
 from app.services.payment.common import _record_router_payment
 from app.services.subscription_auto_purchase_service import (
     auto_purchase_saved_cart_after_topup,
@@ -33,13 +41,14 @@ from app.services.tariff_partial_payment_service import (
     build_invoice_checkout_snapshot,
     extract_checkout_snapshot,
 )
-from app.utils.bot_registry import bot_for_user, get_bot_instance
+from app.utils.bot_registry import bot_for_user, get_aurapay_shop, get_bot_instance
 from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
 
 logger = logging.getLogger(__name__)
 
 GATEWAY = "aurapay"
+SHOP_METADATA_KEY = "aurapay_shop"
 
 
 def parse_amount_to_kopeks(raw: Any) -> Optional[int]:
@@ -51,8 +60,20 @@ def parse_amount_to_kopeks(raw: Any) -> Optional[int]:
         return None
 
 
+def payment_shop(payment: Any) -> Optional[str]:
+    """Касса, в которой выставлен счёт; None — основная."""
+    return normalize_shop((getattr(payment, "metadata_json", None) or {}).get(SHOP_METADATA_KEY))
+
+
 class AurapayPaymentMixin:
     """Создание счетов AuraPay, вебхук, проверка статуса и зачисление."""
+
+    def _aurapay_service_for(self, shop: Optional[str]) -> Any:
+        """Клиент кассы; None — AuraPay выключена или касса не описана в .env."""
+        service = getattr(self, "aurapay_service", None)
+        if service is None or shop is None:
+            return service
+        return aurapay_service_for_shop(shop)
 
     def _aurapay_payment_bot(self, payment: Any, user: Any) -> tuple:
         """(бот, bot_id бренда) для сообщений по счёту: бот, где выставлен счёт,
@@ -77,9 +98,12 @@ class AurapayPaymentMixin:
         language: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
-        service = getattr(self, "aurapay_service", None)
+        router_meta = (metadata or {}).get("payment_router") or {}
+        shop = normalize_shop(get_aurapay_shop(router_meta.get("bot_id")))
+        service = self._aurapay_service_for(shop)
         if not service:
-            logger.error("AuraPay service не инициализирован")
+            # Своя касса витрины без ключей — не в основную: деньги ушли бы чужому.
+            logger.error("AuraPay касса %s не настроена", shop or "основная")
             return None
 
         if amount_kopeks < settings.AURAPAY_MIN_AMOUNT_KOPEKS:
@@ -131,6 +155,8 @@ class AurapayPaymentMixin:
             "language": language or settings.DEFAULT_LANGUAGE,
             **(metadata or {}),
         }
+        if shop:
+            payment_metadata[SHOP_METADATA_KEY] = shop
         snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
         if snapshot:
             payment_metadata[SNAPSHOT_METADATA_KEY] = snapshot
@@ -187,7 +213,9 @@ class AurapayPaymentMixin:
             return False
 
         shop_id = str(payload.get("shop_id") or "").strip()
-        if shop_id and settings.AURAPAY_SHOP_ID and shop_id != settings.AURAPAY_SHOP_ID:
+        shop_service = self._aurapay_service_for(payment_shop(payment))
+        expected_shop_id = getattr(shop_service, "shop_id", None) or settings.AURAPAY_SHOP_ID
+        if shop_id and expected_shop_id and shop_id != expected_shop_id:
             logger.error(
                 "AuraPay webhook чужой кассы %s для платежа %s", shop_id, payment.order_id
             )
@@ -245,7 +273,7 @@ class AurapayPaymentMixin:
             return None
 
         remote: Optional[Dict[str, Any]] = None
-        service = getattr(self, "aurapay_service", None)
+        service = self._aurapay_service_for(payment_shop(payment))
         if service and not payment.is_paid:
             try:
                 remote = await service.get_invoice_status(

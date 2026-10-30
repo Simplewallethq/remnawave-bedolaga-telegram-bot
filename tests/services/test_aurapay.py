@@ -424,3 +424,111 @@ async def test_storefront_invoice_goes_through_aurapay(aurapay_only_for_storefro
     assert routed.gateway == "aurapay"
     assert routed.check_callback == "check_aurapay_7"
     assert routed.external_id == "x"
+
+
+# -------------------------------------------------------- кассы витрин
+
+MIG_SHOP_ID = "a0000000-0000-4000-8000-00000000mig0"
+MIG_SECRET = "mig-secret"
+
+
+@pytest.fixture
+def mig_shop(monkeypatch):
+    monkeypatch.setattr(settings, "AURAPAY_SHOP_ID", SHOP_ID, raising=False)
+    monkeypatch.setattr(settings, "AURAPAY_API_KEY", "main-api", raising=False)
+    monkeypatch.setattr(settings, "AURAPAY_SECRET_KEY", SECRET, raising=False)
+    monkeypatch.setattr(
+        settings,
+        "AURAPAY_EXTRA_SHOPS",
+        json.dumps(
+            {
+                "MIG": {"shop_id": MIG_SHOP_ID, "api_key": "mig-api", "secret_key": MIG_SECRET},
+                "broken": {"shop_id": "x"},
+            }
+        ),
+        raising=False,
+    )
+
+
+def test_extra_shops_parsed_and_resolved(mig_shop):
+    from app.services.aurapay_service import aurapay_service_for_shop, aurapay_shop_by_shop_id
+
+    assert set(settings.get_aurapay_extra_shops()) == {"mig"}
+    assert aurapay_service_for_shop("mig").shop_id == MIG_SHOP_ID
+    assert aurapay_service_for_shop("mig").api_key == "mig-api"
+    assert aurapay_service_for_shop(None).shop_id == SHOP_ID
+    assert aurapay_service_for_shop("default").shop_id == SHOP_ID
+    assert aurapay_service_for_shop("broken") is None
+    assert aurapay_shop_by_shop_id(MIG_SHOP_ID) == "mig"
+    assert aurapay_shop_by_shop_id(SHOP_ID) is None
+    assert aurapay_shop_by_shop_id(None) is None
+
+
+@pytest.mark.anyio
+async def test_storefront_with_own_shop_invoices_into_it(mig_shop, monkeypatch):
+    main_stub = StubAurapayService()
+    mig_stub = StubAurapayService(
+        {"id": "inv-m", "status": "PENDING", "payment_data": {"url": "https://payform.aurapay.tech/m"}}
+    )
+    monkeypatch.setattr(
+        aurapay_mixin_module,
+        "aurapay_service_for_shop",
+        lambda shop: mig_stub if shop == "mig" else None,
+    )
+    service = _make_service(main_stub)
+    captured: Dict[str, Any] = {}
+
+    async def fake_create(db: Any, **kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(id=1, status=kwargs["status"])
+
+    async def no_snapshot(*_: Any) -> None:
+        return None
+
+    monkeypatch.setattr(payment_service_module, "create_aurapay_payment", fake_create, raising=False)
+    monkeypatch.setattr(aurapay_mixin_module, "build_invoice_checkout_snapshot", no_snapshot)
+    monkeypatch.setattr(settings, "AURAPAY_MIN_AMOUNT_KOPEKS", 1000, raising=False)
+    monkeypatch.setattr(settings, "AURAPAY_MAX_AMOUNT_KOPEKS", 1_000_000, raising=False)
+    bot_registry.set_aurapay_shop(777, "mig")
+
+    result = await service.create_aurapay_payment(
+        None, user_id=42, amount_kopeks=29_000, description="x",
+        metadata={"payment_router": {"bot_id": 777}},
+    )
+
+    assert result["invoice_id"] == "inv-m"
+    assert main_stub.calls == []
+    assert len(mig_stub.calls) == 1
+    assert captured["metadata"]["aurapay_shop"] == "mig"
+
+
+@pytest.mark.anyio
+async def test_storefront_shop_without_keys_does_not_fall_back_to_main(mig_shop, monkeypatch):
+    main_stub = StubAurapayService()
+    service = _make_service(main_stub)
+    monkeypatch.setattr(settings, "AURAPAY_MIN_AMOUNT_KOPEKS", 1000, raising=False)
+    bot_registry.set_aurapay_shop(777, "unknown")
+
+    result = await service.create_aurapay_payment(
+        None, user_id=42, amount_kopeks=29_000, description="x",
+        metadata={"payment_router": {"bot_id": 777}},
+    )
+
+    assert result is None
+    assert main_stub.calls == []
+
+
+@pytest.mark.anyio
+async def test_webhook_and_status_use_shop_of_the_invoice(mig_shop, monkeypatch):
+    payment = DummyPayment(metadata_json={"aurapay_shop": "mig"})
+    user = DummyUser()
+    _patch_finalize(monkeypatch, payment, user)
+    service = _make_service(StubAurapayService())
+
+    from_main = dict(DOC_BODY, order_id=payment.order_id, amount="290.00", shop_id=SHOP_ID)
+    assert await service.process_aurapay_webhook(DummySession(), from_main) is False
+    assert user.balance_kopeks == 0
+
+    from_mig = dict(DOC_BODY, order_id=payment.order_id, amount="290.00", shop_id=MIG_SHOP_ID)
+    assert await service.process_aurapay_webhook(DummySession(), from_mig) is True
+    assert user.balance_kopeks == 29_000

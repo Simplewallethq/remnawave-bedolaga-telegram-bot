@@ -3332,6 +3332,7 @@ _WHITE_LABEL_TABLES_PG = (
     "REFERENCES price_schemes(id) ON DELETE SET NULL",
     "ALTER TABLE copycat_bots ADD COLUMN IF NOT EXISTS price_scheme_id INTEGER NULL "
     "REFERENCES price_schemes(id) ON DELETE SET NULL",
+    "ALTER TABLE copycat_bots ADD COLUMN IF NOT EXISTS aurapay_shop VARCHAR(64) NULL",
     """
     CREATE TABLE IF NOT EXISTS bot_owners (
         id SERIAL PRIMARY KEY,
@@ -3366,8 +3367,8 @@ _WHITE_LABEL_TABLES_PG = (
 
 async def ensure_white_label_schema() -> bool:
     """Ценовые схемы витрин и платформа владельцев: таблицы price_schemes,
-    price_scheme_tariffs, bot_owners, owner_payouts и price_scheme_id у
-    копикетов и их групп. Таблицы обычно создаёт create_all раньше — здесь
+    price_scheme_tariffs, bot_owners, owner_payouts, price_scheme_id у
+    копикетов и их групп, касса AuraPay копикета. Таблицы обычно создаёт create_all раньше — здесь
     идемпотентный фолбэк и новые колонки существующих таблиц."""
     try:
         db_type = await get_database_type()
@@ -3378,13 +3379,18 @@ async def ensure_white_label_schema() -> bool:
             return True
 
         # SQLite/MySQL: таблицы — через create_all, здесь только колонки.
-        for table in ("copycat_groups", "copycat_bots"):
+        columns = (
+            ("copycat_groups", "price_scheme_id", "INTEGER"),
+            ("copycat_bots", "price_scheme_id", "INTEGER"),
+            ("copycat_bots", "aurapay_shop", "VARCHAR(64)"),
+        )
+        for table, column, column_type in columns:
             if not await check_table_exists(table):
                 continue
-            if await check_column_exists(table, "price_scheme_id"):
+            if await check_column_exists(table, column):
                 continue
             async with engine.begin() as conn:
-                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN price_scheme_id INTEGER NULL"))
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {column_type} NULL"))
         return True
     except Exception as error:
         logger.error(f"Ошибка подготовки схемы white label: {error}")

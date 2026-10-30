@@ -24,6 +24,7 @@ from aiogram import Bot
 from app.branding.profile import _as_bool, clean_brand_name
 from app.config import settings
 from app.database.models import CopycatBot, CopycatGroup
+from app.services.aurapay_service import normalize_shop
 from app.utils import bot_registry
 
 logger = logging.getLogger(__name__)
@@ -484,6 +485,7 @@ class CopycatRuntime:
         else:
             bot_registry.set_payment_weights(tg_id, weights[0], weights[1])
         bot_registry.set_price_scheme(tg_id, effective_price_scheme_id(row, row.group))
+        bot_registry.set_aurapay_shop(tg_id, normalize_shop(row.aurapay_shop))
         # Бот владельца — чужая витрина: наши пользователи заводят в нём новый
         # аккаунт, а не приносят туда свою подписку и баланс.
         bot_registry.set_isolated_accounts(tg_id, row.owner_user_id is not None)

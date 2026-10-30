@@ -174,3 +174,40 @@ class AurapayService:
         else:
             raise AurapayAPIError("нужен id или order_id инвойса")
         return await self._request("/invoice/status", payload)
+
+
+# ------------------------------------------------------------------- кассы
+
+# Имя основной кассы (AURAPAY_SHOP_ID и соседи). В платеже и у бота она — None.
+DEFAULT_SHOP = "default"
+
+
+def normalize_shop(shop: Optional[str]) -> Optional[str]:
+    """Имя кассы витрины; None — основная."""
+    name = (shop or "").strip().lower()
+    if not name or name == DEFAULT_SHOP:
+        return None
+    return name
+
+
+def aurapay_service_for_shop(shop: Optional[str]) -> Optional[AurapayService]:
+    """Клиент нужной кассы; None — касса не описана в AURAPAY_EXTRA_SHOPS."""
+    name = normalize_shop(shop)
+    if name is None:
+        return AurapayService()
+    creds = settings.get_aurapay_extra_shops().get(name)
+    if creds is None:
+        return None
+    return AurapayService(
+        shop_id=creds["shop_id"], api_key=creds["api_key"], secret_key=creds["secret_key"]
+    )
+
+
+def aurapay_shop_by_shop_id(shop_id: Any) -> Optional[str]:
+    """Имя кассы по её shop_id из вебхука; чужой или пустой — основная."""
+    shop_id = str(shop_id or "").strip()
+    if shop_id:
+        for name, creds in settings.get_aurapay_extra_shops().items():
+            if creds["shop_id"] == shop_id:
+                return name
+    return None

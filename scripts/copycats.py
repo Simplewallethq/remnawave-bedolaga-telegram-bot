@@ -43,7 +43,8 @@ Usage
 Поля бота: name, logo, image_url, privacy_url, terms_url, channel_link,
 channel_id, support, subscription_domain, happ_redirect_template,
 referral_terms_url, has_own_app, rays_enabled, is_copycat, enabled, group,
-owner_user_id, owner_share_percent, price_scheme.
+owner_user_id, owner_share_percent, price_scheme, aurapay_shop (касса из
+AURAPAY_EXTRA_SHOPS; пусто — основная).
 Поля группы: name, description, support, subscription_domain,
 happ_redirect_template, privacy_url, terms_url, referral_terms_url,
 owner_share_percent, price_scheme.
@@ -56,6 +57,7 @@ import asyncio
 import sys
 from typing import Any, Optional
 
+from app.config import settings
 from app.database.crud.copycat import (
     find_copycat_bot,
     get_copycat_bot_by_token,
@@ -90,6 +92,7 @@ from app.services.price_scheme_service import (
     set_tariff,
     snapshot_from_row,
 )
+from app.services.aurapay_service import normalize_shop
 from app.services.payment_gateway_router import ROUTED_GATEWAYS
 
 BOT_FIELDS = BOT_BRAND_FIELDS + (
@@ -101,6 +104,7 @@ BOT_FIELDS = BOT_BRAND_FIELDS + (
     "owner_user_id",
     "owner_share_percent",
     "price_scheme",
+    "aurapay_shop",
 )
 GROUP_FIELDS = ("name", "description", "owner_share_percent", "price_scheme") + GROUP_BRAND_FIELDS
 SCHEME_FIELDS = ("name", "trial_days", "enforce_floor")
@@ -186,8 +190,21 @@ async def _apply_bot_fields(db, row: Any, values: dict[str, Any]) -> None:
             row.group_id = None if value is None else (await _require_group(db, value)).id
         elif key == "price_scheme":
             row.price_scheme_id = None if value is None else (await _require_scheme(db, value)).id
+        elif key == "aurapay_shop":
+            row.aurapay_shop = _require_aurapay_shop(value)
         else:
             setattr(row, key, value)
+
+
+def _require_aurapay_shop(value: Optional[str]) -> Optional[str]:
+    shop = normalize_shop(value)
+    if shop is None:
+        return None
+    shops = settings.get_aurapay_extra_shops()
+    if shop not in shops:
+        known = ", ".join(sorted(shops)) or "нет"
+        raise UsageError(f"касса AuraPay {shop!r} не описана в AURAPAY_EXTRA_SHOPS; есть: {known}")
+    return shop
 
 
 def _scheme_name(scheme_id: Optional[int]) -> str:
@@ -253,9 +270,10 @@ def _bot_line(row: CopycatBot) -> str:
     scheme_id = effective_price_scheme_id(row, row.group)
     scheme_text = f" цены={_scheme_name(scheme_id)}" if scheme_id is not None else ""
     owner_text = f" владелец=user:{row.owner_user_id}" if row.owner_user_id else ""
+    shop_text = f" aurapay={row.aurapay_shop}" if row.aurapay_shop else ""
     return (
         f"#{row.id:<4} {status} @{row.username or '?':<28} tg={row.telegram_bot_id or '-':<12} "
-        f"группа={group}{kind}{routing}{share_text}{scheme_text}{owner_text}"
+        f"группа={group}{kind}{routing}{share_text}{scheme_text}{owner_text}{shop_text}"
     )
 
 
@@ -281,6 +299,7 @@ def _show_bot(row: CopycatBot) -> None:
     own = " (своя)" if row.price_scheme_id is not None else " (группы)"
     scheme_id = effective_price_scheme_id(row, group)
     print(f"  ценовая схема: {_scheme_name(scheme_id)}{own if scheme_id is not None else ' (цены основного бота)'}")
+    print(f"  касса AuraPay: {row.aurapay_shop or 'основная'}")
 
 
 def _show_group(group: CopycatGroup, count: int) -> None:
