@@ -3018,6 +3018,8 @@ class CopycatBot(Base):
     payment_gateway_weights = Column(JSON, nullable=True)
     # Своя касса AuraPay (имя из AURAPAY_EXTRA_SHOPS); NULL — основная.
     aurapay_shop = Column(String(64), nullable=True)
+    # Свой терминал WATA (имя из WATA_EXTRA_TERMINALS); NULL — основной.
+    wata_terminal = Column(String(64), nullable=True)
     # Кто завёл витрину (бот для владельцев) и его доля, если не как у группы.
     owner_user_id = Column(
         Integer,

@@ -23,6 +23,8 @@ _payment_weights: dict[int, tuple[dict[str, int], str]] = {}
 _price_schemes: dict[int, int] = {}
 # Своя касса AuraPay витрины (имя из AURAPAY_EXTRA_SHOPS). Нет записи — основная.
 _aurapay_shops: dict[int, str] = {}
+# Свой терминал WATA витрины (имя из WATA_EXTRA_TERMINALS). Нет записи — основной.
+_wata_terminals: dict[int, str] = {}
 # Боты владельцев: старые общие аккаунты сюда не пускаются (см. telegram_account_clause).
 _isolated_accounts: set[int] = set()
 
@@ -60,6 +62,7 @@ def forget_bot(bot_id: int) -> None:
     _payment_weights.pop(bot_id, None)
     _price_schemes.pop(bot_id, None)
     _aurapay_shops.pop(bot_id, None)
+    _wata_terminals.pop(bot_id, None)
     _isolated_accounts.discard(bot_id)
 
 
@@ -111,6 +114,20 @@ def get_aurapay_shop(bot_id: int | None) -> str | None:
     if bot_id is None:
         return None
     return _aurapay_shops.get(bot_id)
+
+
+def set_wata_terminal(bot_id: int, terminal: str | None) -> None:
+    if terminal:
+        _wata_terminals[bot_id] = terminal
+    else:
+        _wata_terminals.pop(bot_id, None)
+
+
+def get_wata_terminal(bot_id: int | None) -> str | None:
+    """Терминал WATA, в который бот выставляет счета; None — основной."""
+    if bot_id is None:
+        return None
+    return _wata_terminals.get(bot_id)
 
 
 def set_isolated_accounts(bot_id: int, isolated: bool) -> None:
@@ -238,6 +255,7 @@ def clear() -> None:
     _payment_weights.clear()
     _price_schemes.clear()
     _aurapay_shops.clear()
+    _wata_terminals.clear()
     _isolated_accounts.clear()
 
 

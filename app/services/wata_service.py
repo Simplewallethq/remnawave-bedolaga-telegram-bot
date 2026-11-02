@@ -28,10 +28,17 @@ class WataService:
         base_url: Optional[str] = None,
         access_token: Optional[str] = None,
         request_timeout: Optional[int] = None,
+        terminal: Optional[str] = None,
+        success_url: Optional[str] = None,
+        fail_url: Optional[str] = None,
     ) -> None:
         self.base_url = (base_url or settings.WATA_BASE_URL or "").rstrip("/")
         self.access_token = access_token or settings.WATA_ACCESS_TOKEN
         self.request_timeout = request_timeout or int(settings.WATA_REQUEST_TIMEOUT)
+        # Имя терминала витрины; None — основной.
+        self.terminal = terminal
+        self.success_url = success_url or settings.WATA_SUCCESS_REDIRECT_URL
+        self.fail_url = fail_url or settings.WATA_FAIL_REDIRECT_URL
 
     @property
     def is_configured(self) -> bool:
@@ -147,10 +154,10 @@ class WataService:
 
         payload["type"] = link_type or settings.WATA_PAYMENT_TYPE or "OneTime"
 
-        if success_url or settings.WATA_SUCCESS_REDIRECT_URL:
-            payload["successRedirectUrl"] = success_url or settings.WATA_SUCCESS_REDIRECT_URL
-        if fail_url or settings.WATA_FAIL_REDIRECT_URL:
-            payload["failRedirectUrl"] = fail_url or settings.WATA_FAIL_REDIRECT_URL
+        if success_url or self.success_url:
+            payload["successRedirectUrl"] = success_url or self.success_url
+        if fail_url or self.fail_url:
+            payload["failRedirectUrl"] = fail_url or self.fail_url
 
         if expiration_minutes is None:
             ttl = settings.WATA_LINK_TTL_MINUTES
@@ -210,3 +217,33 @@ class WataService:
     async def get_transaction(self, transaction_id: str) -> Dict[str, Any]:
         logger.debug("Получаем WATA транзакцию %s", transaction_id)
         return await self._request("GET", f"/transactions/{transaction_id}")
+
+
+# ---------------------------------------------------------------- терминалы
+
+# Имя основного терминала (WATA_ACCESS_TOKEN). В платеже и у бота он — None.
+DEFAULT_TERMINAL = "default"
+
+
+def normalize_terminal(terminal: Optional[str]) -> Optional[str]:
+    """Имя терминала витрины; None — основной."""
+    name = (terminal or "").strip().lower()
+    if not name or name == DEFAULT_TERMINAL:
+        return None
+    return name
+
+
+def wata_service_for_terminal(terminal: Optional[str]) -> Optional[WataService]:
+    """Клиент нужного терминала; None — терминал не описан в WATA_EXTRA_TERMINALS."""
+    name = normalize_terminal(terminal)
+    if name is None:
+        return WataService()
+    creds = settings.get_wata_extra_terminals().get(name)
+    if creds is None:
+        return None
+    return WataService(
+        access_token=creds["access_token"],
+        terminal=name,
+        success_url=creds.get("success_url") or None,
+        fail_url=creds.get("fail_url") or None,
+    )

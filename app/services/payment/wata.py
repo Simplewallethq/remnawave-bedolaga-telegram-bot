@@ -21,12 +21,37 @@ from app.services.tariff_partial_payment_service import (
     build_invoice_checkout_snapshot,
     extract_checkout_snapshot,
 )
-from app.services.wata_service import WataAPIError, WataService
+from app.branding.context import brand_scope, current_bot_id
+from app.services.wata_service import (
+    WataAPIError,
+    WataService,
+    normalize_terminal,
+    wata_service_for_terminal,
+)
 from app.services.vpn_deposit_bonus_service import vpn_deposit_bonus_service
+from app.utils.bot_registry import bot_for_user, get_bot_instance, get_wata_terminal
 from app.utils.success_notifications import format_topup_success_message
 from app.utils.user_utils import format_referrer_info
 
 logger = logging.getLogger(__name__)
+
+TERMINAL_METADATA_KEY = "wata_terminal"
+
+
+def payment_terminal(payment: Any) -> Optional[str]:
+    """Терминал, в котором выставлен счёт; None — основной."""
+    return normalize_terminal(
+        (getattr(payment, "metadata_json", None) or {}).get(TERMINAL_METADATA_KEY)
+    )
+
+
+def _invoice_bot_id(metadata: Optional[Dict[str, Any]]) -> Optional[int]:
+    """Бот, выставляющий счёт: из роутера, иначе отвечающий бот апдейта."""
+    router_meta = (metadata or {}).get("payment_router") or {}
+    bot_id = router_meta.get("bot_id")
+    if bot_id is None:
+        bot_id = current_bot_id()
+    return bot_id
 
 
 def _extract_transaction_id(payment: Any, remote_link: Optional[Dict[str, Any]] = None) -> Optional[str]:
@@ -76,7 +101,33 @@ def _extract_transaction_id(payment: Any, remote_link: Optional[Dict[str, Any]] 
 
 
 class WataPaymentMixin:
-    """Encapsulates creation and status handling for WATA payment links."""
+    """Encapsulates creation and status handling for WATA payment links.
+
+    Терминал — основной или свой у витрины (`scripts.copycats set BOT
+    wata_terminal=quattra`). Его имя пишется в `metadata_json.wata_terminal`
+    счёта: проверка статуса идёт в тот же терминал, даже если витрину потом
+    перевели на другой.
+    """
+
+    def _wata_service_for(self, terminal: Optional[str]) -> Any:
+        """Клиент терминала; None — WATA выключена или терминал не описан в .env."""
+        service = getattr(self, "wata_service", None)
+        if service is None or terminal is None:
+            return service
+        return wata_service_for_terminal(terminal)
+
+    def _wata_payment_bot(self, payment: Any, user: Any) -> tuple:
+        """(бот, bot_id бренда) для сообщений по счёту: бот, где выставлен счёт,
+        иначе бот регистрации пользователя, иначе основной."""
+        base = getattr(self, "bot", None)
+        if base is None:
+            return None, None
+        router_meta = (getattr(payment, "metadata_json", None) or {}).get("payment_router") or {}
+        bot_id = router_meta.get("bot_id")
+        invoice_bot = get_bot_instance(bot_id)
+        if invoice_bot is not None:
+            return invoice_bot, bot_id
+        return bot_for_user(user, base), getattr(user, "bot_id", None)
 
     async def create_wata_payment(
         self,
@@ -88,8 +139,11 @@ class WataPaymentMixin:
         language: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
-        if not getattr(self, "wata_service", None):
-            logger.error("WATA service is not initialised")
+        terminal = normalize_terminal(get_wata_terminal(_invoice_bot_id(metadata)))
+        service = self._wata_service_for(terminal)
+        if not service:
+            # Свой терминал витрины без ключей — не в основной: деньги ушли бы не туда.
+            logger.error("WATA терминал %s не настроен", terminal or "основной")
             return None
 
         is_vpn_bonus = vpn_deposit_bonus_service.is_campaign_metadata(metadata)
@@ -114,7 +168,7 @@ class WataPaymentMixin:
         order_id = f"wata_{user_id}_{uuid.uuid4().hex[:12]}"
 
         try:
-            response = await self.wata_service.create_payment_link(  # type: ignore[union-attr]
+            response = await service.create_payment_link(
                 amount_kopeks=amount_kopeks,
                 currency="RUB",
                 description=description,
@@ -149,6 +203,8 @@ class WataPaymentMixin:
         snapshot = await build_invoice_checkout_snapshot(user_id, amount_kopeks)
         if snapshot:
             metadata[SNAPSHOT_METADATA_KEY] = snapshot
+        if terminal:
+            metadata[TERMINAL_METADATA_KEY] = terminal
 
         local_payment = await payment_module.create_wata_payment(
             db=db,
@@ -169,10 +225,11 @@ class WataPaymentMixin:
         )
 
         logger.info(
-            "Создан WATA платеж %s на %s₽ для пользователя %s",
+            "Создан WATA платеж %s на %s₽ для пользователя %s (терминал %s)",
             payment_link_id,
             amount_kopeks / 100,
             user_id,
+            terminal or "основной",
         )
 
         return {
@@ -290,10 +347,11 @@ class WataPaymentMixin:
         remote_link: Optional[Dict[str, Any]] = None
         transaction_payload: Optional[Dict[str, Any]] = None
         transaction_id: Optional[str] = None
+        service = self._wata_service_for(payment_terminal(payment))
 
-        if getattr(self, "wata_service", None) and payment.payment_link_id:
+        if service and payment.payment_link_id:
             try:
-                remote_link = await self.wata_service.get_payment_link(payment.payment_link_id)  # type: ignore[union-attr]
+                remote_link = await service.get_payment_link(payment.payment_link_id)
             except WataAPIError as error:
                 logger.error("Ошибка получения WATA ссылки %s: %s", payment.payment_link_id, error)
             except Exception as error:  # pragma: no cover - safety net
@@ -320,9 +378,7 @@ class WataPaymentMixin:
                 transaction_id = _extract_transaction_id(payment, remote_link)
                 if transaction_id:
                     try:
-                        transaction_payload = await self.wata_service.get_transaction(  # type: ignore[union-attr]
-                            transaction_id
-                        )
+                        transaction_payload = await service.get_transaction(transaction_id)
                     except WataAPIError as error:
                         logger.error(
                             "Ошибка получения WATA транзакции %s: %s",
@@ -337,7 +393,7 @@ class WataPaymentMixin:
                         )
                 if not transaction_payload:
                     try:
-                        tx_response = await self.wata_service.search_transactions(  # type: ignore[union-attr]
+                        tx_response = await service.search_transactions(
                             order_id=payment.order_id,
                             payment_link_id=payment.payment_link_id,
                             status="Paid",
@@ -360,14 +416,12 @@ class WataPaymentMixin:
         if (
             not transaction_payload
             and not payment.is_paid
-            and getattr(self, "wata_service", None)
+            and service
         ):
             fallback_transaction_id = transaction_id or _extract_transaction_id(payment)
             if fallback_transaction_id:
                 try:
-                    transaction_payload = await self.wata_service.get_transaction(  # type: ignore[union-attr]
-                        fallback_transaction_id
-                    )
+                    transaction_payload = await service.get_transaction(fallback_transaction_id)
                 except WataAPIError as error:
                     logger.error(
                         "Ошибка повторного запроса WATA транзакции %s: %s",
@@ -430,14 +484,19 @@ class WataPaymentMixin:
             paid_at = payment.paid_at
         existing_metadata = dict(getattr(payment, "metadata_json", {}) or {})
 
+        # Счёт и ответ — в боте, где выставлен счёт: пользователю витрины
+        # основной бот писать не может («chat not found»).
+        payer = await payment_module.get_user_by_id(db, payment.user_id)
+        user_bot, brand_bot_id = self._wata_payment_bot(payment, payer)
+
         invoice_message = existing_metadata.get("invoice_message") or {}
         invoice_message_removed = False
-        if getattr(self, "bot", None) and invoice_message:
+        if user_bot and invoice_message:
             chat_id = invoice_message.get("chat_id")
             message_id = invoice_message.get("message_id")
             if chat_id and message_id:
                 try:
-                    await self.bot.delete_message(chat_id, message_id)
+                    await user_bot.delete_message(chat_id, message_id)
                 except Exception as delete_error:  # pragma: no cover - depends on rights
                     logger.warning(
                         "Не удалось удалить счёт WATA %s: %s",
@@ -579,7 +638,7 @@ class WataPaymentMixin:
                     auto_purchase_success = await auto_purchase_saved_cart_after_topup(
                         db,
                         user,
-                        bot=getattr(self, "bot", None),
+                        bot=user_bot,
                         checkout_snapshot=checkout_snapshot,
                     )
                 except Exception as auto_error:
@@ -596,20 +655,21 @@ class WataPaymentMixin:
             logger.debug("Не удалось отправить напоминание о корзине после WATA: %s", error)
 
         # Уведомление пользователю только если автопокупка не сработала
-        if not auto_purchase_success and getattr(self, "bot", None):
-            try:
-                if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
-                    await vpn_deposit_bonus_service.send_success_message(self.bot, user)
-                else:
-                    keyboard = await self.build_topup_success_keyboard(user)
-                    await self.bot.send_message(
-                        user.telegram_id,
-                        format_topup_success_message(settings.format_price(credit_amount_kopeks)),
-                        parse_mode="HTML",
-                        reply_markup=keyboard,
-                    )
-            except Exception as error:
-                logger.error("Ошибка отправки уведомления пользователю WATA: %s", error)
+        if not auto_purchase_success and user_bot:
+            with brand_scope(brand_bot_id):
+                try:
+                    if bonus_decision.is_campaign_payment and not bonus_decision.is_duplicate:
+                        await vpn_deposit_bonus_service.send_success_message(user_bot, user)
+                    else:
+                        keyboard = await self.build_topup_success_keyboard(user)
+                        await user_bot.send_message(
+                            user.telegram_id,
+                            format_topup_success_message(settings.format_price(credit_amount_kopeks)),
+                            parse_mode="HTML",
+                            reply_markup=keyboard,
+                        )
+                except Exception as error:
+                    logger.error("Ошибка отправки уведомления пользователю WATA: %s", error)
 
         await vpn_deposit_bonus_service.record_payment_processed(
             db,

@@ -67,8 +67,13 @@ class ReadOnlySettingError(RuntimeError):
 
 
 class BotConfigurationService:
-    # AURAPAY_EXTRA_SHOPS — JSON с ключами касс: маска по имени его не скроет.
-    EXCLUDED_KEYS: set[str] = {"BOT_TOKEN", "ADMIN_IDS", "AURAPAY_EXTRA_SHOPS"}
+    # *_EXTRA_SHOPS/TERMINALS — JSON с ключами касс: маска по имени его не скроет.
+    EXCLUDED_KEYS: set[str] = {
+        "BOT_TOKEN",
+        "ADMIN_IDS",
+        "AURAPAY_EXTRA_SHOPS",
+        "WATA_EXTRA_TERMINALS",
+    }
 
     READ_ONLY_KEYS: set[str] = {"EXTERNAL_ADMIN_TOKEN", "EXTERNAL_ADMIN_TOKEN_BOT_ID"}
     PLAIN_TEXT_KEYS: set[str] = {"EXTERNAL_ADMIN_TOKEN", "EXTERNAL_ADMIN_TOKEN_BOT_ID"}

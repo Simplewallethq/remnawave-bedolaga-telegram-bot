@@ -474,6 +474,12 @@ class Settings(BaseSettings):
     WATA_WEBHOOK_PORT: int = 8085
     WATA_PUBLIC_KEY_URL: Optional[str] = None
     WATA_PUBLIC_KEY_CACHE_SECONDS: int = 3600
+    # Отдельные терминалы витрин, JSON: {"quattra": {"access_token": "…",
+    # "terminal_public_id": "…", "success_url": "…", "fail_url": "…"}}
+    # (редиректы необязательны). Бот привязывается к терминалу через
+    # scripts.copycats set BOT wata_terminal=quattra, без привязки — терминал выше.
+    # Вебхук общий: подпись одним ключом WATA, платёж находим по orderId.
+    WATA_EXTRA_TERMINALS: Optional[str] = None
 
     # --- 1Payment (СБП с рекуррентами по токену) ---
     # Подключается ТОЛЬКО через роутер платежей и только на поверхностях оплаты
@@ -1694,6 +1700,40 @@ class Settings(BaseSettings):
             and self.WATA_ACCESS_TOKEN is not None
             and self.WATA_TERMINAL_PUBLIC_ID is not None
         )
+
+    def get_wata_extra_terminals(self) -> Dict[str, Dict[str, str]]:
+        """Отдельные терминалы витрин по имени; запись без токена или ID терминала отбрасывается."""
+        raw = (self.WATA_EXTRA_TERMINALS or "").strip()
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            logger.error("WATA_EXTRA_TERMINALS: не JSON, терминалы витрин не подключены")
+            return {}
+        if not isinstance(data, dict):
+            logger.error("WATA_EXTRA_TERMINALS: ожидался объект {имя: ключи}")
+            return {}
+        terminals: Dict[str, Dict[str, str]] = {}
+        for name, creds in data.items():
+            name = str(name).strip().lower()
+            if not name or name == "default":
+                logger.error("WATA_EXTRA_TERMINALS: имя %r занято основным терминалом", name)
+                continue
+            if not isinstance(creds, dict):
+                logger.error("WATA_EXTRA_TERMINALS[%s]: ожидался объект с ключами", name)
+                continue
+            entry = {
+                key: str(creds.get(key) or "").strip()
+                for key in ("access_token", "terminal_public_id", "success_url", "fail_url")
+            }
+            if not entry["access_token"] or not entry["terminal_public_id"]:
+                logger.error(
+                    "WATA_EXTRA_TERMINALS[%s]: нужны access_token и terminal_public_id", name
+                )
+                continue
+            terminals[name] = entry
+        return terminals
 
     # --- Наличие учётных данных, независимо от флага ENABLED ---
     # Вебхук-роуты регистрируются один раз при старте, поэтому гейтить их надо

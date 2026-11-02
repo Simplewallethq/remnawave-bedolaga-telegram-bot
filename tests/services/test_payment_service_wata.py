@@ -371,3 +371,183 @@ async def test_process_wata_webhook_returns_false_when_payment_missing(
     processed = await service.process_wata_webhook(db, payload)
 
     assert processed is False
+
+
+# ------------------------------------------------------ терминалы витрин
+
+import json  # noqa: E402
+
+import app.services.payment.wata as wata_mixin_module  # noqa: E402
+from app.utils import bot_registry  # noqa: E402
+
+QUATTRA_TOKEN = "quattra-token"
+QUATTRA_TERMINAL_ID = "3a000000-0000-0000-0000-00000000q001"
+
+
+@pytest.fixture
+def quattra_terminal(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings, "WATA_ENABLED", True, raising=False)
+    monkeypatch.setattr(settings, "WATA_ACCESS_TOKEN", "main-token", raising=False)
+    monkeypatch.setattr(settings, "WATA_TERMINAL_PUBLIC_ID", "main-terminal", raising=False)
+    monkeypatch.setattr(settings, "WATA_SUCCESS_REDIRECT_URL", "https://t.me/main", raising=False)
+    monkeypatch.setattr(
+        settings,
+        "WATA_EXTRA_TERMINALS",
+        json.dumps(
+            {
+                "Quattra": {
+                    "access_token": QUATTRA_TOKEN,
+                    "terminal_public_id": QUATTRA_TERMINAL_ID,
+                    "success_url": "https://t.me/quattra_vpn_bot",
+                },
+                "broken": {"access_token": "x"},
+            }
+        ),
+        raising=False,
+    )
+    yield
+    bot_registry.set_wata_terminal(777, None)
+
+
+def test_extra_terminals_parsed_and_resolved(quattra_terminal) -> None:
+    from app.services.wata_service import wata_service_for_terminal
+
+    assert set(settings.get_wata_extra_terminals()) == {"quattra"}
+    quattra = wata_service_for_terminal("quattra")
+    assert quattra.access_token == QUATTRA_TOKEN
+    assert quattra.success_url == "https://t.me/quattra_vpn_bot"
+    assert quattra.fail_url == settings.WATA_FAIL_REDIRECT_URL
+    assert wata_service_for_terminal(None).access_token == "main-token"
+    assert wata_service_for_terminal("default").success_url == "https://t.me/main"
+    assert wata_service_for_terminal("broken") is None
+
+
+def _capture_local_payment(monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
+    captured: Dict[str, Any] = {}
+
+    async def fake_create(**kwargs: Any) -> DummyLocalPayment:
+        captured.update(kwargs)
+        return DummyLocalPayment(payment_id=5)
+
+    async def no_snapshot(*_: Any) -> None:
+        return None
+
+    monkeypatch.setattr(payment_service_module, "create_wata_payment", fake_create, raising=False)
+    monkeypatch.setattr(wata_mixin_module, "build_invoice_checkout_snapshot", no_snapshot)
+    monkeypatch.setattr(settings, "WATA_MIN_AMOUNT_KOPEKS", 100, raising=False)
+    monkeypatch.setattr(settings, "WATA_MAX_AMOUNT_KOPEKS", 5_000_000, raising=False)
+    return captured
+
+
+@pytest.mark.anyio("asyncio")
+async def test_storefront_with_own_terminal_invoices_into_it(
+    quattra_terminal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main_stub = StubWataService({"id": "main-link", "url": "https://wata/main"})
+    quattra_stub = StubWataService({"id": "q-link", "url": "https://wata/q"})
+    monkeypatch.setattr(
+        wata_mixin_module,
+        "wata_service_for_terminal",
+        lambda terminal: quattra_stub if terminal == "quattra" else None,
+    )
+    captured = _capture_local_payment(monkeypatch)
+    service = _make_service(main_stub)
+    bot_registry.set_wata_terminal(777, "quattra")
+
+    result = await service.create_wata_payment(
+        db=DummySession(), user_id=42, amount_kopeks=29_000, description="x",
+        metadata={"payment_router": {"bot_id": 777}},
+    )
+
+    assert result["payment_link_id"] == "q-link"
+    assert main_stub.calls == []
+    assert len(quattra_stub.calls) == 1
+    assert captured["metadata"]["wata_terminal"] == "quattra"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_bot_without_own_terminal_uses_main(
+    quattra_terminal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main_stub = StubWataService({"id": "main-link", "url": "https://wata/main"})
+    captured = _capture_local_payment(monkeypatch)
+    service = _make_service(main_stub)
+
+    result = await service.create_wata_payment(
+        db=DummySession(), user_id=42, amount_kopeks=29_000, description="x",
+        metadata={"payment_router": {"bot_id": 555}},
+    )
+
+    assert result["payment_link_id"] == "main-link"
+    assert "wata_terminal" not in captured["metadata"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_storefront_terminal_from_brand_context_without_router(
+    quattra_terminal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.branding.context import brand_scope
+
+    quattra_stub = StubWataService({"id": "q-link", "url": "https://wata/q"})
+    monkeypatch.setattr(
+        wata_mixin_module, "wata_service_for_terminal", lambda terminal: quattra_stub
+    )
+    _capture_local_payment(monkeypatch)
+    service = _make_service(StubWataService({"id": "main-link"}))
+    bot_registry.set_wata_terminal(777, "quattra")
+
+    with brand_scope(777):
+        result = await service.create_wata_payment(
+            db=DummySession(), user_id=42, amount_kopeks=29_000, description="x"
+        )
+
+    assert result["payment_link_id"] == "q-link"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_storefront_terminal_without_keys_does_not_fall_back_to_main(
+    quattra_terminal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main_stub = StubWataService({"id": "main-link"})
+    service = _make_service(main_stub)
+    bot_registry.set_wata_terminal(777, "unknown")
+
+    result = await service.create_wata_payment(
+        db=DummySession(), user_id=42, amount_kopeks=29_000, description="x",
+        metadata={"payment_router": {"bot_id": 777}},
+    )
+
+    assert result is None
+    assert main_stub.calls == []
+
+
+@pytest.mark.anyio("asyncio")
+async def test_status_check_asks_terminal_of_the_invoice(
+    quattra_terminal, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payment = DummyWataPayment()
+    payment.metadata_json = {"wata_terminal": "quattra"}
+    asked: list[str] = []
+
+    class LinkStub:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        async def get_payment_link(self, link_id: str) -> Dict[str, Any]:
+            asked.append(self.name)
+            return {"id": link_id, "status": "Opened"}
+
+    monkeypatch.setattr(
+        wata_mixin_module, "wata_service_for_terminal", lambda terminal: LinkStub(terminal)
+    )
+
+    async def fake_get_by_id(*_: Any) -> DummyWataPayment:
+        return payment
+
+    monkeypatch.setattr(payment_service_module, "get_wata_payment_by_id", fake_get_by_id, raising=False)
+    service = _make_service(LinkStub("main"))  # type: ignore[arg-type]
+
+    result = await service.get_wata_payment_status(DummySession(), 1)
+
+    assert result["is_paid"] is False
+    assert asked == ["quattra"]
