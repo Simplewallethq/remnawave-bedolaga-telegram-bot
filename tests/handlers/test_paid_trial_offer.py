@@ -340,3 +340,37 @@ async def test_finalize_renewal_clears_paid_trial_flag(monkeypatch: pytest.Monke
     assert renewer.has_had_paid_subscription is True
     assert renewer.has_made_first_topup is True
     assert calls["subtracted"] == 32_000
+
+
+@pytest.mark.anyio
+async def test_finalize_renewal_switch_plan_swaps_tier_and_keeps_days(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _patch_purchase(monkeypatch)
+    end = datetime.utcnow() + timedelta(days=55)
+
+    class Sub:
+        def __init__(self) -> None:
+            self.end_date = end
+            self.status = "active"
+            self.plan_id = 3
+            self.plan_period_days = 30
+            self.device_limit = 3
+            self.traffic_limit_gb = 0
+            self.is_paid_trial = False
+
+        def extend_subscription(self, days: int) -> None:
+            self.end_date = self.end_date + timedelta(days=days)
+
+    pro = SimpleNamespace(id=4, code="pro", display_name="Pro", traffic_limit_gb=0, device_limit=5)
+    monkeypatch.setattr(tariffs_module, "plan_device_limit", lambda plan, cohort: plan.device_limit)
+    monkeypatch.setattr(tariffs_module, "resolve_pricing_cohort", lambda user: "legacy")
+    buyer = _user(balance=348_000)
+    result = await tariffs_module.finalize_tariff_renewal(
+        _Db(), buyer, Sub(), pro, 360, 348_000, switch_plan=True
+    )
+    assert result is not None
+    renewed, _, _ = result
+    assert renewed.plan_id == 4
+    assert renewed.device_limit == 5
+    assert renewed.plan_period_days == 360
+    assert renewed.end_date == end + timedelta(days=360)
+    assert calls["subtracted"] == 348_000

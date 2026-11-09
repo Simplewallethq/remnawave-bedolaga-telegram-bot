@@ -55,8 +55,6 @@ from app.services.cabinet_auth_service import cabinet_auth_service
 from app.services.cabinet_notification_service import cabinet_notification_hub
 from app.services.payment_service import PaymentService
 from app.services.plan_pricing_service import (
-    calculate_upgrade_delta,
-    get_current_plan_price_for_period,
     get_plan_by_code,
     get_plan_price,
     resolve_pricing_cohort,
@@ -720,27 +718,15 @@ async def _create_cabinet_tariff_payment(
 
     if is_active_paid and subscription.plan_id == plan.id:
         tariff_op = "renew"
-    elif is_active_paid:
-        tariff_op = "upgrade"
-        checkout_period_days = subscription.plan_period_days or period_days
-        new_price = await get_plan_price(
-            db,
-            plan.id,
-            checkout_period_days,
-            cohort=resolve_pricing_cohort(user),
-        )
-        current_price = await get_current_plan_price_for_period(db, subscription, user)
-        if new_price is None:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                detail="Price for target plan is not configured",
-            )
-        checkout_price_kopeks = calculate_upgrade_delta(
-            subscription,
-            plan,
-            new_price,
-            current_price,
-        )
+    elif is_active_paid and fixed_offer is None:
+        # Кабинет продаёт другой тариф на выбранный срок по полной цене, как
+        # показывает экран оплаты и как работает оплата с баланса в `purchase`:
+        # тариф меняется, подписка продлевается на этот срок. Пропорциональная
+        # доплата за оставшиеся дни (бот, «смена тарифа») здесь не подходит: юзер
+        # выбрал Pro на 12 мес. за 3480 ₽, а получал счёт на 163 ₽ без продления.
+        # С фикс-оффером (cold Solo / Legacy Pro) остаётся `purchase`: эти офферы
+        # автопокупка принимает только как покупку.
+        tariff_op = "switch_renew"
 
     offer_id = getattr(fixed_offer, "id", None)
     offer_type = getattr(fixed_offer, "notification_type", None)

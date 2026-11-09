@@ -883,9 +883,15 @@ async def _auto_tariff_purchase(
                     price_kopeks=new_price,
                 )
 
-        elif tariff_op == "renew":
-            active_sub = await _resolve_renewable_subscription(user)
-            if not active_sub or active_sub.plan_id != plan.id:
+        elif tariff_op in ("renew", "switch_renew"):
+            # switch_renew — кабинет: другой тариф на выбранный срок по полной
+            # цене, с продлением текущей подписки (см. _create_cabinet_tariff_payment).
+            switch_plan = tariff_op == "switch_renew"
+            if switch_plan:
+                active_sub = await _resolve_active_subscription(user)
+            else:
+                active_sub = await _resolve_renewable_subscription(user)
+            if not active_sub or (not switch_plan and active_sub.plan_id != plan.id):
                 logger.info(
                     "🔁 Автопокупка тарифа: нет совпадающей активной подписки для продления %s",
                     user.telegram_id,
@@ -896,7 +902,9 @@ async def _auto_tariff_purchase(
                 price = fixed_offer_price
             if price is None or user.balance_kopeks < price:
                 return False
-            result = await finalize_tariff_renewal(db, user, active_sub, plan, period_days, price)
+            result = await finalize_tariff_renewal(
+                db, user, active_sub, plan, period_days, price, switch_plan=switch_plan
+            )
             if result is None:
                 return False
             subscription, transaction, old_end_date = result
@@ -973,7 +981,7 @@ async def _auto_tariff_purchase(
         return False
 
     if subscription is not None and transaction is not None:
-        if tariff_op == "renew":
+        if tariff_op in ("renew", "switch_renew"):
             await record_subscription_renewal_event(
                 db,
                 user_id=user.id,

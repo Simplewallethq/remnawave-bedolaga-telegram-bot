@@ -834,11 +834,16 @@ async def finalize_tariff_renewal(
     plan: SubscriptionPlan,
     period_days: int,
     price_kopeks: int,
+    *,
+    switch_plan: bool = False,
 ) -> Optional[Tuple[Subscription, object, datetime]]:
     """Charge price, extend the subscription by period_days, re-sync Remnawave.
 
     Caller MUST verify balance >= price_kopeks first. Returns (subscription, transaction,
     old_end_date) or None if the balance deduction failed.
+
+    `switch_plan=True` — продление сразу на другом тарифе `plan` (покупка другого
+    тарифа на срок из кабинета): меняются тариф и лимиты, остаток дней сохраняется.
     """
     texts = get_texts(db_user.language)
     description = texts.t(
@@ -860,6 +865,10 @@ async def finalize_tariff_renewal(
         old_end_date = subscription.end_date
         subscription.extend_subscription(period_days)
         subscription.plan_period_days = period_days
+        if switch_plan:
+            subscription.plan_id = plan.id
+            subscription.device_limit = plan_device_limit(plan, resolve_pricing_cohort(db_user))
+            subscription.traffic_limit_gb = plan.traffic_limit_gb
         # Пробный доступ «за 1 ₽» после первого продления — обычная платная подписка.
         subscription.is_paid_trial = False
         db_user.has_made_first_topup = True

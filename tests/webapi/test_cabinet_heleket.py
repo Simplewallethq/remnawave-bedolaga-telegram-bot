@@ -146,3 +146,37 @@ async def test_cabinet_tariff_checkout_uses_non_crypto_payment_router(
     assert captured["ttl"] == 3600
     create_payment.assert_awaited_once()
     assert create_payment.await_args.args[2:] == (method, 24_000)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_other_plan_for_active_payer_bills_full_period_price(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Plus до января, выбрал в кабинете Pro на 12 мес. за 3480 ₽ при 20 ₽ на
+    балансе: счёт на 3460 ₽ и продление, а не доплата 163 ₽ за остаток дней."""
+    captured = {}
+
+    async def save_cart(user_id, cart_data, ttl=3600):
+        captured.update(user_id=user_id, cart=cart_data, ttl=ttl)
+        return True
+
+    create_payment = AsyncMock(return_value={"paymentUrl": "https://pay.example/x"})
+    monkeypatch.setattr(user_cart_service, "save_user_cart", save_cart)
+    monkeypatch.setattr(cabinet_module, "_create_topup_payment", create_payment)
+
+    user = _user(balance=2_000, plan_id=3, is_trial=False, status="active")
+    await cabinet_module._create_cabinet_tariff_payment(
+        db=SimpleNamespace(),
+        user=user,
+        plan=SimpleNamespace(id=4, code="pro", display_name="Pro"),
+        period_days=360,
+        price_kopeks=348_000,
+        base_price_kopeks=348_000,
+        payment_method="sbp",
+    )
+
+    cart = captured["cart"]
+    assert cart["tariff_op"] == "switch_renew"
+    assert cart["period_days"] == 360
+    assert cart["total_price"] == 348_000
+    assert create_payment.await_args.args[2:] == ("sbp", 346_000)
