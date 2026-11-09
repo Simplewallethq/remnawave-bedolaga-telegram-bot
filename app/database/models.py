@@ -1005,6 +1005,9 @@ class User(Base):
     # tg_user_id — Telegram ID из referrer-строки; НЕ telegram_id (тот unique,
     # и этим же Telegram ID может владеть отдельный нативный TG-аккаунт).
     acquisition_source = Column(String(100), nullable=True)
+    # Метки рекламы при регистрации в веб-кабинете: from, utm_*, yclid, referrer
+    # (см. app/utils/signup_attribution.py). Пишется один раз, при создании аккаунта.
+    signup_attribution = Column(JSON, nullable=True)
     tg_user_id = Column(BigInteger, nullable=True)
     # Клиент мобильного приложения из заголовка x-appName ('letoAndroid/1.2.1');
     # last-touch: обновляется при каждом обращении приложения к API.

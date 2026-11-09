@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,6 +11,11 @@ class RegisterRequest(BaseModel):
     email: str = Field(..., max_length=255)
     password: str = Field(..., min_length=6, max_length=128)
     ref: Optional[str] = Field(default=None, description="Реферальный код пригласившего")
+    attribution: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Метки рекламы с первого захода (from, utm_*, yclid, referrer); "
+        "чистятся на бэкенде, кривые не мешают регистрации",
+    )
     code: Optional[str] = Field(
         default=None, max_length=12,
         description="Email-код подтверждения (обязателен при CABINET_EMAIL_VERIFICATION)",
@@ -35,6 +40,11 @@ class OtpVerifyRequest(BaseModel):
     email: str = Field(..., max_length=255)
     code: str = Field(..., max_length=12)
     ref: Optional[str] = Field(default=None, description="Реф-код пригласившего (учитывается только для новых)")
+    attribution: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Метки рекламы с первого захода (from, utm_*, yclid, referrer); "
+        "чистятся на бэкенде, кривые не мешают регистрации",
+    )
 
 
 class LoginRequest(BaseModel):

@@ -23,6 +23,7 @@ from app.config import settings
 from app.database.crud.promo_group import get_default_promo_group
 from app.database.crud.discount_offer import get_latest_claimed_offer_for_user
 from app.database.crud.promo_offer_log import log_promo_offer_action
+from app.utils.signup_attribution import acquisition_source_from
 from app.utils.validators import sanitize_telegram_name
 
 logger = logging.getLogger(__name__)
@@ -458,6 +459,7 @@ async def create_web_user(
     referral_code: str = None,
     first_name: str = None,
     auth_source: str = "web",
+    signup_attribution: Optional[Dict[str, str]] = None,
 ) -> User:
     """
     Создаёт пользователя без Telegram (email + пароль).
@@ -487,6 +489,8 @@ async def create_web_user(
         has_had_paid_subscription=False,
         has_made_first_topup=False,
         promo_group_id=promo_group_id,
+        signup_attribution=signup_attribution or None,
+        acquisition_source=acquisition_source_from(signup_attribution),
     )
 
     db.add(user)
@@ -497,6 +501,7 @@ async def create_web_user(
     logger.info(
         f"✅ Создан пользователь {normalized_email} (источник: {auth_source}) "
         f"с реферальным кодом {referral_code}"
+        + (f", метки: {signup_attribution}" if signup_attribution else "")
     )
     return user
 

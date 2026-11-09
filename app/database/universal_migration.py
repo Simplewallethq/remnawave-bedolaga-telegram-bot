@@ -6252,6 +6252,28 @@ async def add_user_has_used_mobile_app_column() -> bool:
         return False
 
 
+async def add_user_signup_attribution_column() -> bool:
+    """Добавляет users.signup_attribution: метки рекламы при регистрации в кабинете."""
+    if await check_column_exists('users', 'signup_attribution'):
+        logger.info("Колонка signup_attribution уже существует в users")
+        return True
+
+    try:
+        db_type = await get_database_type()
+        column_type = 'JSONB' if db_type == 'postgresql' else 'JSON'
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(f"ALTER TABLE users ADD COLUMN signup_attribution {column_type} NULL")
+            )
+
+        logger.info("✅ Добавлена колонка signup_attribution в users")
+        return True
+
+    except Exception as error:
+        logger.error(f"❌ Ошибка добавления signup_attribution в users: {error}")
+        return False
+
+
 async def add_user_acquisition_source_column() -> bool:
     """Добавляет колонку acquisition_source в таблицу users (Install Referrer)."""
     column_exists = await check_column_exists('users', 'acquisition_source')
@@ -9150,6 +9172,12 @@ async def run_universal_migration():
             logger.info("✅ Колонка acquisition_source в users готова")
         else:
             logger.warning("⚠️ Проблемы с добавлением acquisition_source в users")
+
+        logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ SIGNUP_ATTRIBUTION В USERS ===")
+        if await add_user_signup_attribution_column():
+            logger.info("✅ Колонка signup_attribution в users готова")
+        else:
+            logger.warning("⚠️ Проблемы с добавлением signup_attribution в users")
 
         logger.info("=== ДОБАВЛЕНИЕ КОЛОНКИ TG_USER_ID В USERS ===")
         tg_user_id_ready = await add_user_tg_user_id_column()

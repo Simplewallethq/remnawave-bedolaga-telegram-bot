@@ -63,6 +63,7 @@ from app.services.cold_solo_offer_service import cold_solo_offer_service
 from app.services.legacy_pro_offer_service import legacy_pro_offer_service
 from app.services.subscription_service import SubscriptionService
 from app.utils.passwords import hash_password
+from app.utils.signup_attribution import sanitize_signup_attribution
 from app.utils.telegram_webapp import parse_webapp_init_data
 from app.utils.validators import validate_email
 from app.webapi.cabinet_dependencies import get_current_cabinet_user
@@ -236,6 +237,7 @@ async def register(
         email=email,
         password_hash=hash_password(payload.password),
         referred_by_id=referred_by_id,
+        signup_attribution=sanitize_signup_attribution(payload.attribution),
     )
 
     if settings.CABINET_EMAIL_VERIFICATION:
@@ -440,6 +442,7 @@ async def auth_otp_verify(
             email=email,
             password_hash=hash_password(secrets.token_urlsafe(32)),
             referred_by_id=referred_by_id,
+            signup_attribution=sanitize_signup_attribution(payload.attribution),
         )
         user.email_verified = True
         await db.commit()
