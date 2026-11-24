@@ -2765,7 +2765,8 @@ async def handle_subscription_menu(
 
         dedicated_ip_line = await subscription_menu_line(db, db_user)
         if dedicated_ip_line:
-            text = f"{text}\n{dedicated_ip_line}"
+            # Отдельным абзацем, чтобы статус IP не терялся под «Устройства».
+            text = f"{text}\n\n{dedicated_ip_line}"
         dedicated_ip_button = await subscription_menu_button(db, db_user)
     except Exception as error:
         logger.warning("Выделенный IP: не удалось собрать блок меню подписки: %s", error)

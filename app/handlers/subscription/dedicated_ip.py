@@ -49,21 +49,21 @@ async def subscription_menu_line(db: AsyncSession, user: User) -> Optional[str]:
     country = dip.country_label()
     if slot is not None and slot.status == DedicatedIpSlot.STATUS_ACTIVE:
         if slot.autorenew:
-            return texts.t("DEDICATED_IP_MENU_LINE_ACTIVE", "Выделенный IP: {country} до {date}").format(
+            return texts.t("DEDICATED_IP_MENU_LINE_ACTIVE", "✅ <b>Выделенный IP:</b> {country} до {date}").format(
                 country=country, date=_date(slot.paid_until)
             )
         return texts.t(
-            "DEDICATED_IP_MENU_LINE_NO_RENEW", "Выделенный IP: {country} до {date}, не продлевается"
+            "DEDICATED_IP_MENU_LINE_NO_RENEW", "✅ <b>Выделенный IP:</b> {country} до {date}, не продлевается"
         ).format(country=country, date=_date(slot.paid_until))
     if slot is not None and slot.status == DedicatedIpSlot.STATUS_HOLD:
-        return texts.t("DEDICATED_IP_MENU_LINE_HOLD", "Выделенный IP: не продлён, держим до {date}").format(
+        return texts.t("DEDICATED_IP_MENU_LINE_HOLD", "⚠️ <b>Выделенный IP:</b> не продлён, держим до {date}").format(
             date=_date(slot.hold_until)
         )
     if not await dip.is_on_sale(db, user):
         return None
     if not dip.subscription_is_eligible(subscription):
-        return texts.t("DEDICATED_IP_MENU_LINE_TEASER", "Выделенный IP: доступен с платной подпиской")
-    return texts.t("DEDICATED_IP_MENU_LINE_NONE", "Выделенный IP: не подключён")
+        return texts.t("DEDICATED_IP_MENU_LINE_TEASER", "❌ <b>Выделенный IP:</b> доступен с платной подпиской")
+    return texts.t("DEDICATED_IP_MENU_LINE_NONE", "❌ <b>Выделенный IP:</b> не подключён")
 
 
 async def subscription_menu_button(db: AsyncSession, user: User) -> Optional[types.InlineKeyboardButton]:

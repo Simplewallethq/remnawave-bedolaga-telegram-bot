@@ -230,16 +230,17 @@ async def _render_invoice(
 
     if isinstance(tariff_summary, dict):
         # Допродажа выделенного IP: кнопка сразу под «Оплатить», сумма — за весь период.
+        # Текст короткий: на телефоне в кнопку влезает ~28 знаков, длиннее — цена обрезается.
         dedicated_ip = tariff_summary.get("dedicated_ip")
         if isinstance(dedicated_ip, dict) and dedicated_ip.get("toggle_callback"):
             ip_price = settings.format_price(int(dedicated_ip.get("price_kopeks") or 0))
             if dedicated_ip.get("selected"):
                 ip_button_text = texts.t(
-                    "DEDICATED_IP_INVOICE_REMOVE_BUTTON", "Убрать выделенный IP — −{amount}"
+                    "DEDICATED_IP_INVOICE_REMOVE_BUTTON", "➖ Убрать IP −{amount}"
                 ).format(amount=ip_price)
             else:
                 ip_button_text = texts.t(
-                    "DEDICATED_IP_INVOICE_ADD_BUTTON", "🔒 Добавить выделенный IP — +{amount}"
+                    "DEDICATED_IP_INVOICE_ADD_BUTTON", "➕ Выделенный IP +{amount}"
                 ).format(amount=ip_price)
             rows.append(
                 [
