@@ -24,6 +24,9 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 SNAPSHOT_KIND = "tariff_purchase"
+# Состав прочих тарифных счетов (сейчас — только выделенный IP): по нему вебхук
+# решает, выдавать ли IP, а покупку тарифа ведёт обычная Redis-корзина.
+COMPOSITION_KIND = "cart_composition"
 SNAPSHOT_VERSION = 1
 SNAPSHOT_METADATA_KEY = "tariff_checkout"
 
@@ -125,15 +128,21 @@ async def build_invoice_checkout_snapshot(
 
     if not cart_data:
         return None
-    if cart_data.get("cart_mode") != "tariff":
-        return None
-    if (cart_data.get("tariff_op") or "purchase") != "purchase":
-        return None
     if not cart_data.get("intent"):
+        return None
+    cart_mode = cart_data.get("cart_mode")
+    if cart_mode not in ("tariff", "dedicated_ip"):
         return None
 
     partial = cart_data.get("partial_payment")
-    if not isinstance(partial, dict):
+    if (
+        cart_mode != "tariff"
+        or (cart_data.get("tariff_op") or "purchase") != "purchase"
+        or not isinstance(partial, dict)
+    ):
+        # Состав фиксируем, только если на счёте предлагался выделенный IP.
+        if cart_mode == "dedicated_ip" or "dedicated_ip" in cart_data:
+            return _composition_snapshot(user_id, cart_data, invoice_amount_kopeks)
         return None
 
     final_price = int(partial.get("final_price_kopeks") or cart_data.get("total_price") or 0)
@@ -153,6 +162,29 @@ async def build_invoice_checkout_snapshot(
         "final_price_kopeks": final_price,
         "balance_planned_kopeks": int(partial.get("balance_planned_kopeks") or 0),
         "shortfall_kopeks": int(partial.get("shortfall_kopeks") or 0),
+        "invoice_amount_kopeks": int(invoice_amount_kopeks),
+        "dedicated_ip": bool(cart_data.get("dedicated_ip")),
+        "dedicated_ip_kopeks": int(cart_data.get("dedicated_ip_kopeks") or 0),
+        "issued_at": datetime.utcnow().isoformat(),
+    }
+
+
+def _composition_snapshot(
+    user_id: int, cart_data: Dict[str, Any], invoice_amount_kopeks: int
+) -> Dict[str, Any]:
+    is_ip_cart = cart_data.get("cart_mode") == "dedicated_ip"
+    return {
+        "v": SNAPSHOT_VERSION,
+        "kind": COMPOSITION_KIND,
+        "user_id": int(user_id),
+        "cart_mode": cart_data.get("cart_mode"),
+        "tariff_op": cart_data.get("tariff_op"),
+        "plan_id": cart_data.get("plan_id"),
+        "period_days": cart_data.get("period_days"),
+        "dedicated_ip": bool(is_ip_cart or cart_data.get("dedicated_ip")),
+        "dedicated_ip_kopeks": int(
+            (cart_data.get("total_price") if is_ip_cart else cart_data.get("dedicated_ip_kopeks")) or 0
+        ),
         "invoice_amount_kopeks": int(invoice_amount_kopeks),
         "issued_at": datetime.utcnow().isoformat(),
     }
@@ -182,6 +214,8 @@ def extract_checkout_snapshot(payment: Any) -> Optional[Dict[str, Any]]:
             return None
     if not isinstance(snapshot, dict):
         return None
+    if snapshot.get("kind") == COMPOSITION_KIND:
+        return snapshot
     if snapshot.get("kind") != SNAPSHOT_KIND:
         return None
     if int(snapshot.get("final_price_kopeks") or 0) <= 0:
@@ -218,7 +252,7 @@ async def pop_snapshot_for_stars(user_id: int, token: str) -> Optional[Dict[str,
             return None
         await user_cart_service.redis_client.delete(key)
         snapshot = json.loads(raw)
-        if isinstance(snapshot, dict) and snapshot.get("kind") == SNAPSHOT_KIND:
+        if isinstance(snapshot, dict) and snapshot.get("kind") in (SNAPSHOT_KIND, COMPOSITION_KIND):
             return snapshot
         return None
     except Exception as error:

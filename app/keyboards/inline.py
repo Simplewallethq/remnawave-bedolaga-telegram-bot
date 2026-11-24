@@ -3946,6 +3946,7 @@ def get_subscription_menu_keyboard(
     balance_kopeks: int = 0,
     autopay_enabled: bool = False,
     username: Optional[str] = None,
+    dedicated_ip_button: Optional[InlineKeyboardButton] = None,
 ) -> InlineKeyboardMarkup:
     """
     Экран 5: Меню подписки
@@ -3978,11 +3979,14 @@ def get_subscription_menu_keyboard(
         style=ButtonStyle.SUCCESS,
     )
 
-    buttons = [
-        [extend_button],
+    buttons = [[extend_button]]
+    if dedicated_ip_button is not None:
+        # «🔒 Выделенный IP» / «🔒 Мой IP» — между «Продлить» и «Баланс».
+        buttons.append([dedicated_ip_button])
+    buttons.extend([
         [InlineKeyboardButton(text=balance_button_text, callback_data="balance_topup")],
         # [InlineKeyboardButton(text=autopay_button_text, callback_data="subscription_autopay")],
-    ]
+    ])
     if can_use_platega_subscription(username):
         buttons.append(
             [

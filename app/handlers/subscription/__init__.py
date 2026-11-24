@@ -117,7 +117,11 @@ from .tariffs import (
 )
 
 
+from .dedicated_ip import register_handlers as _register_dedicated_ip_handlers
+
+
 def register_handlers(dp):
+    _register_dedicated_ip_handlers(dp)
     _register_tariffs_handlers(dp)
     _register_purchase_handlers(dp)
     _register_paid_trial_offer_handlers(dp)

@@ -2003,6 +2003,27 @@ async def add_user_tariff_pricing_cohort_override_column() -> bool:
         return False
 
 
+async def add_dedicated_ip_columns() -> bool:
+    """subscriptions.dedicated_ip_squad_uuid — сквад оплаченного слота «выделенный IP».
+
+    Таблицу dedicated_ip_slots создаёт init_db (create_all); здесь только колонка
+    в существующей таблице подписок.
+    """
+    try:
+        if await check_column_exists('subscriptions', 'dedicated_ip_squad_uuid'):
+            logger.info("ℹ️ Колонка subscriptions.dedicated_ip_squad_uuid уже существует")
+            return True
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "ALTER TABLE subscriptions ADD COLUMN dedicated_ip_squad_uuid VARCHAR(255) NULL"
+            ))
+        logger.info("✅ Колонка subscriptions.dedicated_ip_squad_uuid добавлена")
+        return True
+    except Exception as error:
+        logger.error(f"Ошибка добавления колонки subscriptions.dedicated_ip_squad_uuid: {error}")
+        return False
+
+
 async def add_trial_paid_offer_columns() -> bool:
     """Колонки A/B «доступ за 1 ₽ вместо триала».
 
@@ -9340,6 +9361,12 @@ async def run_universal_migration():
             logger.warning("⚠️ Проблемы с колонкой tariff_pricing_cohort_override в users")
 
         logger.info("=== ДОБАВЛЕНИЕ КОЛОНОК A/B ПЛАТНОГО ТРИАЛА (TRIAL_OFFER_VARIANT, IS_PAID_TRIAL) ===")
+        dedicated_ip_ready = await add_dedicated_ip_columns()
+        if dedicated_ip_ready:
+            logger.info("✅ Колонка выделенного IP в subscriptions готова")
+        else:
+            logger.warning("⚠️ Проблемы с колонкой выделенного IP в subscriptions")
+
         trial_paid_offer_ready = await add_trial_paid_offer_columns()
         if trial_paid_offer_ready:
             logger.info("✅ Колонки A/B платного триала готовы")

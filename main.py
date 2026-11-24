@@ -149,6 +149,18 @@ async def main():
                 "SKIP_MIGRATION=true",
             )
 
+        # Сквады пула «выделенный IP» — до любой синхронизации с панелью, чтобы бот
+        # не потерял и не раздал их (app/utils/panel_squads.py).
+        try:
+            from app.database.database import AsyncSessionLocal
+            from app.services.dedicated_ip_service import refresh_pool_cache
+
+            async with AsyncSessionLocal() as dip_db:
+                pool_size = await refresh_pool_cache(dip_db)
+            logger.info("🔒 Пул выделенных IP: %s слотов", pool_size)
+        except Exception as dip_error:
+            logger.error(f"❌ Не удалось загрузить пул выделенных IP: {dip_error}")
+
         async with timeline.stage(
             "Загрузка конфигурации из БД",
             "⚙️",

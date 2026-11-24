@@ -318,7 +318,14 @@ async def sync_with_remnawave(
     created = 0
     updated = 0
     removed = 0
-    
+
+    # Сквады пула «выделенный IP» — не серверы каталога: бот выдаёт их по слотам.
+    from app.utils.panel_squads import get_dedicated_ip_pool_squads
+
+    pool_squads = get_dedicated_ip_pool_squads()
+    if pool_squads:
+        remnawave_squads = [squad for squad in remnawave_squads if squad.get('uuid') not in pool_squads]
+
     existing_servers = {}
     result = await db.execute(select(ServerSquad))
     for server in result.scalars().all():

@@ -169,6 +169,17 @@ class Settings(BaseSettings):
     # копии, триал и платные) — у копикетов его нет. Пусто — сквад не добавляется.
     PRIMARY_BRAND_INTERNAL_SQUAD_UUID: Optional[str] = None
 
+    # Выделенный IP — допродажа к платной тарифной подписке (только основной бренд).
+    # Пул адресов — таблица dedicated_ip_slots (scripts/seed_dedicated_ips.py).
+    DEDICATED_IP_ENABLED: bool = False
+    DEDICATED_IP_PRICE_KOPEKS: int = 29000  # за 30 дней
+    DEDICATED_IP_COUNTRY: str = "🇳🇱 Нидерланды"
+    DEDICATED_IP_HOLD_DAYS: int = 7
+    # Предупредить админов, когда свободных слотов осталось столько или меньше.
+    DEDICATED_IP_LOW_STOCK_THRESHOLD: int = 3
+    # Пока фича в тесте — показывать только админам.
+    DEDICATED_IP_ADMINS_ONLY: bool = False
+
     PRICE_TRAFFIC_5GB: int = 2000
     PRICE_TRAFFIC_10GB: int = 3500
     PRICE_TRAFFIC_25GB: int = 7000

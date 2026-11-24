@@ -2756,6 +2756,20 @@ async def handle_subscription_menu(
             )
             text = f"{header_line}\n\n{text}"
 
+    dedicated_ip_button = None
+    try:
+        from app.handlers.subscription.dedicated_ip import (
+            subscription_menu_button,
+            subscription_menu_line,
+        )
+
+        dedicated_ip_line = await subscription_menu_line(db, db_user)
+        if dedicated_ip_line:
+            text = f"{text}\n{dedicated_ip_line}"
+        dedicated_ip_button = await subscription_menu_button(db, db_user)
+    except Exception as error:
+        logger.warning("Выделенный IP: не удалось собрать блок меню подписки: %s", error)
+
     image_path = os.path.join("images", "subscription.webp")
     if not os.path.exists(image_path):
          image_path = None
@@ -2768,6 +2782,7 @@ async def handle_subscription_menu(
             balance_kopeks=db_user.balance_kopeks,
             autopay_enabled=bool(subscription.autopay_enabled),
             username=db_user.username,
+            dedicated_ip_button=dedicated_ip_button,
         ),
         parse_mode="HTML",
         photo_path=image_path

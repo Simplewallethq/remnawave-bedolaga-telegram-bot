@@ -123,6 +123,7 @@ async def _save_tariff_intent_cart(
     price_override_kopeks: Optional[int] = None,
     offer_type: Optional[str] = None,
     base_price_kopeks: Optional[int] = None,
+    dedicated_ip_kopeks: Optional[int] = None,
 ) -> None:
     """Persist an intent cart so the tariff purchase auto-completes after a balance top-up.
 
@@ -143,6 +144,12 @@ async def _save_tariff_intent_cart(
         "intent": True,
         "pricing_cohort": resolve_pricing_cohort(db_user),
     }
+    if dedicated_ip_kopeks is not None:
+        # Выделенный IP предлагался на счёте: total_price — только тариф, IP
+        # списывается отдельно после оформления тарифа (apply_after_tariff).
+        # Ключ есть и при «не выбран» — так счёт фиксирует состав (снимок в metadata).
+        cart_data["dedicated_ip"] = dedicated_ip_kopeks > 0
+        cart_data["dedicated_ip_kopeks"] = int(dedicated_ip_kopeks)
     if offer_id is not None and price_override_kopeks is not None:
         cart_data.update(
             {
@@ -184,8 +191,14 @@ async def _start_tariff_platega_checkout(
     total_kopeks: int,
     back_callback: str,
     balance_callback: str | None = None,
+    dedicated_ip: Optional[dict] = None,
+    note: Optional[str] = None,
 ) -> None:
-    """Create a Platega invoice for a tariff operation with an optional balance-payment action."""
+    """Create a Platega invoice for a tariff operation with an optional balance-payment action.
+
+    `dedicated_ip` — кнопка допродажи IP на счёте: {"available", "selected",
+    "price_kopeks", "toggle_callback"}; total_kopeks уже включает IP, если selected.
+    """
     from app.middlewares.payments_disabled import reject_payment_if_disabled
 
     if await reject_payment_if_disabled(callback, db_user.language):
@@ -225,6 +238,12 @@ async def _start_tariff_platega_checkout(
             "balance_kopeks": db_user.balance_kopeks,
             "missing_kopeks": missing_kopeks,
             "balance_callback": balance_callback if missing_kopeks == 0 else None,
+            **(
+                {"dedicated_ip": dedicated_ip}
+                if dedicated_ip and dedicated_ip.get("available")
+                else {}
+            ),
+            **({"note": note} if note else {}),
         },
     )
 
@@ -1173,6 +1192,12 @@ async def start_tariff_purchase(
         await _show_tier_switch(callback, db_user, db, active_sub, plan)
         return
 
+    ip_addon = await _dedicated_ip_addon(
+        db, db_user, period_days, toggle_callback=f"dip_inv:purchase:{plan.code}:{period_days}"
+    )
+    ip_kopeks = ip_addon["price_kopeks"] if ip_addon["selected"] else 0
+    cart_ip_kopeks = ip_kopeks if ip_addon["available"] else None
+
     if not pay_from_balance:
         await _save_tariff_intent_cart(
             db_user,
@@ -1184,14 +1209,23 @@ async def start_tariff_purchase(
             price_override_kopeks=offer_price,
             offer_type=offer_type,
             base_price_kopeks=base_price_kopeks,
+            dedicated_ip_kopeks=cart_ip_kopeks,
         )
         await _start_tariff_platega_checkout(
             callback,
             db_user,
             state,
-            total_kopeks=price_kopeks,
+            total_kopeks=price_kopeks + ip_kopeks,
             back_callback=f"tariff_select:{plan.code}",
             balance_callback=f"tariff_balance:purchase:{plan.code}:{period_days}",
+            **({"dedicated_ip": ip_addon} if ip_addon["available"] else {}),
+        )
+        return
+
+    if ip_kopeks and db_user.balance_kopeks < price_kopeks + ip_kopeks:
+        await callback.answer(
+            texts.t("INSUFFICIENT_BALANCE", "Недостаточно средств на балансе."),
+            show_alert=True,
         )
         return
 
@@ -1205,6 +1239,8 @@ async def start_tariff_purchase(
         )
         return
     new_sub, transaction, was_trial_conversion = result
+    if ip_kopeks:
+        await _apply_dedicated_ip_after_tariff(db, db_user, new_sub, period_days, ip_kopeks, callback.bot)
     if pay_from_balance:
         await _delete_tariff_intent_cart(db_user)
     await _mark_tariff_offer_claimed(
@@ -2016,6 +2052,12 @@ async def _execute_renewal(
         if hot_price is not None:
             price_kopeks = hot_price
 
+    ip_addon = await _dedicated_ip_addon(
+        db, db_user, period_days, toggle_callback=f"dip_inv:renew:{plan.id}:{period_days}"
+    )
+    ip_kopeks = ip_addon["price_kopeks"] if ip_addon["selected"] else 0
+    cart_ip_kopeks = ip_kopeks if ip_addon["available"] else None
+
     if not pay_from_balance:
         await _save_tariff_intent_cart(
             db_user,
@@ -2026,14 +2068,23 @@ async def _execute_renewal(
             offer_id=getattr(hot_offer, "id", None),
             price_override_kopeks=hot_price,
             offer_type=hot_offer_type,
+            dedicated_ip_kopeks=cart_ip_kopeks,
         )
         await _start_tariff_platega_checkout(
             callback,
             db_user,
             state,
-            total_kopeks=price_kopeks,
+            total_kopeks=price_kopeks + ip_kopeks,
             back_callback="subscription_renew_current",
             balance_callback=f"tariff_balance:renew:{plan.id}:{period_days}",
+            **({"dedicated_ip": ip_addon} if ip_addon["available"] else {}),
+        )
+        return
+
+    if ip_kopeks and db_user.balance_kopeks < price_kopeks + ip_kopeks:
+        await callback.answer(
+            texts.t("INSUFFICIENT_BALANCE", "Недостаточно средств на балансе."),
+            show_alert=True,
         )
         return
 
@@ -2045,6 +2096,8 @@ async def _execute_renewal(
         )
         return
     subscription, transaction, old_end_date = result
+    if ip_kopeks:
+        await _apply_dedicated_ip_after_tariff(db, db_user, subscription, period_days, ip_kopeks, callback.bot)
     if pay_from_balance:
         await _delete_tariff_intent_cart(db_user)
     await _mark_tariff_offer_claimed(
@@ -2116,8 +2169,78 @@ async def pay_tariff_from_balance(
 
 
 async def _all_active_server_uuids(db: AsyncSession) -> list:
+    from app.utils.panel_squads import get_dedicated_ip_pool_squads
+
     squads = await get_active_server_squads(db)
-    return [s.squad_uuid for s in squads if getattr(s, "squad_uuid", None)]
+    pool = get_dedicated_ip_pool_squads()
+    return [s.squad_uuid for s in squads if getattr(s, "squad_uuid", None) and s.squad_uuid not in pool]
+
+
+async def _dedicated_ip_addon(
+    db: AsyncSession, db_user: User, period_days: int, *, toggle_callback: str
+) -> dict:
+    """Кнопка «Добавить/Убрать выделенный IP» для счёта тарифа (см. dedicated_ip_service)."""
+    from app.services import dedicated_ip_service
+
+    try:
+        addon = await dedicated_ip_service.invoice_addon(db, db_user, period_days)
+    except Exception as error:
+        logger.warning("Выделенный IP: не удалось собрать допродажу для %s: %s", db_user.telegram_id, error)
+        addon = {"available": False, "selected": False, "price_kopeks": 0}
+    addon["toggle_callback"] = toggle_callback
+    if not addon["available"]:
+        addon["selected"] = False
+    return addon
+
+
+async def _apply_dedicated_ip_after_tariff(
+    db: AsyncSession,
+    db_user: User,
+    subscription: Subscription,
+    period_days: int,
+    ip_kopeks: int,
+    bot: Bot = None,
+) -> None:
+    from app.services import dedicated_ip_service
+
+    slot = await dedicated_ip_service.apply_after_tariff(
+        db, db_user, subscription, period_days, price_kopeks=ip_kopeks, bot=bot,
+    )
+    if slot is not None and bot is not None:
+        from app.handlers.subscription.dedicated_ip import send_dedicated_ip_ready
+
+        await send_dedicated_ip_ready(bot, db_user, slot)
+
+
+async def toggle_dedicated_ip_on_invoice(
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+    state: FSMContext,
+):
+    """dip_inv:{purchase|renew}:{plan}:{days} — переключить IP и пересоздать счёт."""
+    from app.services import dedicated_ip_service
+
+    parts = (callback.data or "").split(":")
+    if len(parts) != 4 or parts[1] not in ("purchase", "renew"):
+        await callback.answer("bad_callback", show_alert=False)
+        return
+    try:
+        int(parts[3])
+    except ValueError:
+        await callback.answer("bad_callback", show_alert=False)
+        return
+
+    slot = await dedicated_ip_service.get_user_slot(db, db_user.id)
+    current = await dedicated_ip_service.get_invoice_choice(db_user, slot)
+    await dedicated_ip_service.set_invoice_choice(db_user, not current)
+
+    if parts[1] == "purchase":
+        next_callback = callback.model_copy(update={"data": f"tariff_buy:{parts[2]}:{parts[3]}"})
+        await start_tariff_purchase(next_callback, db_user, db, state)
+    else:
+        next_callback = callback.model_copy(update={"data": f"tariff_renew:{parts[2]}:{parts[3]}"})
+        await apply_renewal(next_callback, db_user, db, state)
 
 
 def register_handlers(dp: Dispatcher):
@@ -2168,6 +2291,10 @@ def register_handlers(dp: Dispatcher):
     dp.callback_query.register(
         pay_tariff_from_balance,
         F.data.startswith("tariff_balance:"),
+    )
+    dp.callback_query.register(
+        toggle_dedicated_ip_on_invoice,
+        F.data.startswith("dip_inv:"),
     )
     dp.callback_query.register(
         show_tariff_partial_payment_methods,

@@ -73,7 +73,18 @@ async def resolve_renewal_charge(
             )
             if price is None:
                 return None
-            return {"name": plan.display_name, "price_kopeks": int(price), "period_days": period_days}
+            from app.services import dedicated_ip_service
+
+            dedicated_ip_kopeks = await dedicated_ip_service.renewal_addon_kopeks(
+                db, subscription, period_days
+            )
+            return {
+                "name": plan.display_name,
+                "price_kopeks": int(price) + dedicated_ip_kopeks,
+                "plan_price_kopeks": int(price),
+                "dedicated_ip_kopeks": dedicated_ip_kopeks,
+                "period_days": period_days,
+            }
 
         from app.services.subscription_service import SubscriptionService
 

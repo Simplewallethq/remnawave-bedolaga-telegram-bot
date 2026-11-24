@@ -229,6 +229,26 @@ async def _render_invoice(
         )
 
     if isinstance(tariff_summary, dict):
+        # Допродажа выделенного IP: кнопка сразу под «Оплатить», сумма — за весь период.
+        dedicated_ip = tariff_summary.get("dedicated_ip")
+        if isinstance(dedicated_ip, dict) and dedicated_ip.get("toggle_callback"):
+            ip_price = settings.format_price(int(dedicated_ip.get("price_kopeks") or 0))
+            if dedicated_ip.get("selected"):
+                ip_button_text = texts.t(
+                    "DEDICATED_IP_INVOICE_REMOVE_BUTTON", "Убрать выделенный IP — −{amount}"
+                ).format(amount=ip_price)
+            else:
+                ip_button_text = texts.t(
+                    "DEDICATED_IP_INVOICE_ADD_BUTTON", "🔒 Добавить выделенный IP — +{amount}"
+                ).format(amount=ip_price)
+            rows.append(
+                [
+                    types.InlineKeyboardButton(
+                        text=ip_button_text,
+                        callback_data=dedicated_ip["toggle_callback"],
+                    )
+                ]
+            )
         balance_callback = tariff_summary.get("balance_callback")
         if isinstance(balance_callback, str) and balance_callback:
             rows.append(
@@ -262,6 +282,19 @@ async def _render_invoice(
                 int(tariff_summary.get("missing_kopeks") or amount_kopeks)
             ),
         )
+        if isinstance(dedicated_ip, dict) and dedicated_ip.get("selected"):
+            # Строка про IP — сразу под «Стоимость услуги».
+            ip_line = texts.t(
+                "DEDICATED_IP_INVOICE_INCLUDED_LINE",
+                "🔒 В том числе выделенный IP: {amount}",
+            ).format(
+                amount=settings.format_price(int(dedicated_ip.get("price_kopeks") or 0))
+            )
+            head, sep, tail = instructions.partition("\n")
+            instructions = f"{head}\n{ip_line}{sep}{tail}" if sep else f"{head}\n{ip_line}"
+        note = tariff_summary.get("note")
+        if isinstance(note, str) and note:
+            instructions = f"{note}\n\n{instructions}"
     else:
         rows.extend(
             [

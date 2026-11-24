@@ -1002,6 +1002,17 @@ class OnePaymentPaymentMixin:
             subscription, transaction, old_end_date = renewal
             transaction_id = getattr(transaction, "id", None)
 
+            dedicated_ip_kopeks = int(snapshot.get("dedicated_ip_kopeks") or 0)
+            if dedicated_ip_kopeks > 0:
+                from app.services import dedicated_ip_service
+
+                await dedicated_ip_service.apply_after_tariff(
+                    db, user, subscription, period_days,
+                    price_kopeks=dedicated_ip_kopeks,
+                    source=dedicated_ip_service.SOURCE_AUTOPAY,
+                    bot=getattr(self, "bot", None),
+                )
+
         await db.refresh(user)
 
         try:

@@ -1111,6 +1111,11 @@ class Subscription(Base):
     plan_id = Column(Integer, ForeignKey("subscription_plans.id", ondelete="SET NULL"), nullable=True, index=True)
     plan_period_days = Column(Integer, nullable=True)
 
+    # Сквад слота «выделенный IP», пока слот оплачен (status=active). Источник
+    # правды — dedicated_ip_slots; копия здесь нужна синхронной сборке сквадов
+    # (app/utils/panel_squads.py), которая не ходит в базу.
+    dedicated_ip_squad_uuid = Column(String(255), nullable=True)
+
     user = relationship("User", back_populates="subscription")
     discount_offers = relationship("DiscountOffer", back_populates="subscription")
     temporary_accesses = relationship("SubscriptionTemporaryAccess", back_populates="subscription")
@@ -1253,6 +1258,45 @@ class Subscription(Base):
         if self.traffic_limit_gb == 0:  
             return
         self.traffic_limit_gb += gb
+
+
+class DedicatedIpSlot(Base):
+    """Слот пула «выделенный IP»: адрес нашего /24 + сквад панели с одним инбаундом.
+
+    Пул заводится в панели заранее (инбаунд, хост «🔒 Мой IP», сквад на адрес),
+    бот только выдаёт слот юзеру и снимает. Статусы:
+
+    * ``free`` — свободен;
+    * ``active`` — оплачен до ``paid_until``, сквад у юзера в панели;
+    * ``hold`` — не продлён (подписка истекла или IP не оплатили при продлении):
+      адрес держим за юзером до ``hold_until``, сквад снят;
+    * ``disabled`` — выведен из продажи (адрес забанен и т.п.), бот его не выдаёт.
+    """
+
+    __tablename__ = "dedicated_ip_slots"
+
+    STATUS_FREE = "free"
+    STATUS_ACTIVE = "active"
+    STATUS_HOLD = "hold"
+    STATUS_DISABLED = "disabled"
+
+    id = Column(Integer, primary_key=True, index=True)
+    slot_no = Column(Integer, nullable=False, unique=True)
+    ip = Column(String(64), nullable=False, unique=True)
+    squad_uuid = Column(String(255), nullable=False, unique=True)
+    host_uuid = Column(String(255), nullable=True)
+    status = Column(String(16), nullable=False, default=STATUS_FREE, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    paid_until = Column(DateTime, nullable=True)
+    autorenew = Column(Boolean, nullable=False, default=True)
+    hold_until = Column(DateTime, nullable=True)
+    source = Column(String(32), nullable=True)
+    assigned_at = Column(DateTime, nullable=True)
+    released_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    user = relationship("User")
 
 
 class DeviceLink(Base):

@@ -963,6 +963,14 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             start_parameter,
         )
 
+    # Диплинк выделенного IP (t.me/letovpnbot?start=dedicated_ip | ip_support —
+    # метка продаж из поддержки): не реф-код и не кампания.
+    dedicated_ip_deeplink = None
+    if start_parameter in ("dedicated_ip", "ip_support"):
+        dedicated_ip_deeplink = start_parameter
+        start_parameter = None
+        logger.info("🔒 START: диплинк выделенного IP (%s)", dedicated_ip_deeplink)
+
     if start_parameter and start_parameter.startswith("p_"):
         # Partner VIP-link: locally HMAC-verified before any DB/network calls.
         # Always short-circuit downstream branches — a partner token must NEVER
@@ -1184,6 +1192,17 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
         # Cabinet deep-link: отправляем ссылку авто-входа и не показываем меню.
         if cabinet_login:
             await _send_cabinet_login_link(message, user, texts)
+            return
+
+        # Диплинк выделенного IP: экран по состоянию (тизер / оффер / «Мой IP»).
+        if dedicated_ip_deeplink:
+            from app.handlers.subscription.dedicated_ip import show_dedicated_ip
+            from app.services import dedicated_ip_service
+
+            if dedicated_ip_deeplink == "ip_support":
+                await dedicated_ip_service.remember_source(user.id, dedicated_ip_service.SOURCE_SUPPORT)
+            await db.refresh(user, ["subscription"])
+            await show_dedicated_ip(message, user, db, is_message=True)
             return
 
         # TV deep-link: спрашиваем подтверждение и не показываем меню — зритель

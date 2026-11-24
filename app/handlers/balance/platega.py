@@ -121,6 +121,22 @@ async def build_autopay_menu_text(
                     date=format_local_datetime(active["next_charge_at"], "%d.%m.%Y %H:%M")
                 )
             )
+        breakdown = await resolve_renewal_charge(db, db_user)
+        if breakdown and breakdown.get("dedicated_ip_kopeks"):
+            # «Следующее списание 11.02.2027: 580 ₽ (Plus 290 ₽ + выделенный IP 290 ₽)»
+            next_at = active.get("next_charge_at")
+            lines.append(
+                texts.t(
+                    "AUTOPAY_SECTION_DEDICATED_IP_BREAKDOWN",
+                    "Следующее списание{date}: {total} ({name} {plan} + выделенный IP {ip})",
+                ).format(
+                    date=f" {format_local_datetime(next_at, '%d.%m.%Y')}" if next_at else "",
+                    total=settings.format_price(int(breakdown["price_kopeks"])),
+                    name=breakdown.get("name") or "",
+                    plan=settings.format_price(int(breakdown.get("plan_price_kopeks") or 0)),
+                    ip=settings.format_price(int(breakdown["dedicated_ip_kopeks"])),
+                )
+            )
         text = f"{intro}\n\n" + "\n".join(lines)
         if active["lead_label"]:
             text += "\n\n" + texts.t(

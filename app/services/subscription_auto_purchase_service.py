@@ -980,6 +980,16 @@ async def _auto_tariff_purchase(
         )
         return False
 
+    # Выделенный IP из состава счёта — отдельным списанием после тарифа.
+    if (
+        subscription is not None
+        and tariff_op in ("purchase", "renew", "switch_renew")
+        and cart_data.get("dedicated_ip")
+    ):
+        await _apply_dedicated_ip_from_cart(
+            db, user, subscription, period_days, cart_data.get("dedicated_ip_kopeks"), bot
+        )
+
     if subscription is not None and transaction is not None:
         if tariff_op in ("renew", "switch_renew"):
             await record_subscription_renewal_event(
@@ -1024,6 +1034,74 @@ async def _auto_tariff_purchase(
         tariff_op,
         user.telegram_id,
     )
+    return True
+
+
+async def _apply_dedicated_ip_from_cart(
+    db: AsyncSession,
+    user: User,
+    subscription: Subscription,
+    period_days: int,
+    price_kopeks,
+    bot: Optional[Bot],
+) -> None:
+    from app.services import dedicated_ip_service
+
+    price = _safe_int(price_kopeks) or dedicated_ip_service.price_for_period_kopeks(period_days)
+    slot = await dedicated_ip_service.apply_after_tariff(
+        db, user, subscription, period_days, price_kopeks=price, bot=bot
+    )
+    if slot is not None and bot is not None:
+        from app.handlers.subscription.dedicated_ip import send_dedicated_ip_ready
+
+        await send_dedicated_ip_ready(bot, user, slot)
+
+
+async def _auto_dedicated_ip_purchase(
+    db: AsyncSession,
+    user: User,
+    cart_data: dict,
+    *,
+    bot: Optional[Bot] = None,
+) -> bool:
+    """Отдельная покупка выделенного IP к действующей подписке после пополнения."""
+    from app.database.crud.user import get_user_by_id
+    from app.handlers.subscription.dedicated_ip import send_dedicated_ip_ready
+    from app.services import dedicated_ip_service
+
+    fresh_user = await get_user_by_id(db, user.id)
+    if fresh_user is None:
+        return False
+    user = fresh_user
+    subscription = user.subscription
+    if not dedicated_ip_service.subscription_is_eligible(subscription):
+        logger.info("🔒 Автопокупка IP: у пользователя %s нет подходящей подписки", user.telegram_id)
+        return False
+
+    # Цена — та, что была на счёте (за остаток дней на момент выставления).
+    price = _safe_int(cart_data.get("total_price"))
+    if price <= 0:
+        price = dedicated_ip_service.price_for_remaining_kopeks(subscription.end_date)
+    try:
+        slot = await dedicated_ip_service.charge_and_apply(
+            db, user, subscription, price_kopeks=price, source=cart_data.get("source"), bot=bot
+        )
+    except dedicated_ip_service.NoFreeSlotError:
+        logger.warning("🔒 Автопокупка IP: пул пуст, деньги пользователя %s на балансе", user.telegram_id)
+        await dedicated_ip_service._notify_user(bot, user, "DEDICATED_IP_SOLD_OUT_AFTER_PAYMENT", (
+            "😔 Свободные выделенные IP закончились, пока шла оплата.\n\n"
+            "{amount} остались у тебя на балансе."
+        ), amount=dedicated_ip_service.format_rub(price))
+        await dedicated_ip_service.notify_low_stock_if_needed(db, bot, force=True)
+        await user_cart_service.delete_user_cart(user.id)
+        return False
+    except dedicated_ip_service.InsufficientBalanceError:
+        logger.info("🔒 Автопокупка IP: недостаточно средств у %s", user.telegram_id)
+        return False
+
+    await user_cart_service.delete_user_cart(user.id)
+    if bot is not None:
+        await send_dedicated_ip_ready(bot, user, slot)
     return True
 
 
@@ -1099,6 +1177,11 @@ async def _auto_tariff_purchase_from_snapshot(
     if result is None:
         return False
     subscription, transaction, was_trial_conversion = result
+
+    if snapshot.get("dedicated_ip"):
+        await _apply_dedicated_ip_from_cart(
+            db, user, subscription, period_days, snapshot.get("dedicated_ip_kopeks"), bot
+        )
 
     offer_id = _safe_int(snapshot.get("offer_id"))
     if offer_id > 0:
@@ -1190,6 +1273,19 @@ async def auto_purchase_saved_cart_after_topup(
             return False
         return False
 
+    # Состав оплаченного счёта (выделенный IP) — из снимка в metadata счёта, а не
+    # из текущей корзины: человек мог переключить IP и оплатить старую страницу.
+    if checkout_snapshot and checkout_snapshot.get("kind") == "cart_composition":
+        cart_data = dict(cart_data)
+        if checkout_snapshot.get("dedicated_ip"):
+            cart_data["dedicated_ip"] = True
+            cart_data["dedicated_ip_kopeks"] = checkout_snapshot.get("dedicated_ip_kopeks")
+        else:
+            cart_data.pop("dedicated_ip", None)
+            cart_data.pop("dedicated_ip_kopeks", None)
+            if (cart_data.get("cart_mode") or cart_data.get("mode")) == "dedicated_ip":
+                return False
+
     # Явные intent-корзины (пользователь нажал "оплатить") обрабатываем всегда,
     # даже если AUTO_PURCHASE_AFTER_TOPUP_ENABLED выключен
     is_intent = cart_data.get("intent", False)
@@ -1209,6 +1305,8 @@ async def auto_purchase_saved_cart_after_topup(
         return await _auto_add_devices(db, user, cart_data, bot=bot)
     elif cart_mode == "tariff":
         return await _auto_tariff_purchase(db, user, cart_data, bot=bot)
+    elif cart_mode == "dedicated_ip":
+        return await _auto_dedicated_ip_purchase(db, user, cart_data, bot=bot)
 
     try:
         prepared = await _prepare_auto_purchase(db, user, cart_data)

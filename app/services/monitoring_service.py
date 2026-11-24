@@ -327,6 +327,8 @@ class MonitoringService:
                 if cleaned_test_access:
                     logger.info(f"🧹 Отозвано {cleaned_test_access} истекших тестовых доступов к сквадам")
 
+                await self._process_dedicated_ips(db)
+
                 await self._check_expired_subscriptions(db)
                 await self._check_expiring_subscriptions(db)
                 await self._check_trial_expiring_soon(db)
@@ -375,6 +377,19 @@ class MonitoringService:
             finally:
                 break
     
+    async def _process_dedicated_ips(self, db: AsyncSession):
+        """Выделенные IP: кэш сквадов пула, сроки слотов, остаток пула."""
+        from app.services import dedicated_ip_service
+
+        try:
+            await dedicated_ip_service.refresh_pool_cache(db)
+            if not settings.DEDICATED_IP_ENABLED:
+                return
+            await dedicated_ip_service.process_expirations(db, bot=self.bot)
+            await dedicated_ip_service.notify_low_stock_if_needed(db, self.bot)
+        except Exception as error:
+            logger.error(f"Ошибка обработки выделенных IP: {error}", exc_info=True)
+
     async def _cleanup_notification_cache(self):
         current_time = datetime.utcnow()
 
@@ -1206,6 +1221,28 @@ class MonitoringService:
 
         return plan, period_days, int(price_kopeks)
 
+    async def _dedicated_ip_renewal_addon(
+        self, db: AsyncSession, subscription: Subscription, period_days: int
+    ) -> int:
+        """Цена выделенного IP за период автопродления (0 — IP нет или продление выключено)."""
+        from app.services import dedicated_ip_service
+
+        try:
+            return await dedicated_ip_service.renewal_addon_kopeks(db, subscription, period_days)
+        except Exception as error:
+            logger.warning("Выделенный IP: не посчитана доплата к автопродлению %s: %s", subscription.id, error)
+            return 0
+
+    async def _renew_dedicated_ip(
+        self, db: AsyncSession, user: User, subscription: Subscription, period_days: int, price_kopeks: int
+    ) -> None:
+        from app.services import dedicated_ip_service
+
+        await dedicated_ip_service.apply_after_tariff(
+            db, user, subscription, period_days,
+            price_kopeks=price_kopeks, source=dedicated_ip_service.SOURCE_AUTOPAY, bot=self.bot,
+        )
+
     async def _process_autopayments(self, db: AsyncSession):
         try:
             current_time = datetime.utcnow()
@@ -1251,6 +1288,7 @@ class MonitoringService:
                 plan = None
                 promo_discount_percent = 0
                 promo_discount_value = 0
+                dedicated_ip_kopeks = 0
 
                 if is_tariff:
                     # Тарифная подписка: цена и период берутся из тарифа, как в
@@ -1262,6 +1300,8 @@ class MonitoringService:
                         skipped_count += 1
                         continue
                     plan, period_days, charge_amount = tariff_charge
+                    dedicated_ip_kopeks = await self._dedicated_ip_renewal_addon(db, subscription, period_days)
+                    charge_amount += dedicated_ip_kopeks
                 else:
                     # Legacy à-la-carte подписка: пересчет по текущим ценам
                     # (период + серверы + устройства + трафик).
@@ -1277,6 +1317,16 @@ class MonitoringService:
                             renewal_cost,
                             promo_discount_percent,
                         )
+
+                if (
+                    dedicated_ip_kopeks
+                    and user.balance_kopeks < charge_amount
+                    and user.balance_kopeks >= charge_amount - dedicated_ip_kopeks
+                    and not await self._has_active_onepayment_binding(db, user.id)
+                ):
+                    # На IP не хватает — продлеваем саму подписку, IP уйдёт в удержание.
+                    charge_amount -= dedicated_ip_kopeks
+                    dedicated_ip_kopeks = 0
 
                 if user.balance_kopeks < charge_amount:
                     failed_count += 1
@@ -1302,12 +1352,17 @@ class MonitoringService:
                         from app.handlers.subscription.tariffs import finalize_tariff_renewal
 
                         renewal = await finalize_tariff_renewal(
-                            db, user, subscription, plan, period_days, charge_amount
+                            db, user, subscription, plan, period_days,
+                            charge_amount - dedicated_ip_kopeks,
                         )
                         success = renewal is not None
                         if success:
                             subscription, transaction, old_end_date = renewal
                             transaction_id = transaction.id
+                            if dedicated_ip_kopeks:
+                                await self._renew_dedicated_ip(
+                                    db, user, subscription, period_days, dedicated_ip_kopeks
+                                )
                     else:
                         success = await subtract_user_balance(
                             db, user, charge_amount,
@@ -1510,11 +1565,13 @@ class MonitoringService:
         # Цена и период — те же, что у баланс-автоплатежа.
         is_tariff = not subscription.is_legacy
         plan = None
+        dedicated_ip_kopeks = 0
         if is_tariff:
             tariff_charge = await self._resolve_tariff_autopay_charge(db, subscription, user)
             if tariff_charge is None:
                 return "skipped"
             plan, period_days, price_kopeks = tariff_charge
+            dedicated_ip_kopeks = await self._dedicated_ip_renewal_addon(db, subscription, period_days)
         else:
             period_days = 30
             price_kopeks = int(
@@ -1525,7 +1582,8 @@ class MonitoringService:
         if price_kopeks <= 0:
             return "skipped"
 
-        shortfall = price_kopeks - user.balance_kopeks
+        # Выделенный IP продлевается вместе с подпиской: в сумму списания и снимок.
+        shortfall = price_kopeks + dedicated_ip_kopeks - user.balance_kopeks
 
         if shortfall <= 0:
             # Страховочная ветка (в т.ч. после потерянного продления по колбеку):
@@ -1543,6 +1601,10 @@ class MonitoringService:
                     if success:
                         subscription, transaction, old_end_date = renewal
                         transaction_id = transaction.id
+                        if dedicated_ip_kopeks:
+                            await self._renew_dedicated_ip(
+                                db, user, subscription, period_days, dedicated_ip_kopeks
+                            )
                 else:
                     success = await subtract_user_balance(
                         db, user, price_kopeks, "Автопродление подписки (СБП 1Payment)"
@@ -1622,6 +1684,7 @@ class MonitoringService:
             "plan_id": getattr(plan, "id", None) if plan is not None else subscription.plan_id,
             "period_days": period_days,
             "price_kopeks": price_kopeks,
+            "dedicated_ip_kopeks": dedicated_ip_kopeks,
             "balance_planned_kopeks": max(0, user.balance_kopeks),
             "shortfall_kopeks": shortfall,
             "charge_kopeks": charge_kopeks,
