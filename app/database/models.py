@@ -3067,6 +3067,9 @@ class CopycatBot(Base):
     aurapay_shop = Column(String(64), nullable=True)
     # Свой терминал WATA (имя из WATA_EXTRA_TERMINALS); NULL — основной.
     wata_terminal = Column(String(64), nullable=True)
+    # Заметка команды, например почему витрину закрыли. Рантайм её не читает,
+    # она видна в `scripts.copycats show` и на борде Grafana «Атрибуция Копикэты».
+    comment = Column(Text, nullable=True)
     # Кто завёл витрину (бот для владельцев) и его доля, если не как у группы.
     owner_user_id = Column(
         Integer,

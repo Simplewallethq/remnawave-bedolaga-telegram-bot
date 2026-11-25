@@ -12,6 +12,8 @@ Usage
     python -m scripts.copycats add TOKEN [--group NAME] [--mirror] [key=value ...]
     python -m scripts.copycats set BOT key=value ...        # пустое значение = NULL
     python -m scripts.copycats enable BOT | disable BOT | delete BOT
+    python -m scripts.copycats disable BOT жалоба на бренд  # выключить и записать причину в заметку
+    python -m scripts.copycats comment BOT неприбылен       # заметка; без текста — стереть
 
     python -m scripts.copycats groups
     python -m scripts.copycats group-add NAME [key=value ...]
@@ -45,7 +47,8 @@ channel_id, support, subscription_domain, happ_redirect_template,
 referral_terms_url, has_own_app, rays_enabled, is_copycat, enabled, group,
 owner_user_id, owner_share_percent, price_scheme, aurapay_shop (касса из
 AURAPAY_EXTRA_SHOPS; пусто — основная), wata_terminal (терминал из
-WATA_EXTRA_TERMINALS; пусто — основной).
+WATA_EXTRA_TERMINALS; пусто — основной), comment (заметка команды: видна
+в show и на борде «Атрибуция Копикэты», рантайм её не читает).
 Поля группы: name, description, support, subscription_domain,
 happ_redirect_template, privacy_url, terms_url, referral_terms_url,
 owner_share_percent, price_scheme.
@@ -108,6 +111,7 @@ BOT_FIELDS = BOT_BRAND_FIELDS + (
     "price_scheme",
     "aurapay_shop",
     "wata_terminal",
+    "comment",
 )
 GROUP_FIELDS = ("name", "description", "owner_share_percent", "price_scheme") + GROUP_BRAND_FIELDS
 SCHEME_FIELDS = ("name", "trial_days", "enforce_floor")
@@ -321,6 +325,7 @@ def _show_bot(row: CopycatBot) -> None:
     print(f"  ценовая схема: {_scheme_name(scheme_id)}{own if scheme_id is not None else ' (цены основного бота)'}")
     print(f"  касса AuraPay: {row.aurapay_shop or 'основная'}")
     print(f"  терминал WATA: {row.wata_terminal or 'основной'}")
+    print(f"  заметка: {row.comment or '—'}")
 
 
 def _show_group(group: CopycatGroup, count: int) -> None:
@@ -406,8 +411,20 @@ async def run(args: argparse.Namespace) -> None:
         if command in ("enable", "disable"):
             row = await _require_bot(db, args.bot)
             row.enabled = command == "enable"
+            reason = " ".join(getattr(args, "reason", None) or []).strip()
+            if reason:
+                row.comment = reason
             await db.commit()
             print(f"Витрина #{row.id} {'включена' if row.enabled else 'выключена'}")
+            if reason:
+                print(f"  заметка: {row.comment}")
+            return
+
+        if command == "comment":
+            row = await _require_bot(db, args.bot)
+            row.comment = " ".join(args.text).strip() or None
+            await db.commit()
+            print(f"Витрина #{row.id}: заметка {'записана' if row.comment else 'стёрта'}")
             return
 
         if command == "delete":
@@ -643,8 +660,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("bot")
     p.add_argument("fields", nargs="+")
 
-    for name in ("enable", "disable", "delete"):
+    for name in ("enable", "delete"):
         sub.add_parser(name).add_argument("bot")
+    p = sub.add_parser("disable")
+    p.add_argument("bot")
+    p.add_argument("reason", nargs="*", help="причина — запишется в заметку")
+    p = sub.add_parser("comment")
+    p.add_argument("bot")
+    p.add_argument("text", nargs="*", help="без текста — стереть заметку")
 
     sub.add_parser("groups")
     p = sub.add_parser("group-add")
