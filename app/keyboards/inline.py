@@ -1213,12 +1213,15 @@ def _tariff_period_rows(
     period_prices: dict,
     texts,
     callback_prefix: str,
+    sale_discounts: Optional[dict] = None,
 ) -> List[List[InlineKeyboardButton]]:
     """Period buttons in display order; the hit period is first and highlighted.
 
     Хит и свой порядок — только у основного бота; витрины как было.
+    `sale_discounts` — {period_days: percent} акции: такие кнопки получают «🔥».
     """
     promo = not current_brand().is_copycat
+    sale_discounts = sale_discounts or {}
     rows: List[List[InlineKeyboardButton]] = []
     for period_days in _TARIFF_PERIOD_ORDER if promo else _TARIFF_PERIOD_PLAIN_ORDER:
         price_kopeks = period_prices.get(period_days)
@@ -1228,6 +1231,10 @@ def _tariff_period_rows(
         is_hit = promo and period_days == _TARIFF_HIT_PERIOD_DAYS
         if is_hit:
             label = texts.t("TARIFF_PERIOD_HIT_SUFFIX", "{base} · ⭐️ хит").format(base=label)
+        sale_percent = sale_discounts.get(period_days)
+        if sale_percent:
+            # Процент скидки — в шапке экрана: на кнопке он не влезает на телефоне.
+            label = texts.t("TARIFF_PERIOD_SALE_LABEL", "🔥 {base}").format(base=label)
         rows.append([
             InlineKeyboardButton(
                 text=label,
@@ -1341,10 +1348,11 @@ def get_tariff_periods_keyboard(
     plan_code: str,
     period_prices: dict,
     language: str = DEFAULT_LANGUAGE,
+    sale_discounts: Optional[dict] = None,
 ) -> InlineKeyboardMarkup:
     """`period_prices` is {period_days: price_kopeks}."""
     texts = get_texts(language)
-    rows = _tariff_period_rows(period_prices, texts, f"tariff_buy:{plan_code}")
+    rows = _tariff_period_rows(period_prices, texts, f"tariff_buy:{plan_code}", sale_discounts)
 
     rows.append([
         InlineKeyboardButton(
@@ -1395,10 +1403,11 @@ def get_renew_periods_keyboard(
     plan_id: int,
     period_prices: dict,
     language: str = DEFAULT_LANGUAGE,
+    sale_discounts: Optional[dict] = None,
 ) -> InlineKeyboardMarkup:
     """Renew at the current tier; one row per available period."""
     texts = get_texts(language)
-    rows = _tariff_period_rows(period_prices, texts, f"tariff_renew:{plan_id}")
+    rows = _tariff_period_rows(period_prices, texts, f"tariff_renew:{plan_id}", sale_discounts)
 
     rows.append([
         InlineKeyboardButton(

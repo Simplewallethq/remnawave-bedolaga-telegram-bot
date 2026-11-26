@@ -279,6 +279,12 @@ class Settings(BaseSettings):
     # created_at в БД хранится в наивном UTC.
     # 2026-06-09T12:00:00 UTC = 2026-06-09 15:00 МСК.
     TARIFFS_NEW_PRICING_CUTOFF: str = "2026-06-09T12:00:00"
+    # Подсветка акционных периодов в боте: «🔥» и бейдж скидки на кнопках.
+    # Формат "дни:процент", напр. "360:40,720:50". Гаснет сама после
+    # TARIFF_SALE_UNTIL (ISO, naive = UTC). Юзерам со старыми ценами не видна.
+    TARIFF_SALE_PERIODS: str = "360:40,720:50"
+    TARIFF_SALE_UNTIL: Optional[str] = "2026-11-28T21:00:00"  # конец субботы 28.11 по МСК
+    TARIFF_SALE_TITLE: str = "🖤 <b>Чёрная пятница:</b> −40% на год и −50% на два года"
 
     # Разовый перевод легаси-подписок (plan_id IS NULL) на тарифы при старте бота.
     # off   — выключено (по умолчанию; чужие инсталляции не должны мигрировать внезапно)
@@ -1178,6 +1184,27 @@ class Settings(BaseSettings):
         if parsed.tzinfo is not None:
             parsed = parsed.astimezone(dt_timezone.utc).replace(tzinfo=None)
         return parsed
+
+    def get_tariff_sale_discounts(self, now: Optional[datetime] = None) -> Dict[int, int]:
+        """{period_days: percent} акции на периоды; пусто, если акция кончилась."""
+        until_raw = getattr(self, "TARIFF_SALE_UNTIL", None)
+        if until_raw:
+            try:
+                until = datetime.fromisoformat(str(until_raw))
+            except (ValueError, TypeError):
+                return {}
+            if until.tzinfo is not None:
+                until = until.astimezone(dt_timezone.utc).replace(tzinfo=None)
+            if (now or datetime.utcnow()) >= until:
+                return {}
+        discounts: Dict[int, int] = {}
+        for part in str(getattr(self, "TARIFF_SALE_PERIODS", "") or "").split(","):
+            days, _, percent = part.strip().partition(":")
+            try:
+                discounts[int(days)] = int(percent or 0)
+            except ValueError:
+                continue
+        return discounts
 
     def get_legacy_tariff_migration_mode(self) -> str:
         """Normalized mode of the one-off legacy→tariff migration: off | dry | apply."""

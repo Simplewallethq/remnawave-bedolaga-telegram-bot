@@ -80,6 +80,20 @@ def _format_rub_short(amount_kopeks: int) -> str:
     return f"{int(round(amount_kopeks / 100))}₽"
 
 
+def _tariff_sale_discounts(db_user) -> dict:
+    """{period_days: percent} акции для юзера; у старых цен (legacy) акции нет."""
+    if resolve_pricing_cohort(db_user) == "legacy":
+        return {}
+    return settings.get_tariff_sale_discounts()
+
+
+def _with_sale_title(message_text: str, sale_discounts: dict, texts) -> str:
+    if not sale_discounts:
+        return message_text
+    title = settings.TARIFF_SALE_TITLE
+    return f"{message_text}\n\n{title}" if title else message_text
+
+
 def _period_label(period_days: int, texts) -> str:
     key, fallback = _PERIOD_LABEL_KEYS.get(period_days, ("", f"{period_days} дн."))
     return texts.t(key, fallback) if key else fallback
@@ -454,6 +468,11 @@ async def show_tariffs_page(
         part for part in [
             texts.t("TARIFFS_TITLE", "📋 <b>Тарифы</b>"),
             (
+                settings.TARIFF_SALE_TITLE
+                if _tariff_sale_discounts(db_user)
+                else None
+            ),
+            (
                 "🎁 <b>Скидка −20% активна до 22:00 MSK</b>"
                 if hot_offer is not None
                 else None
@@ -632,11 +651,14 @@ async def show_tariff_periods(
         )
     title = title.format(name=plan.display_name)
     message_text = f"{description}\n\n{title}"
+    sale_discounts = _tariff_sale_discounts(db_user)
+    message_text = _with_sale_title(message_text, sale_discounts, texts)
 
     keyboard = get_tariff_periods_keyboard(
         plan.code,
         period_prices,
         language=db_user.language,
+        sale_discounts=sale_discounts,
     )
 
     image_path = os.path.join("images", "plans.webp")
@@ -1945,7 +1967,11 @@ async def show_renew_current(
         "💎 <b>Продление подписки</b>\n\nТариф: {name}\n{description}\n\nВыберите период продления:",
     ).format(name=plan.display_name, description=description)
 
-    keyboard = get_renew_periods_keyboard(plan.id, period_prices, language=db_user.language)
+    sale_discounts = _tariff_sale_discounts(db_user)
+    message_text = _with_sale_title(message_text, sale_discounts, texts)
+    keyboard = get_renew_periods_keyboard(
+        plan.id, period_prices, language=db_user.language, sale_discounts=sale_discounts
+    )
 
     image_path = os.path.join("images", "subscription.webp")
     await edit_or_answer_photo(

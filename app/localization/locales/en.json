@@ -1855,6 +1855,7 @@
   "TARIFF_SOLO_UPSELL_SOLO": "Choose Solo",
   "TARIFF_PERIOD_PERMONTH_SUFFIX": "{base} · ({per_month}/mo)",
   "TARIFF_PERIOD_HIT_SUFFIX": "{base} · ⭐️ top pick",
+  "TARIFF_PERIOD_SALE_LABEL": "🔥 {base}",
   "TARIFF_PERIOD_BUTTON_1M": "1 month — {price}",
   "TARIFF_PERIOD_BUTTON_3M": "3 months — {price}",
   "TARIFF_PERIOD_BUTTON_6M": "6 months — {price}",

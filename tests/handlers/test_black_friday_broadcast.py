@@ -230,3 +230,39 @@ def test_broadcast_recipients_skip_users_without_telegram(monkeypatch):
     monkeypatch.setattr(admin_messages, "get_target_users", fake_target_users)
     recipients = asyncio.run(admin_messages.get_broadcast_recipients(None, "bf_lapsed", bot_scope="leto"))
     assert recipients == [with_tg]
+
+
+def test_sale_discounts_expire_and_parse(monkeypatch):
+    monkeypatch.setattr(settings, "TARIFF_SALE_PERIODS", "360:40,720:50")
+    monkeypatch.setattr(settings, "TARIFF_SALE_UNTIL", "2026-11-28T21:00:00")
+    assert settings.get_tariff_sale_discounts(datetime(2026, 11, 28, 20, 59)) == {360: 40, 720: 50}
+    assert settings.get_tariff_sale_discounts(datetime(2026, 11, 28, 21, 0)) == {}
+    monkeypatch.setattr(settings, "TARIFF_SALE_PERIODS", "")
+    assert settings.get_tariff_sale_discounts(datetime(2026, 11, 27)) == {}
+
+
+def test_sale_periods_get_fire_on_buttons():
+    from app.keyboards.inline import get_renew_periods_keyboard, get_tariff_periods_keyboard
+
+    prices = {30: 29000, 90: 57000, 360: 86000, 720: 96000}
+    for keyboard in (
+        get_tariff_periods_keyboard("solo", prices, sale_discounts={360: 40, 720: 50}),
+        get_renew_periods_keyboard(1, prices, sale_discounts={360: 40, 720: 50}),
+    ):
+        labels = {b.callback_data.rsplit(":", 1)[1]: b.text for row in keyboard.inline_keyboard[:-1] for b in row}
+        assert labels["360"].startswith("🔥 ")
+        assert labels["720"].startswith("🔥 ")
+        assert not labels["30"].startswith("🔥")
+        assert not labels["90"].startswith("🔥")
+    plain = get_tariff_periods_keyboard("solo", prices)
+    assert not any(b.text.startswith("🔥") for row in plain.inline_keyboard for b in row)
+
+
+def test_legacy_users_see_no_sale(registry, monkeypatch):
+    from app.handlers.subscription import tariffs
+
+    monkeypatch.setattr(settings, "TARIFF_SALE_UNTIL", "2099-01-01T00:00:00")
+    new_user = _user(None)
+    legacy_user = _user(None, created=CUTOFF - timedelta(days=1))
+    assert tariffs._tariff_sale_discounts(new_user) == {360: 40, 720: 50}
+    assert tariffs._tariff_sale_discounts(legacy_user) == {}

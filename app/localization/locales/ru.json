@@ -1883,6 +1883,7 @@
   "TARIFF_SOLO_UPSELL_SOLO": "Выбрать Solo",
   "TARIFF_PERIOD_PERMONTH_SUFFIX": "{base} · ({per_month}/мес)",
   "TARIFF_PERIOD_HIT_SUFFIX": "{base} · ⭐️ хит",
+  "TARIFF_PERIOD_SALE_LABEL": "🔥 {base}",
   "TARIFF_PERIOD_BUTTON_1M": "1 мес — {price}",
   "TARIFF_PERIOD_BUTTON_3M": "3 мес — {price}",
   "TARIFF_PERIOD_BUTTON_6M": "6 мес — {price}",
