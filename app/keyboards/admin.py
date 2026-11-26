@@ -1355,6 +1355,16 @@ def get_broadcast_target_keyboard(language: str = "ru") -> InlineKeyboardMarkup:
                 callback_data="broadcast_trial_zero"
             )
         ],
+        [
+            InlineKeyboardButton(
+                text=_t(texts, "ADMIN_BROADCAST_TARGET_BF_ACTIVE", "🖤 ЧП: активные"),
+                callback_data="broadcast_bf_active"
+            ),
+            InlineKeyboardButton(
+                text=_t(texts, "ADMIN_BROADCAST_TARGET_BF_LAPSED", "🖤 ЧП: истекшие"),
+                callback_data="broadcast_bf_lapsed"
+            )
+        ],
         [InlineKeyboardButton(text=texts.BACK, callback_data="admin_messages")]
     ])
 
@@ -2288,9 +2298,16 @@ BROADCAST_BUTTONS = {
         "text_key": "ADMIN_BROADCAST_BUTTON_HOME",
         "callback": "back_to_menu",
     },
+    # Юзеру с тарифом откроется продление текущего, остальным — список тарифов.
+    "tariffs": {
+        "default_text": "🔥 Выбрать тариф",
+        "text_key": "ADMIN_BROADCAST_BUTTON_TARIFFS",
+        "callback": "subscription_extend",
+    },
 }
 
 BROADCAST_BUTTON_ROWS: tuple[tuple[str, ...], ...] = (
+    ("tariffs",),
     ("balance", "referrals"),
     ("promocode", "connect"),
     ("subscription", "support"),

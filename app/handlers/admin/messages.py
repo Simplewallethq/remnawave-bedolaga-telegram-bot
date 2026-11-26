@@ -40,6 +40,12 @@ from app.utils.bot_registry import (
     is_copycat_user,
 )
 from app.utils.miniapp_buttons import build_miniapp_or_callback_button
+from app.utils.broadcast_delivery import (
+    CAPTION_LIMIT,
+    BroadcastSender,
+    extract_media,
+    message_html,
+)
 from app.services.pinned_message_service import (
     broadcast_pinned_message,
     get_active_pinned_message,
@@ -55,6 +61,48 @@ def _is_trial_like(subscription) -> bool:
     return bool(
         getattr(subscription, "is_trial", False) or getattr(subscription, "is_paid_trial", False)
     )
+
+BLACK_FRIDAY_SHORT_PERIODS = (30, 90)
+BLACK_FRIDAY_TARGET_NAMES = {
+    "bf_active": "Чёрная пятница: активный триал и 1/3 мес",
+    "bf_lapsed": "Чёрная пятница: без подписки и истекшие",
+}
+
+
+def black_friday_segment(user, now: Optional[datetime] = None) -> Optional[str]:
+    """Сегмент рассылки «Чёрная пятница»: "active", "lapsed" или None.
+
+    active — активный триал или действующая платная подписка на 1 или 3 месяца;
+    lapsed — без подписки, истёкший триал или истёкшая платная подписка.
+    Юзеры Лето и зеркал со старыми ценами (когорта legacy) не попадают: акции
+    на длинные тарифы у них нет. Партнёрские подписки тоже не трогаем.
+    """
+    if not is_copycat_user(user):
+        from app.services.plan_pricing_service import resolve_pricing_cohort
+
+        if resolve_pricing_cohort(user) == "legacy":
+            return None
+
+    subscription = getattr(user, "subscription", None)
+    if subscription is None:
+        return "lapsed"
+    if getattr(subscription, "is_partner", False):
+        return None
+
+    now = now or datetime.utcnow()
+    is_active = (
+        subscription.status == SubscriptionStatus.ACTIVE.value
+        and subscription.end_date is not None
+        and subscription.end_date > now
+    )
+    if not is_active:
+        return "lapsed"
+    if _is_trial_like(subscription):
+        return "active"
+    if getattr(subscription, "plan_period_days", None) in BLACK_FRIDAY_SHORT_PERIODS:
+        return "active"
+    return None
+
 
 BUTTON_ROWS = BROADCAST_BUTTON_ROWS
 DEFAULT_SELECTED_BUTTONS = DEFAULT_BROADCAST_BUTTONS
@@ -108,6 +156,19 @@ def create_broadcast_keyboard(selected_buttons: list, language: str = "ru") -> O
         return None
 
     return types.InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def _build_broadcast_sender(main_bot, data: dict, selected_buttons, language: str) -> BroadcastSender:
+    """Отправитель рассылки из данных FSM: текст, медиа и кнопки."""
+    has_media = data.get('has_media', False)
+    return BroadcastSender(
+        main_bot,
+        text=data.get('broadcast_message') or "",
+        reply_markup=create_broadcast_keyboard(selected_buttons, language),
+        media_type=data.get('media_type') if has_media else None,
+        media_file_id=data.get('media_file_id') if has_media else None,
+        media_file_name=data.get('media_file_name'),
+    )
 
 
 async def _persist_broadcast_result(
@@ -657,8 +718,10 @@ async def select_broadcast_target(
         "expired": "С истекшей подпиской",
         "active_zero": "Активная подписка, трафик 0 ГБ",
         "trial_zero": "Триальная подписка, трафик 0 ГБ",
+        "bf_active": BLACK_FRIDAY_TARGET_NAMES["bf_active"],
+        "bf_lapsed": BLACK_FRIDAY_TARGET_NAMES["bf_lapsed"],
     }
-    
+
     await state.update_data(
         broadcast_target=target,
         broadcast_target_label="Аудитория",
@@ -725,8 +788,9 @@ async def _prompt_broadcast_text(
         f"🎯 <b>{label}:</b> {target_name}\n"
         f"{scope_line}"
         f"👥 <b>Получателей:</b> {user_count}\n\n"
-        f"Введите текст сообщения для рассылки:\n\n"
-        f"<i>Поддерживается HTML разметка</i>",
+        f"Пришлите текст рассылки или готовый пост: фото с подписью.\n\n"
+        f"<i>Форматирование Telegram сохранится: жирный, цитаты, ссылки, "
+        f"премиум-эмодзи. Можно и HTML-теги, если пишете без форматирования.</i>",
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_messages")]
         ]),
@@ -767,14 +831,44 @@ async def process_broadcast_message(
     state: FSMContext,
     db: AsyncSession
 ):
-    broadcast_text = message.text
-    
-    if len(broadcast_text) > 4000:
+    # Готовый пост (фото/видео/документ с подписью) — берём целиком и сразу к кнопкам.
+    media_type, media_file_id, media_file_name = extract_media(message)
+    if media_type:
+        caption_length = len(message.caption or "")
+        if caption_length > CAPTION_LIMIT:
+            await message.answer(
+                f"❌ Подпись к медиа слишком длинная: {caption_length} символов, "
+                f"Telegram пропускает максимум {CAPTION_LIMIT}."
+            )
+            return
+        caption_html = message_html(message)
+        await state.update_data(
+            broadcast_message=caption_html,
+            broadcast_message_length=caption_length,
+            has_media=True,
+            media_type=media_type,
+            media_file_id=media_file_id,
+            media_file_name=media_file_name,
+            media_caption=caption_html,
+        )
+        await show_button_selector(message, db_user, state)
+        return
+
+    if not message.text:
+        await message.answer("❌ Пришлите текст рассылки или готовый пост с фото и подписью.")
+        return
+
+    if len(message.text) > 4000:
         await message.answer("❌ Сообщение слишком длинное (максимум 4000 символов)")
         return
-    
-    await state.update_data(broadcast_message=broadcast_text)
-    
+
+    # Жирный, цитаты и премиум-эмодзи приходят сущностями — переводим их в HTML.
+    broadcast_text = message_html(message)
+    await state.update_data(
+        broadcast_message=broadcast_text,
+        broadcast_message_length=len(message.text),
+    )
+
     await message.answer(
         "🖼️ <b>Добавление медиафайла</b>\n\n"
         "Вы можете добавить к сообщению фото, видео или документ.\n"
@@ -875,11 +969,22 @@ async def process_broadcast_media(
             f"❌ Пожалуйста, отправьте {expected_type} как указано в инструкции."
         )
         return
-    
+
+    text_length = data.get('broadcast_message_length')
+    if text_length is None:
+        text_length = len(data.get('broadcast_message') or "")
+    if text_length > CAPTION_LIMIT:
+        await message.answer(
+            f"❌ Текст рассылки — {text_length} символов, а подпись к медиа в Telegram "
+            f"не длиннее {CAPTION_LIMIT}. Сократите текст или отправьте без медиа."
+        )
+        return
+
     await state.update_data(
         has_media=True,
         media_file_id=media_file_id,
         media_type=media_type,
+        media_file_name=extract_media(message)[2],
         media_caption=message.caption
     )
     
@@ -982,6 +1087,7 @@ async def show_button_selector_callback(
 
 Выберите кнопки, которые будут добавлены к сообщению рассылки:
 
+🔥 <b>Выбрать тариф</b> — откроет продление тарифа или список тарифов
 💰 <b>Пополнить баланс</b> — откроет методы пополнения
 🤝 <b>Партнерка</b> — откроет реферальную программу
 🎫 <b>Промокод</b> — откроет форму ввода промокода
@@ -1049,6 +1155,7 @@ async def show_button_selector(
 
 Выберите кнопки, которые будут добавлены к сообщению рассылки:
 
+🔥 <b>Выбрать тариф</b> — откроет продление тарифа или список тарифов
 💰 <b>Пополнить баланс</b> — откроет методы пополнения
 🤝 <b>Партнерка</b> — откроет реферальную программу
 🎫 <b>Промокод</b> — откроет форму ввода промокода
@@ -1147,64 +1254,59 @@ async def confirm_button_selection(
     else:
         buttons_info = "\n📘 <b>Кнопки:</b> отсутствуют"
     
-    preview_text = f"""
-📨 <b>Предварительный просмотр рассылки</b>
+    # Сначала само сообщение — ровно так, как его получат юзеры: с медиа,
+    # форматированием, премиум-эмодзи и кнопками.
+    preview_error = None
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    try:
+        await _build_broadcast_sender(callback.bot, data, selected_buttons, db_user.language).send(
+            callback.bot, callback.message.chat.id
+        )
+    except Exception as error:
+        logger.warning("Превью рассылки не отправилось: %s", error)
+        preview_error = html.escape(str(error))
 
-🎯 <b>Аудитория:</b> {target_display}{scope_info}
-👥 <b>Получателей:</b> {user_count}
+    preview_line = (
+        f"⚠️ <b>Превью не отправилось:</b> {preview_error}\n\n"
+        if preview_error
+        else "☝️ Выше — сообщение так, как его получат пользователи.\n\n"
+    )
+    card_text = f"""
+📨 <b>Подтверждение рассылки</b>
 
-📝 <b>Сообщение:</b>
-{message_text}{media_info}
-
+{preview_line}🎯 <b>Аудитория:</b> {target_display}{scope_info}
+👥 <b>Получателей:</b> {user_count}{media_info}
 {buttons_info}
 
 Подтвердить отправку?
 """
-    
+
     keyboard = [
         [
             types.InlineKeyboardButton(text="✅ Отправить", callback_data="admin_confirm_broadcast"),
             types.InlineKeyboardButton(text="📘 Изменить кнопки", callback_data="edit_buttons")
         ]
     ]
-    
+
     if has_media:
         keyboard.append([
             types.InlineKeyboardButton(text="🖼️ Изменить медиа", callback_data="change_media")
         ])
-    
+
     keyboard.append([
         types.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_messages")
     ])
-    
-    # Если есть медиа, показываем его с загруженным фото, иначе обычное текстовое сообщение
-    if has_media and media_type == "photo":
-        media_file_id = data.get('media_file_id')
-        if media_file_id:
-            # Удаляем текущее сообщение и отправляем новое с фото
-            await callback.message.delete()
-            await callback.bot.send_photo(
-                chat_id=callback.message.chat.id,
-                photo=media_file_id,
-                caption=preview_text,
-                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
-                parse_mode="HTML"
-            )
-        else:
-            # Если нет file_id, используем обычное редактирование
-            await callback.message.edit_text(
-                preview_text,
-                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
-                parse_mode="HTML"
-            )
-    else:
-        # Для текстовых сообщений или других типов медиа используем обычное редактирование
-        await callback.message.edit_text(
-            preview_text,
-            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
-            parse_mode="HTML"
-        )
-    
+
+    await callback.bot.send_message(
+        chat_id=callback.message.chat.id,
+        text=card_text,
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode="HTML",
+    )
+
     await callback.answer()
 @admin_required
 @error_handler
@@ -1262,7 +1364,7 @@ async def confirm_broadcast(
     sent_count = 0
     failed_count = 0
     
-    broadcast_keyboard = create_broadcast_keyboard(selected_buttons, db_user.language)
+    broadcast_sender = _build_broadcast_sender(callback.bot, data, selected_buttons, db_user.language)
     
     # Ограничение на количество одновременных отправок и базовая задержка между сообщениями,
     # чтобы избежать перегрузки бота и лимитов Telegram при больших рассылках
@@ -1277,54 +1379,8 @@ async def confirm_broadcast(
             bot = bot_for_user(user, callback.bot)
             for attempt in range(3):
                 try:
-                    if has_media and media_file_id:
-                        try:
-                            if media_type == "photo":
-                                await bot.send_photo(
-                                    chat_id=user.telegram_id,
-                                    photo=media_file_id,
-                                    caption=message_text,
-                                    parse_mode="HTML",
-                                    reply_markup=broadcast_keyboard
-                                )
-                            elif media_type == "video":
-                                await bot.send_video(
-                                    chat_id=user.telegram_id,
-                                    video=media_file_id,
-                                    caption=message_text,
-                                    parse_mode="HTML",
-                                    reply_markup=broadcast_keyboard
-                                )
-                            elif media_type == "document":
-                                await bot.send_document(
-                                    chat_id=user.telegram_id,
-                                    document=media_file_id,
-                                    caption=message_text,
-                                    parse_mode="HTML",
-                                    reply_markup=broadcast_keyboard
-                                )
-                        except TelegramBadRequest as media_error:
-                            # file_id привязан к боту, который загрузил медиа (основному);
-                            # зеркало его не знает — отдаём хотя бы текст.
-                            if bot is callback.bot:
-                                raise
-                            logger.warning(
-                                f"Рассылка: зеркало не смогло отправить медиа пользователю "
-                                f"{user.telegram_id} ({media_error}), шлём текст"
-                            )
-                            await bot.send_message(
-                                chat_id=user.telegram_id,
-                                text=message_text,
-                                parse_mode="HTML",
-                                reply_markup=broadcast_keyboard
-                            )
-                    else:
-                        await bot.send_message(
-                            chat_id=user.telegram_id,
-                            text=message_text,
-                            parse_mode="HTML",
-                            reply_markup=broadcast_keyboard
-                        )
+                    # Медиа в зеркала и копикеты отправитель сам перезальёт из основного бота.
+                    await broadcast_sender.send(bot, user.telegram_id)
 
                     await asyncio.sleep(per_message_delay)
                     return True, user.telegram_id
@@ -1501,6 +1557,11 @@ async def _get_target_users_unscoped(db: AsyncSession, target: str) -> list:
 
     if target == "all":
         return users
+
+    if target in ("bf_active", "bf_lapsed"):
+        segment = target[len("bf_"):]
+        now = datetime.utcnow()
+        return [user for user in users if black_friday_segment(user, now) == segment]
 
     if target == "active":
         return [
@@ -1819,7 +1880,8 @@ def get_target_name(target_type: str) -> str:
         "custom_inactive_week": "Неактивные 7+ дней",
         "custom_inactive_month": "Неактивные 30+ дней",
         "custom_referrals": "Через рефералов",
-        "custom_direct": "Прямая регистрация"
+        "custom_direct": "Прямая регистрация",
+        **BLACK_FRIDAY_TARGET_NAMES,
     }
     return names.get(target_type, target_type)
 
