@@ -1247,6 +1247,39 @@ async def _auto_tariff_purchase_from_snapshot(
     return True
 
 
+_INVOICE_SELECTION_KEYS = ("cart_mode", "tariff_op", "plan_id", "period_days")
+_CART_OFFER_KEYS = ("offer_type", "offer_id", "price_override_kopeks")
+
+
+def _cart_from_paid_invoice(cart_data: dict, snapshot: dict) -> dict:
+    """Тариф и период берём из оплаченного счёта, а не из текущей корзины.
+
+    Корзина в Redis одна на пользователя: если после выставления счёта человек
+    открыл другой период (бот выставил новый счёт и перезаписал корзину), а
+    оплатил старую страницу, купить нужно то, что было в оплаченном счёте.
+    Оффер в корзине относится к новому выбору, поэтому при расхождении его
+    не применяем: цена считается по прайсу, а если денег не хватит, сумма
+    останется на балансе.
+    """
+    cart_data = dict(cart_data)
+    if snapshot.get("cart_mode") != "tariff":
+        return cart_data
+    selection = {key: snapshot.get(key) for key in _INVOICE_SELECTION_KEYS if snapshot.get(key) is not None}
+    if not selection.get("plan_id") or not selection.get("period_days"):
+        return cart_data
+    if any(cart_data.get(key) != value for key, value in selection.items()):
+        logger.warning(
+            "🔁 Автопокупка: оплачен счёт на %s, а в корзине уже %s — оформляем по счёту",
+            selection,
+            {key: cart_data.get(key) for key in _INVOICE_SELECTION_KEYS},
+        )
+        for key in _CART_OFFER_KEYS:
+            cart_data.pop(key, None)
+        cart_data.pop("plan_code", None)
+        cart_data.update(selection)
+    return cart_data
+
+
 async def auto_purchase_saved_cart_after_topup(
     db: AsyncSession,
     user: User,
@@ -1276,7 +1309,7 @@ async def auto_purchase_saved_cart_after_topup(
     # Состав оплаченного счёта (выделенный IP) — из снимка в metadata счёта, а не
     # из текущей корзины: человек мог переключить IP и оплатить старую страницу.
     if checkout_snapshot and checkout_snapshot.get("kind") == "cart_composition":
-        cart_data = dict(cart_data)
+        cart_data = _cart_from_paid_invoice(cart_data, checkout_snapshot)
         if checkout_snapshot.get("dedicated_ip"):
             cart_data["dedicated_ip"] = True
             cart_data["dedicated_ip_kopeks"] = checkout_snapshot.get("dedicated_ip_kopeks")

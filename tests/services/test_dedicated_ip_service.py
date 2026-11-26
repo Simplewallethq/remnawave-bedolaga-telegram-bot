@@ -369,3 +369,38 @@ async def test_paid_invoice_without_ip_does_not_grant_ip(monkeypatch):
     snapshot = {"kind": "cart_composition", "dedicated_ip": True, "dedicated_ip_kopeks": 29000}
     assert await auto.auto_purchase_saved_cart_after_topup(None, user, checkout_snapshot=snapshot) is True
     assert seen["dedicated_ip"] is True and seen["dedicated_ip_kopeks"] == 29000
+
+
+@pytest.mark.anyio
+async def test_paid_invoice_period_wins_over_newer_cart(monkeypatch):
+    """Счёт на 2 года оплатили после того, как бот выставил счёт на год: оформляем 2 года."""
+    from app.services import subscription_auto_purchase_service as auto
+
+    cart = {"cart_mode": "tariff", "tariff_op": "renew", "intent": True, "plan_id": 3, "plan_code": "plus",
+            "period_days": 360, "dedicated_ip": False, "dedicated_ip_kopeks": 0,
+            "offer_type": "hot_invoice_20", "offer_id": 7, "price_override_kopeks": 86400}
+
+    async def fake_get_user_cart(user_id):
+        return dict(cart)
+
+    seen = {}
+
+    async def fake_tariff(db, user, cart_data, *, bot=None):
+        seen.clear()
+        seen.update(cart_data)
+        return True
+
+    monkeypatch.setattr(auto.user_cart_service, "get_user_cart", fake_get_user_cart)
+    monkeypatch.setattr(auto, "_auto_tariff_purchase", fake_tariff)
+    user = SimpleNamespace(id=1, telegram_id=1, bot_id=None)
+    snapshot = {"kind": "cart_composition", "cart_mode": "tariff", "tariff_op": "renew", "plan_id": 3,
+                "period_days": 720, "dedicated_ip": False, "dedicated_ip_kopeks": 0}
+
+    assert await auto.auto_purchase_saved_cart_after_topup(None, user, checkout_snapshot=snapshot) is True
+    assert seen["period_days"] == 720 and seen["plan_id"] == 3
+    assert "offer_type" not in seen and "price_override_kopeks" not in seen
+
+    # Совпадает со счётом — корзина (и её оффер) как есть.
+    snapshot["period_days"] = 360
+    assert await auto.auto_purchase_saved_cart_after_topup(None, user, checkout_snapshot=snapshot) is True
+    assert seen["period_days"] == 360 and seen["offer_type"] == "hot_invoice_20"
