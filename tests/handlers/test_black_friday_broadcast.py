@@ -218,3 +218,15 @@ def test_other_bad_requests_are_not_swallowed():
     with pytest.raises(TelegramBadRequest):
         asyncio.run(sender.send(bot, 1))
     assert bot.id not in sender._plain_emoji_bots
+
+
+def test_broadcast_recipients_skip_users_without_telegram(monkeypatch):
+    with_tg = SimpleNamespace(telegram_id=5)
+    cabinet_only = SimpleNamespace(telegram_id=None)
+
+    async def fake_target_users(db, target, *, bot_scope):
+        return [with_tg, cabinet_only]
+
+    monkeypatch.setattr(admin_messages, "get_target_users", fake_target_users)
+    recipients = asyncio.run(admin_messages.get_broadcast_recipients(None, "bf_lapsed", bot_scope="leto"))
+    assert recipients == [with_tg]

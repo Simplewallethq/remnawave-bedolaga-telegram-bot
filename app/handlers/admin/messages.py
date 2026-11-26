@@ -772,12 +772,7 @@ async def _prompt_broadcast_text(
     label = data.get("broadcast_target_label", "Аудитория")
     target_name = data.get("broadcast_target_name") or get_target_display_name(target)
 
-    if target.startswith("custom_"):
-        user_count = await get_custom_users_count(
-            db, target[len("custom_"):], bot_scope=bot_scope
-        )
-    else:
-        user_count = await get_target_users_count(db, target, bot_scope=bot_scope)
+    user_count = len(await get_broadcast_recipients(db, target, bot_scope=bot_scope))
 
     scope_line = ""
     if copycat_bot_ids():
@@ -1229,11 +1224,7 @@ async def confirm_button_selection(
     media_type = data.get('media_type')
     
     bot_scope = data.get('broadcast_bot_scope', DEFAULT_BOT_SCOPE)
-    user_count = (
-        await get_target_users_count(db, target, bot_scope=bot_scope)
-        if not target.startswith('custom_')
-        else await get_custom_users_count(db, target.replace('custom_', ''), bot_scope=bot_scope)
-    )
+    user_count = len(await get_broadcast_recipients(db, target, bot_scope=bot_scope))
     target_display = get_target_display_name(target)
     scope_info = f"\n🤖 <b>Боты:</b> {get_bot_scope_display_name(bot_scope)}"
     
@@ -1337,10 +1328,7 @@ async def confirm_broadcast(
         parse_mode="HTML" 
     )
     
-    if target.startswith('custom_'):
-        users = await get_custom_users(db, target.replace('custom_', ''), bot_scope=bot_scope)
-    else:
-        users = await get_target_users(db, target, bot_scope=bot_scope)
+    users = await get_broadcast_recipients(db, target, bot_scope=bot_scope)
     
     broadcast_history = BroadcastHistory(
         target_type=target,
@@ -1519,6 +1507,21 @@ def get_bot_scope_display_name(bot_scope: str | None) -> str:
             brand_name = get_brand_for_bot(int(raw_id)).name
             return f"{brand_name} (копикет)"
     return str(bot_scope)
+
+
+async def get_broadcast_recipients(
+    db: AsyncSession, target: str, *, bot_scope: str = DEFAULT_BOT_SCOPE
+) -> list:
+    """Получатели рассылки в боте: аудитория без тех, кому в Telegram не написать.
+
+    У юзеров кабинета и приложения без привязанного Telegram нет telegram_id —
+    раньше на каждом из них рассылка тратила три попытки и ~3 секунды.
+    """
+    if target.startswith("custom_"):
+        users = await get_custom_users(db, target[len("custom_"):], bot_scope=bot_scope)
+    else:
+        users = await get_target_users(db, target, bot_scope=bot_scope)
+    return [user for user in users if getattr(user, "telegram_id", None)]
 
 
 async def get_target_users_count(
