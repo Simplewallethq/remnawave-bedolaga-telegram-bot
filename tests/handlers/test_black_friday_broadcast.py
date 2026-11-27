@@ -258,11 +258,11 @@ def test_sale_periods_get_fire_on_buttons():
     assert not any(b.text.startswith("🔥") for row in plain.inline_keyboard for b in row)
 
 
-def test_legacy_users_see_no_sale(registry, monkeypatch):
+def test_legacy_users_see_sale_too(registry, monkeypatch):
     from app.handlers.subscription import tariffs
 
     monkeypatch.setattr(settings, "TARIFF_SALE_UNTIL", "2099-01-01T00:00:00")
     new_user = _user(None)
     legacy_user = _user(None, created=CUTOFF - timedelta(days=1))
     assert tariffs._tariff_sale_discounts(new_user) == {360: 40, 720: 50}
-    assert tariffs._tariff_sale_discounts(legacy_user) == {}
+    assert tariffs._tariff_sale_discounts(legacy_user) == {360: 40, 720: 50}

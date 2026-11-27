@@ -81,9 +81,11 @@ def _format_rub_short(amount_kopeks: int) -> str:
 
 
 def _tariff_sale_discounts(db_user) -> dict:
-    """{period_days: percent} акции для юзера; у старых цен (legacy) акции нет."""
-    if resolve_pricing_cohort(db_user) == "legacy":
-        return {}
+    """{period_days: percent} акции для юзера.
+
+    С 27.11.2026 старая когорта (legacy) получает на год и два года те же акционные
+    цены, что и new, поэтому подсветку видят все.
+    """
     return settings.get_tariff_sale_discounts()
 
 
